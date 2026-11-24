@@ -1610,7 +1610,9 @@ table.subtable tbody td.center {
 /* Picture-in-Picture / Always-on-Top Mini Overlay */
 .pip-bar,
 .pip-stats-view,
-.pip-resize-grip {
+.pip-resize-edge,
+.pip-resize-grip,
+.pip-opacity-popover {
   display: none;
 }
 
@@ -1643,8 +1645,8 @@ body.pip-active .pip-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 0 6px;
+  gap: 5px;
+  padding: 0 5px;
   background: rgba(20, 17, 14, 0.90);
   border: 1px solid rgba(212, 171, 83, 0.42);
   border-radius: 5px;
@@ -1657,7 +1659,8 @@ body.pip-active .pip-bar {
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
 body.pip-active.pip-hover .pip-bar,
-body.pip-active:hover .pip-bar {
+body.pip-active:hover .pip-bar,
+body.pip-active.pip-popover-open .pip-bar {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -1684,9 +1687,10 @@ body.pip-active:hover .pip-bar {
   border: 1px solid var(--border-strong);
   color: var(--text-muted);
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  padding: 2px 7px;
+  padding: 2px 6px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .pip-pill:hover {
@@ -1703,6 +1707,67 @@ body.pip-active:hover .pip-bar {
   color: #4df088;
   border-color: #4df088;
   background: rgba(24, 58, 36, 0.92);
+}
+
+body.pip-active .pip-opacity-popover {
+  position: fixed;
+  top: 36px;
+  right: 8px;
+  width: 204px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(22, 18, 15, 0.96);
+  border: 1px solid rgba(212, 171, 83, 0.52);
+  border-radius: 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+  z-index: 85;
+}
+body.pip-active .pip-opacity-popover.hidden {
+  display: none !important;
+}
+.pip-op-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-gold-bright);
+}
+.pip-op-hint {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.pip-op-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pip-op-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #d4ab53;
+  cursor: pointer;
+}
+.pip-op-row input[type="number"] {
+  width: 48px;
+  background: #14110e;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-main);
+  font-size: 11px;
+  padding: 2px 4px;
+  text-align: right;
+  outline: none;
+}
+.pip-op-row input[type="number"]:focus {
+  border-color: var(--text-amber);
+}
+.pip-op-pct {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 body.pip-map #mapWorkspace {
@@ -1756,22 +1821,36 @@ body.pip-stats .pip-stats-view {
   overflow-y: auto;
 }
 
+body.pip-active .pip-resize-edge {
+  display: block;
+  position: fixed;
+  z-index: 75;
+  touch-action: none;
+}
+body.pip-active .pip-edge-n { top: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+body.pip-active .pip-edge-s { bottom: 0; left: 10px; right: 16px; height: 6px; cursor: ns-resize; }
+body.pip-active .pip-edge-w { left: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+body.pip-active .pip-edge-e { right: 0; top: 10px; bottom: 16px; width: 6px; cursor: ew-resize; }
+body.pip-active .pip-edge-nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nwse-resize; z-index: 76; }
+body.pip-active .pip-edge-ne { top: 0; right: 0; width: 12px; height: 12px; cursor: nesw-resize; z-index: 76; }
+body.pip-active .pip-edge-sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; z-index: 76; }
+
 body.pip-active .pip-resize-grip {
   display: block;
   position: fixed;
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   cursor: nwse-resize;
-  z-index: 75;
+  z-index: 76;
   opacity: 0;
   transition: opacity 0.16s ease;
-  background: linear-gradient(135deg, transparent 50%, rgba(212, 171, 83, 0.7) 50%, rgba(212, 171, 83, 0.7) 58%, transparent 58%, transparent 72%, rgba(212, 171, 83, 0.7) 72%, rgba(212, 171, 83, 0.7) 80%, transparent 80%);
+  background: linear-gradient(135deg, transparent 48%, rgba(212, 171, 83, 0.78) 48%, rgba(212, 171, 83, 0.78) 56%, transparent 56%, transparent 70%, rgba(212, 171, 83, 0.78) 70%, rgba(212, 171, 83, 0.78) 78%, transparent 78%);
 }
 body.pip-active.pip-hover .pip-resize-grip,
 body.pip-active:hover .pip-resize-grip {
-  opacity: 0.9;
+  opacity: 0.95;
 }
 
 /* In-app Map Extractor UI */
