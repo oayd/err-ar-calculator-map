@@ -38,6 +38,7 @@ jobs:
             --add-data "ui;ui" `
             --collect-all clr_loader `
             --collect-all pythonnet `
+            --collect-all texture2ddecoder `
             err_ar_calculator.py
 
       - name: Run WebView2 self-test

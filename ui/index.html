@@ -467,12 +467,30 @@
 
       <div class="map-player-footer">
         <div id="mapPlayerStatus" class="map-player-status">Player position: awaiting save</div>
+        <button id="mapExtractBtn" class="map-extract-btn" type="button" title="Extract native high-res game maps and UI icons from your local Elden Ring install">Extract Game Maps &amp; Icons</button>
+        <div id="mapExtractProgressWrap" class="map-extract-progress hidden">
+          <div class="map-extract-bar"><div id="mapExtractProgressFill" class="map-extract-fill"></div></div>
+          <div id="mapExtractStatus" class="map-extract-status">Preparing...</div>
+        </div>
       </div>
     </aside>
 
     <section class="map-stage">
       <canvas id="mapCanvas" class="map-canvas"></canvas>
       <div id="mapLoadingOverlay" class="map-loading hidden">Loading map tiles...</div>
+      <div id="mapExtractBanner" class="map-extract-banner hidden">
+        <div class="map-extract-banner-hdr">
+          <span class="badge gold">Native Map Tiles Available</span>
+          <button id="mapExtractBannerClose" class="banner-close" type="button" title="Dismiss">&times;</button>
+        </div>
+        <div class="map-extract-banner-body">
+          Using calibrated coordinate grid. Extract official high-res Elden Ring map tiles &amp; icons directly from your local game install in one click (~18s).
+        </div>
+        <div class="map-extract-banner-actions">
+          <button id="mapExtractHeroBtn" class="top-btn gold-outline" type="button">Extract Game Maps &amp; Icons</button>
+          <button id="mapExtractBrowseBtn" class="top-btn" type="button">Choose Game Folder...</button>
+        </div>
+      </div>
       <div class="map-controls">
         <button id="mapZoomInBtn" class="map-ctrl-btn" type="button" title="Zoom In">+</button>
         <button id="mapZoomOutBtn" class="map-ctrl-btn" type="button" title="Zoom Out">&minus;</button>
@@ -499,6 +517,7 @@
   <!-- Picture-in-Picture / Mini Overlay Controls & Compact Stats HUD -->
   <div id="pipBar" class="pip-bar">
     <div class="pip-group">
+      <span class="pip-drag-grip" title="Drag to move overlay">&#8942;&#8942;</span>
       <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch Overlay to Live Minimap">Map</button>
       <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch Overlay to Compact Stats &amp; Equipped AR">Stats</button>
     </div>
@@ -523,6 +542,7 @@
     <div id="pipWeaponsList" class="pip-weapons-list"></div>
     <div id="pipGearLine" class="pip-gear-line"></div>
   </div>
+  <div id="pipResizeGrip" class="pip-resize-grip" title="Drag corner to resize"></div>
 
   <!-- INJECT_JS -->
 </body>

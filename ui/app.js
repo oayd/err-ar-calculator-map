@@ -490,6 +490,7 @@
     lastY: 0,
     visibleMarkers: [],
     firstOpenDone: false,
+    mapExtractBannerDismissed: false,
   };
 
   const ROW_HEIGHT = 31;
@@ -2664,9 +2665,83 @@
       updateMapSearchList();
       updateMapPlayerReadout();
       resetMapView(false);
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.get_map_extract_status) {
+        const ext = await window.pywebview.api.get_map_extract_status();
+        updateMapExtractUi(ext);
+      }
     } finally {
       mapState.loading = false;
       if (ov) ov.classList.add("hidden");
+    }
+  }
+
+  function updateMapExtractUi(st) {
+    if (!st) return;
+    const hasMaps = Boolean(st.hasMaps);
+    const running = Boolean(st.running);
+    const btn = $("mapExtractBtn");
+    const banner = $("mapExtractBanner");
+    const progWrap = $("mapExtractProgressWrap");
+    const fill = $("mapExtractProgressFill");
+    const status = $("mapExtractStatus");
+    const heroBtn = $("mapExtractHeroBtn");
+    const browseBtn = $("mapExtractBrowseBtn");
+
+    if (btn) {
+      btn.disabled = running;
+      btn.textContent = running ? "Extracting..." : (hasMaps ? "Re-extract Game Maps" : "Extract Game Maps & Icons");
+    }
+    if (heroBtn) heroBtn.disabled = running;
+    if (browseBtn) browseBtn.disabled = running;
+
+    if (banner) {
+      banner.classList.toggle("hidden", hasMaps || mapState.mapExtractBannerDismissed);
+    }
+    if (progWrap && fill && status) {
+      const showProg = running || (st.done && st.message);
+      progWrap.classList.toggle("hidden", !showProg);
+      fill.style.width = `${Math.max(0, Math.min(100, Number(st.pct || 0)))}%`;
+      status.textContent = st.message || "";
+      status.style.color = st.error ? "#f05454" : "";
+    }
+  }
+
+  async function reloadMapAssets() {
+    mapState.images = {};
+    mapState.imgPromises = {};
+    mapState.tiles.clear();
+    mapState.tilePromises.clear();
+    mapState.icons = {};
+    mapState.iconImgs = {};
+    await Promise.all([
+      ensureMapIcons(),
+      ensureMapImage(mapState.layer),
+    ]);
+    updateMapSearchList();
+    renderMapCanvas();
+  }
+
+  window.__onMapExtractProgress = async (st) => {
+    updateMapExtractUi(st);
+    if (st && st.done && st.ok) {
+      await reloadMapAssets();
+      updateMapExtractUi(st);
+    }
+  };
+
+  async function triggerMapExtraction(browse = false) {
+    if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.start_map_extraction) return;
+    const res = await window.pywebview.api.start_map_extraction(Boolean(browse));
+    if (res && res.error) {
+      updateMapExtractUi({
+        hasMaps: false,
+        running: false,
+        pct: 0,
+        done: true,
+        ok: false,
+        error: res.error,
+        message: res.error,
+      });
     }
   }
 
@@ -2866,7 +2941,7 @@
       }
       ctx.fillStyle = "#8a94a0";
       ctx.font = "600 13px Segoe UI, sans-serif";
-      ctx.fillText("Map tiles not cached locally — run extract_err_map.py --maps to extract", ox + 20, oy + 32);
+      ctx.fillText("Map tiles not extracted yet — click 'Extract Game Maps & Icons' below", ox + 20, oy + 32);
     }
 
     // Native L0 8x8 high-res tile overlay when zoomed in beyond overview detail
@@ -3179,6 +3254,7 @@
     document.body.classList.toggle("pip-active", next !== "off");
     document.body.classList.toggle("pip-map", next === "map");
     document.body.classList.toggle("pip-stats", next === "stats");
+    if (next === "off") document.body.classList.remove("pip-hover");
     $("pipModeMapBtn").classList.toggle("active", next === "map");
     $("pipModeStatsBtn").classList.toggle("active", next === "stats");
     if (next === "stats") renderPipStats();
@@ -3352,6 +3428,40 @@
       if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_opacity) {
         window.pywebview.api.set_pip_opacity(nextOp);
       }
+    });
+
+    const setPipHover = (on) => {
+      if (state.pipMode === "off") return;
+      document.body.classList.toggle("pip-hover", Boolean(on));
+    };
+    document.documentElement.addEventListener("mouseenter", () => setPipHover(true));
+    document.documentElement.addEventListener("mousemove", () => setPipHover(true));
+    document.documentElement.addEventListener("mouseleave", () => setPipHover(false));
+    window.addEventListener("blur", () => setPipHover(false));
+
+    $("pipBar").addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || state.pipMode === "off") return;
+      if (e.target.closest("button, select, input")) return;
+      e.preventDefault();
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.start_window_drag) {
+        window.pywebview.api.start_window_drag();
+      }
+    });
+    $("pipResizeGrip").addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || state.pipMode === "off") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.start_window_resize) {
+        window.pywebview.api.start_window_resize();
+      }
+    });
+
+    $("mapExtractBtn").addEventListener("click", () => triggerMapExtraction(false));
+    $("mapExtractHeroBtn").addEventListener("click", () => triggerMapExtraction(false));
+    $("mapExtractBrowseBtn").addEventListener("click", () => triggerMapExtraction(true));
+    $("mapExtractBannerClose").addEventListener("click", () => {
+      mapState.mapExtractBannerDismissed = true;
+      $("mapExtractBanner").classList.add("hidden");
     });
 
     $("mapZoomInBtn").addEventListener("click", () => {
@@ -3732,12 +3842,14 @@
       testPipModes() {
         setPipMode("map");
         const mapBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-map");
+        document.body.classList.add("pip-hover");
         setPipMode("stats");
         const statsBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-stats");
         const statsCells = document.querySelectorAll("#pipStatsGrid .pip-stat-cell").length;
         setPipMode("off");
         const offClean = !document.body.classList.contains("pip-active");
-        return { mapBody, statsBody, statsCells, offClean };
+        const hoverClean = !document.body.classList.contains("pip-hover");
+        return { mapBody, statsBody, statsCells, offClean, hoverClean };
       },
       startMapImagesTest() {
         window.__ERR_MAP_IMAGES = null;

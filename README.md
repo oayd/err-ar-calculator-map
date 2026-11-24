@@ -4,9 +4,9 @@ A fast, standalone Windows desktop Attack Rating (AR), effective damage, status 
 
 ## Features
 - **Exact ERR v2.3.9.1 Weapon Math**: Computes physical/elemental AR, spell scaling, ERR custom affinity & scaling grades, status buildup, and effective damage against ERR enemy defense presets across all 6,454 weapon/affinity combinations.
-- **Interactive Live Map (Base Game, Underground & Shadow of the Erdtree)**: Over 4,000 indexed markers for Sites of Grace, Weapons (linked directly to the Calculator), Talismans, Armor, Bosses, Merchants (with full inventories), and Landmarks across `The Lands Between`, `Underground`, and `Shadow of the Erdtree`. Works out-of-the-box on a calibrated coordinate grid, or optionally extract native high-res game map tiles & icons from your local Elden Ring install using `extract_err_map.py --maps`.
+- **Interactive Live Map (Base Game, Underground & Shadow of the Erdtree)**: Over 4,000 indexed markers for Sites of Grace, Weapons (linked directly to the Calculator), Talismans, Armor, Bosses, Merchants (with full inventories), and Landmarks across `The Lands Between`, `Underground`, and `Shadow of the Erdtree`. Works out-of-the-box on a calibrated coordinate grid, with a **one-click in-app "Extract Game Maps & Icons"** button to extract native high-res game map tiles & UI icons directly from your local Elden Ring install.
 - **Live RAM Sync (30 Hz Follow Mode) + Automatic Save Fallback**: For offline ERR launches without Easy Anti-Cheat, reads live player coordinates, compass facing direction, Level, all 8 attributes, and equipped weapons/armor/talismans via strictly read-only `ReadProcessMemory` (`Follow` tracks your character at **30 Hz** on the map). Automatically falls back to reading `%APPDATA%\EldenRing\*\ER0000.err` (plus `.sl2`, `.co2`, `.cnv`, `.cnvco2`) when the game is closed or EAC is active.
-- **Picture-in-Picture Corner Overlay**: Always-on-top mini window (`Overlay` / `PiP`) switchable between a live corner **Minimap** and a compact **Live Stats & Equipped AR HUD**, with adjustable window opacity (`100%` / `85%` / `70%`).
+- **Frameless Auto-Hide PiP Corner Overlay**: Always-on-top borderless mini window (`Overlay` / `PiP`) switchable between a live corner **Minimap** and a compact **Live Stats & Equipped AR HUD** with no Windows title bar. Controls auto-hide until hovered (drag the hover bar to move, drag the bottom-right corner grip to resize, adjust opacity `100%` / `85%` / `70%`, press `Esc` to expand).
 - **Gear, Greases & Buffs**: Models equipped armor bonuses, talismans (including conditional talismans), ERR weapon greases, Flask of Wondrous Physick tears, and body/aura buffs.
 - **Respec Stat Optimizer**: Finds optimal STR/DEX/INT/FAI/ARC distributions for any weapon & affinity.
 - **Scaling & Softcap Curve Chart**: Interactive SVG chart visualizing per-stat scaling gains and softcaps.
@@ -15,7 +15,7 @@ A fast, standalone Windows desktop Attack Rating (AR), effective damage, status 
 ## Download
 Download the latest standalone `ERR_AR_Calculator.exe` from the [GitHub Releases](../../releases) page. No Python installation or external files are required (requires Windows 10/11 with Microsoft Edge WebView2, which is built into modern Windows).
 
-> **Optional Real In-Game Map Textures**: Due to copyright, pre-rendered Elden Ring map tiles (`map_cache/`) and UI icons (`err_map_icons.json.gz`) are not bundled in the public release. If you own Elden Ring on PC, run `python extract_err_map.py --game "<EldenRingGameDir>" --smithbox "<SmithboxDir>" --err-mod "<ERRModDir>" --maps` once next to `ERR_AR_Calculator.exe` to extract native L0 map tiles and icons from your own game files.
+> **One-Click In-App Map Texture Extraction**: Due to copyright, pre-rendered Elden Ring map tiles (`map_cache/`) and UI icons (`err_map_icons.json.gz`) are not bundled in the public release. If you own Elden Ring on PC, switch to the **Map** tab and click **Extract Game Maps & Icons** inside the app to extract native high-res L0 map tiles and icons directly from your local Steam/Elden Ring install in ~18 seconds (no Python or Smithbox required).
 
 ## Building from Source
 Requires Python 3.13+ on Windows:
@@ -28,7 +28,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name ERR_AR_Calculator 
   --add-data "err_map_data.json.gz;." `
   --add-data "err_icon.ico;." `
   --add-data "ui;ui" `
-  --collect-all clr_loader --collect-all pythonnet `
+  --collect-all clr_loader --collect-all pythonnet --collect-all texture2ddecoder `
   err_ar_calculator.py
 ```
 

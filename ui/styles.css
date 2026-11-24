@@ -1609,7 +1609,8 @@ table.subtable tbody td.center {
 
 /* Picture-in-Picture / Always-on-Top Mini Overlay */
 .pip-bar,
-.pip-stats-view {
+.pip-stats-view,
+.pip-resize-grip {
   display: none;
 }
 
@@ -1619,8 +1620,18 @@ body.pip-active #gearPanel,
 body.pip-active #calcWorkspace,
 body.pip-active #inspectorDrawer,
 body.pip-active .map-sidebar,
-body.pip-active .map-pin-card {
+body.pip-active .map-pin-card,
+body.pip-active #mapExtractBanner {
   display: none !important;
+}
+
+body.pip-active::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 1px solid rgba(212, 171, 83, 0.32);
+  pointer-events: none;
+  z-index: 80;
 }
 
 body.pip-active .pip-bar {
@@ -1634,11 +1645,32 @@ body.pip-active .pip-bar {
   justify-content: space-between;
   gap: 6px;
   padding: 0 6px;
-  background: rgba(20, 17, 14, 0.88);
-  border: 1px solid rgba(212, 171, 83, 0.35);
+  background: rgba(20, 17, 14, 0.90);
+  border: 1px solid rgba(212, 171, 83, 0.42);
   border-radius: 5px;
-  z-index: 60;
+  z-index: 70;
   backdrop-filter: blur(4px);
+  cursor: move;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+body.pip-active.pip-hover .pip-bar,
+body.pip-active:hover .pip-bar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.pip-drag-grip {
+  color: rgba(212, 171, 83, 0.72);
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -1px;
+  padding: 0 3px 0 1px;
+  user-select: none;
+  cursor: move;
 }
 
 .pip-group {
@@ -1680,9 +1712,17 @@ body.pip-map #mapWorkspace {
 body.pip-map .map-controls {
   top: auto;
   bottom: 8px;
-  right: 8px;
+  right: 22px;
   flex-direction: row;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+body.pip-map.pip-hover .map-controls,
+body.pip-map:hover .map-controls {
+  opacity: 1;
+  pointer-events: auto;
 }
 body.pip-map #mapStagePlayerBtn,
 body.pip-map #mapFollowBtn,
@@ -1711,9 +1751,106 @@ body.pip-stats .pip-stats-view {
   flex-direction: column;
   gap: 7px;
   height: 100vh;
-  padding: 38px 10px 8px;
+  padding: 10px 10px 8px;
   background: #14110e;
   overflow-y: auto;
+}
+
+body.pip-active .pip-resize-grip {
+  display: block;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 75;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+  background: linear-gradient(135deg, transparent 50%, rgba(212, 171, 83, 0.7) 50%, rgba(212, 171, 83, 0.7) 58%, transparent 58%, transparent 72%, rgba(212, 171, 83, 0.7) 72%, rgba(212, 171, 83, 0.7) 80%, transparent 80%);
+}
+body.pip-active.pip-hover .pip-resize-grip,
+body.pip-active:hover .pip-resize-grip {
+  opacity: 0.9;
+}
+
+/* In-app Map Extractor UI */
+.map-extract-btn {
+  width: 100%;
+  background: rgba(212, 171, 83, 0.12);
+  border: 1px solid rgba(212, 171, 83, 0.45);
+  color: var(--text-gold-bright);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.map-extract-btn:hover:not(:disabled) {
+  background: rgba(212, 171, 83, 0.22);
+  border-color: var(--text-amber);
+}
+.map-extract-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.map-extract-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.map-extract-bar {
+  width: 100%;
+  height: 6px;
+  background: #14110e;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.map-extract-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #b88a38, #f2cf7e);
+  transition: width 0.18s ease;
+}
+.map-extract-status {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-extract-banner {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  max-width: 390px;
+  background: rgba(25, 21, 17, 0.94);
+  border: 1px solid rgba(212, 171, 83, 0.48);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  z-index: 9;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+}
+.map-extract-banner-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.map-extract-banner-body {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-main);
+}
+.map-extract-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pip-stats-hdr {

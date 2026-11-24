@@ -1,4 +1,5 @@
 import base64
+import ctypes
 import gzip
 import json
 import os
@@ -12,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import webview
 
 import ar_engine
+import game_map_extractor
 import memory_reader
 import save_reader
 
@@ -178,6 +180,15 @@ class CalculatorApi:
         self._pip_opacity: float = 1.0
         self._normal_bounds = None
         self._pip_bounds: Dict[str, Any] = {}
+        self._extract_lock = threading.Lock()
+        self._extract_state: Dict[str, Any] = {
+            "running": False,
+            "pct": 0,
+            "message": "",
+            "done": False,
+            "ok": False,
+            "error": "",
+        }
 
     def _read_save(self, path: Optional[str]) -> Dict[str, Any]:
         if not path or not os.path.exists(path):
@@ -347,6 +358,7 @@ class CalculatorApi:
         if bv is not None:
             def _apply():
                 import System.Drawing as SD
+                import System.Windows.Forms as SWinForms
 
                 if prev == "off":
                     self._normal_bounds = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
@@ -356,11 +368,13 @@ class CalculatorApi:
                 if target == "off":
                     bv.TopMost = False
                     bv.Opacity = 1.0
+                    bv.FormBorderStyle = SWinForms.FormBorderStyle.Sizable
                     bv.MinimumSize = SD.Size(1060, 680)
                     if self._normal_bounds:
                         bv.SetBounds(*self._normal_bounds)
                 else:
-                    bv.MinimumSize = SD.Size(260, 200)
+                    bv.FormBorderStyle = getattr(SWinForms.FormBorderStyle, "None")
+                    bv.MinimumSize = SD.Size(220, 180)
                     bv.TopMost = True
                     bv.Opacity = self._pip_opacity
                     def_w, def_h = (380, 380) if target == "map" else (350, 310)
@@ -391,6 +405,114 @@ class CalculatorApi:
 
                 self._invoke_ui(_apply_op)
         return {"mode": self._pip_mode, "opacity": self._pip_opacity}
+
+    def _win32_nc_hit(self, ht_code: int) -> bool:
+        if self._self_test_mode or self._pip_mode == "off":
+            return False
+        bv = self._get_winforms_form()
+        if bv is None:
+            return False
+
+        def _do():
+            user32 = ctypes.windll.user32
+            user32.ReleaseCapture()
+            hwnd = ctypes.c_void_p(int(bv.Handle.ToInt64()))
+            user32.SendMessageW(hwnd, ctypes.c_uint(0x00A1), ctypes.c_size_t(int(ht_code)), ctypes.c_ssize_t(0))
+
+        return self._invoke_ui(_do)
+
+    def start_window_drag(self) -> bool:
+        return self._win32_nc_hit(2)  # HTCAPTION
+
+    def start_window_resize(self) -> bool:
+        return self._win32_nc_hit(17)  # HTBOTTOMRIGHT
+
+    def get_map_extract_status(self) -> Dict[str, Any]:
+        with self._extract_lock:
+            st = dict(self._extract_state)
+        st["hasMaps"] = all(bool(map_image_path(l)) for l in ("m00", "m01", "m10"))
+        st["hasIcons"] = bool(map_icons_path())
+        st["detectedGameDir"] = game_map_extractor.detect_elden_ring_game_dir()
+        return st
+
+    def _push_extract_status(self):
+        if self._self_test_mode or not self._window:
+            return
+        st = self.get_map_extract_status()
+        try:
+            self._window.evaluate_js(f"window.__onMapExtractProgress && window.__onMapExtractProgress({json.dumps(st)});")
+        except Exception:
+            pass
+
+    def start_map_extraction(self, browse: bool = False) -> Dict[str, Any]:
+        with self._extract_lock:
+            if self._extract_state["running"]:
+                return {"started": False, "reason": "already_running"}
+
+        game_dir = None if browse else game_map_extractor.detect_elden_ring_game_dir()
+        if not game_dir:
+            if not self._window or self._self_test_mode:
+                return {"started": False, "error": "Elden Ring game folder not auto-detected."}
+            init_dir = game_map_extractor.detect_elden_ring_game_dir() or ""
+            chosen = self._window.create_file_dialog(
+                webview.FileDialog.FOLDER,
+                directory=init_dir,
+            )
+            if not chosen:
+                return {"started": False, "cancelled": True}
+            raw_dir = chosen[0] if isinstance(chosen, (list, tuple)) else chosen
+            game_dir = game_map_extractor.normalize_game_dir(raw_dir)
+            if not game_dir:
+                return {
+                    "started": False,
+                    "error": "Selected folder must contain Data0.bhd, Data0.bdt, and oo2core_6_win64.dll (ELDEN RING\\Game).",
+                }
+
+        with self._extract_lock:
+            self._extract_state = {
+                "running": True,
+                "pct": 1,
+                "message": f"Starting extraction from {game_dir}...",
+                "done": False,
+                "ok": False,
+                "error": "",
+            }
+        self._push_extract_status()
+
+        def _worker():
+            try:
+                def _on_prog(pct: int, msg: str):
+                    with self._extract_lock:
+                        self._extract_state["pct"] = pct
+                        self._extract_state["message"] = msg
+                    self._push_extract_status()
+
+                res = game_map_extractor.extract_maps_and_icons(game_dir, app_base_dir(), progress_cb=_on_prog)
+                self._map_icons = None
+                with self._extract_lock:
+                    self._extract_state = {
+                        "running": False,
+                        "pct": 100,
+                        "message": f"Done! Extracted 3 map layers & {res.get('iconCount', 0)} icons.",
+                        "done": True,
+                        "ok": True,
+                        "error": "",
+                    }
+                self._push_extract_status()
+            except Exception as exc:
+                with self._extract_lock:
+                    self._extract_state = {
+                        "running": False,
+                        "pct": 0,
+                        "message": f"Extraction failed: {exc}",
+                        "done": True,
+                        "ok": False,
+                        "error": str(exc),
+                    }
+                self._push_extract_status()
+
+        threading.Thread(target=_worker, daemon=True, name="MapExtractor").start()
+        return {"started": True, "gameDir": game_dir}
 
     def _start_watcher(self):
         if self._self_test_mode or self._watcher_thread is not None:
@@ -881,6 +1003,10 @@ def run_self_test(report_path: Optional[str]):
             assert w.evaluate_js("document.getElementById('mapCenterPlayerBtn') === null"), "Redundant mapCenterPlayerBtn should be removed"
             assert w.evaluate_js("document.getElementById('mapStagePlayerBtn') !== null"), "mapStagePlayerBtn should remain"
             assert w.evaluate_js("document.getElementById('topPipBtn') !== null && document.getElementById('mapPipBtn') !== null"), "PiP toggle buttons should exist"
+            assert w.evaluate_js("document.getElementById('pipResizeGrip') !== null"), "pipResizeGrip should exist"
+            assert w.evaluate_js("document.getElementById('mapExtractBtn') !== null && document.getElementById('mapExtractBanner') !== null"), "Map extractor UI should exist"
+            ex_st = api.get_map_extract_status()
+            assert "hasMaps" in ex_st and "hasIcons" in ex_st and "detectedGameDir" in ex_st, f"Bad extract status: {ex_st}"
             normal_px = map_state.get("iconPx", 0)
             assert normal_px >= 21.0, f"Expected enlarged normal iconPx >= 21.0, got {normal_px}"
             clay_hits = w.evaluate_js('window.__ERR_TEST.searchMap("Claymore")')
@@ -907,7 +1033,7 @@ def run_self_test(report_path: Optional[str]):
             assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
             assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
             pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
-            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"], f"PiP modes failed: {pip_res}"
+            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"], f"PiP modes failed: {pip_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
