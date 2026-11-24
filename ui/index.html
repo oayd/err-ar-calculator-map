@@ -16,6 +16,10 @@
       </button>
       <span class="app-title">Elden Ring Weapon Calculator</span>
       <span class="mod-tag">ERR v2.3.9.1</span>
+      <div class="main-tabs" role="tablist" aria-label="Workspace View">
+        <button id="tabCalcBtn" class="main-tab active" data-view="calc" type="button">Calculator</button>
+        <button id="tabMapBtn" class="main-tab" data-view="map" type="button">Map</button>
+      </div>
     </div>
 
     <div class="topbar-right">
@@ -31,6 +35,7 @@
       <button id="topMatchEqBtn" class="top-btn" title="Match Weapon Level to equipped weapon upgrades">Match +Lv</button>
       <button id="topGearBtn" class="top-btn" title="Configure Equipped Armor, Talismans, Greases &amp; Buffs">Gear &amp; Buffs</button>
       <button id="topCompareBtn" class="top-btn gold-outline" title="Open Compare Tray">Compare (0)</button>
+      <button id="topPipBtn" class="top-btn gold-outline" type="button" title="Open Always-on-Top Mini Overlay (Map or Stats)">Overlay</button>
       <button id="topRefreshModBtn" class="top-btn" title="Re-extract regulation.bin data if extract_err_data.py is present">Refresh Mod</button>
       <button id="topSearchFocusBtn" class="icon-btn" title="Search weapons (Ctrl+F)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -40,7 +45,7 @@
     </div>
   </header>
 
-  <div class="workspace">
+  <div id="calcWorkspace" class="workspace">
     <aside id="sidebar" class="sidebar">
       <div class="m-field">
         <label for="charSelect">Character (Save Slot)</label>
@@ -274,6 +279,7 @@
           </div>
 
           <div class="drawer-actions">
+            <button id="showOnMapBtn" class="mini-link-btn" title="Locate this weapon on the interactive map">Show on Map</button>
             <button id="pinCompareBtn" class="mini-link-btn" title="Pin selected weapon to Compare Tray (P)">+ Pin</button>
             <button id="copySummaryBtn" class="mini-link-btn">Copy</button>
             <button id="drawerCloseBtn" class="banner-close" title="Close inspector (Esc)">&times;</button>
@@ -413,6 +419,109 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Interactive Map Workspace (Local ERR v2.3.9.1) -->
+  <div id="mapWorkspace" class="map-workspace hidden">
+    <aside class="map-sidebar">
+      <div class="map-side-group">
+        <div class="group-header">
+          <span class="group-title">Map Layer</span>
+        </div>
+        <div class="map-layer-tabs">
+          <button type="button" class="map-layer-btn active" data-layer="m00">The Lands Between</button>
+          <button type="button" class="map-layer-btn" data-layer="m01">Underground</button>
+          <button type="button" class="map-layer-btn" data-layer="m10">Shadow of the Erdtree</button>
+        </div>
+      </div>
+
+      <div class="map-side-group">
+        <div class="group-header">
+          <span class="group-title">Markers</span>
+          <div class="group-actions">
+            <button id="mapCatAllBtn" class="link-act" type="button">All</button>
+            <button id="mapCatNoneBtn" class="link-act" type="button">None</button>
+          </div>
+        </div>
+        <div id="mapCatList" class="map-cat-list">
+          <label class="map-cat-row"><input type="checkbox" id="mapCatPlayer" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-player" alt="" /><span class="map-dot player"></span></span><span class="map-cat-label">Live Player</span><span id="mapPlayerStatusTag" class="map-cat-cnt">Live</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="grace" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-grace" alt="" /><span class="map-dot grace"></span></span><span class="map-cat-label">Sites of Grace</span><span class="map-cat-cnt" id="cnt-grace">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="weapon" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-weapon" alt="" /><span class="map-dot weapon"></span></span><span class="map-cat-label">Weapons</span><span class="map-cat-cnt" id="cnt-weapon">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="talisman" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-talisman" alt="" /><span class="map-dot talisman"></span></span><span class="map-cat-label">Talismans</span><span class="map-cat-cnt" id="cnt-talisman">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="armor" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-armor" alt="" /><span class="map-dot armor"></span></span><span class="map-cat-label">Armor</span><span class="map-cat-cnt" id="cnt-armor">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="boss" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-boss" alt="" /><span class="map-dot boss"></span></span><span class="map-cat-label">Bosses</span><span class="map-cat-cnt" id="cnt-boss">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="merchant" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-merchant" alt="" /><span class="map-dot merchant"></span></span><span class="map-cat-label">Merchants</span><span class="map-cat-cnt" id="cnt-merchant">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="poi" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-poi" alt="" /><span class="map-dot poi"></span></span><span class="map-cat-label">Landmarks &amp; Dungeons</span><span class="map-cat-cnt" id="cnt-poi">0</span></label>
+        </div>
+      </div>
+
+      <div class="map-side-group map-search-group">
+        <div class="group-header">
+          <span class="group-title">Find on Map</span>
+          <button id="mapSearchClearBtn" class="link-act" type="button">Clear</button>
+        </div>
+        <input id="mapSearchInput" class="map-search-input" type="text" placeholder="Search weapon, grace, boss..." autocomplete="off" />
+        <div id="mapSearchMeta" class="map-search-meta">Type to filter all layers</div>
+        <div id="mapSearchList" class="map-search-list"></div>
+      </div>
+
+      <div class="map-player-footer">
+        <div id="mapPlayerStatus" class="map-player-status">Player position: awaiting save</div>
+      </div>
+    </aside>
+
+    <section class="map-stage">
+      <canvas id="mapCanvas" class="map-canvas"></canvas>
+      <div id="mapLoadingOverlay" class="map-loading hidden">Loading map tiles...</div>
+      <div class="map-controls">
+        <button id="mapZoomInBtn" class="map-ctrl-btn" type="button" title="Zoom In">+</button>
+        <button id="mapZoomOutBtn" class="map-ctrl-btn" type="button" title="Zoom Out">&minus;</button>
+        <button id="mapZoomResetBtn" class="map-ctrl-btn" type="button" title="Reset View">Fit</button>
+        <button id="mapStagePlayerBtn" class="map-ctrl-btn gold" type="button" title="Jump to Player">Player</button>
+        <button id="mapFollowBtn" class="map-ctrl-btn" type="button" title="Follow live player at 30 Hz">Follow</button>
+        <button id="mapPipBtn" class="map-ctrl-btn" type="button" title="Mini Map Overlay (Always on Top)">PiP</button>
+      </div>
+      <div id="mapHoverTip" class="map-hover-tip hidden"></div>
+      <div id="mapPinCard" class="map-pin-card hidden">
+        <div class="map-pin-hdr">
+          <span id="mapPinBadge" class="badge gold">Weapon</span>
+          <button id="mapPinCloseBtn" class="banner-close" type="button" title="Close">&times;</button>
+        </div>
+        <div id="mapPinTitle" class="map-pin-title">-</div>
+        <div id="mapPinSub" class="map-pin-sub">-</div>
+        <div id="mapPinItems" class="map-pin-items"></div>
+        <div id="mapPinCoords" class="map-pin-coords"></div>
+        <div id="mapPinActions" class="map-pin-actions"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Picture-in-Picture / Mini Overlay Controls & Compact Stats HUD -->
+  <div id="pipBar" class="pip-bar">
+    <div class="pip-group">
+      <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch Overlay to Live Minimap">Map</button>
+      <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch Overlay to Compact Stats &amp; Equipped AR">Stats</button>
+    </div>
+    <div class="pip-group">
+      <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player at 30 Hz">30Hz</button>
+      <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed AR">2H</button>
+      <button id="pipOpacityBtn" class="pip-pill" type="button" title="Cycle Overlay Opacity (100% / 85% / 70%)">100%</button>
+      <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to Full Window (Esc)">Expand</button>
+    </div>
+  </div>
+
+  <div id="pipStatsView" class="pip-stats-view">
+    <div class="pip-stats-hdr">
+      <span id="pipCharName" class="pip-char-name">Character</span>
+      <span id="pipRamBadge" class="pip-ram-badge">SAVE</span>
+    </div>
+    <div id="pipStatsGrid" class="pip-stats-grid"></div>
+    <div class="pip-subhdr">
+      <span>Equipped Weapons</span>
+      <span id="pipPresetTag" class="pip-preset-tag">Raw AR</span>
+    </div>
+    <div id="pipWeaponsList" class="pip-weapons-list"></div>
+    <div id="pipGearLine" class="pip-gear-line"></div>
   </div>
 
   <!-- INJECT_JS -->

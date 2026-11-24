@@ -1,8 +1,9 @@
 import glob
 import hashlib
+import math
 import os
 import struct
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 ER_APPDATA = os.path.join(os.environ.get("APPDATA", ""), "EldenRing")
 
@@ -45,6 +46,49 @@ def _parse_bnd4_entries(data: bytes) -> List[Tuple[int, int]]:
         data_off = struct.unpack_from("<I", data, off + 0x10)[0]
         entries.append((data_off, size))
     return entries
+
+
+def _extract_player_pos(sdata: bytes) -> Optional[Tuple[int, Dict[str, Any]]]:
+    """Locate live PlayerCoordinates struct (pos xyz, 4B mapId, rot xyz) inside slot data."""
+    if len(sdata) < 0x180020:
+        return None
+    map_bytes = sdata[0x14:0x18]
+    m0, m1, m2, m3 = struct.unpack_from("<4B", sdata, 0x14)
+    if m3 == 0 and m2 == 0 and m1 == 0:
+        return None
+    cur = 0x180000
+    n = len(sdata)
+    while True:
+        idx = sdata.find(map_bytes, cur)
+        if idx < 0:
+            break
+        if idx >= 12 and idx + 16 <= n:
+            x, y, z = struct.unpack_from("<3f", sdata, idx - 12)
+            rx, ry, rz = struct.unpack_from("<3f", sdata, idx + 4)
+            if (
+                all(math.isfinite(v) for v in (x, y, z, rx, ry, rz))
+                and abs(x) < 10000.0
+                and abs(z) < 10000.0
+                and (abs(x) > 0.01 or abs(y) > 0.01 or abs(z) > 0.01)
+                and abs(rx) < 0.01
+                and abs(rz) < 0.01
+                and abs(ry) <= 6.5
+            ):
+                return (
+                    idx - 12,
+                    {
+                        "area": m3,
+                        "gridX": m2,
+                        "gridZ": m1,
+                        "sub": m0,
+                        "x": round(x, 2),
+                        "y": round(y, 2),
+                        "z": round(z, 2),
+                        "yaw": round(ry, 4),
+                    },
+                )
+        cur = idx + 1
+    return None
 
 
 def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int]] = None) -> Dict:
@@ -113,6 +157,11 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
             continue
 
         stat_offsets[str(slot)] = s_off + pos - 0x60
+        pos_hit = _extract_player_pos(sdata)
+        player_pos = None
+        if pos_hit is not None:
+            pos_rel, player_pos = pos_hit
+            stat_offsets[f"pos_{slot}"] = s_off + pos_rel
         vig, mnd, end, strength, dex, intel, fai, arc = struct.unpack_from("<8I", sdata, pos - 0x60)
         characters.append(
             {
@@ -134,6 +183,7 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
                 "equipped": equipped,
                 "armor": armor,
                 "talismans": talismans,
+                "playerPos": player_pos,
             }
         )
 

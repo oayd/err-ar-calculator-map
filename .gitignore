@@ -8,5 +8,7 @@ __pycache__/
 *.spec
 *.exe
 err_ar_settings.json
+map_cache/
+err_map_icons.json.gz
 .vscode/
 .DS_Store

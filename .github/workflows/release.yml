@@ -32,6 +32,7 @@ jobs:
           python -m PyInstaller --noconfirm --onefile --windowed --name ERR_AR_Calculator `
             --icon "err_icon.ico" `
             --add-data "err_weapon_data.json.gz;." `
+            --add-data "err_map_data.json.gz;." `
             --add-data "err_icon.ico;." `
             --add-data "ui;ui" `
             --collect-all clr_loader `

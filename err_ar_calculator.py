@@ -1,15 +1,18 @@
+import base64
 import gzip
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
 import webview
 
 import ar_engine
+import memory_reader
 import save_reader
 
 
@@ -45,6 +48,48 @@ def resource_ui_dir() -> str:
 
 def settings_file_path() -> str:
     return os.path.join(app_base_dir(), "err_ar_settings.json")
+
+
+def map_data_path() -> Optional[str]:
+    for base in (app_base_dir(), getattr(sys, "_MEIPASS", app_base_dir())):
+        candidate = os.path.join(base, "err_map_data.json.gz")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def map_icons_path() -> Optional[str]:
+    for base in (app_base_dir(), getattr(sys, "_MEIPASS", app_base_dir())):
+        candidate = os.path.join(base, "err_map_icons.json.gz")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def map_image_path(layer: str) -> Optional[str]:
+    if layer not in ("m00", "m01", "m10"):
+        return None
+    fname = f"map_{layer}.jpg"
+    base = app_base_dir()
+    for root in (base, os.path.dirname(base), getattr(sys, "_MEIPASS", base)):
+        candidate = os.path.join(root, "map_cache", fname)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def map_tile_path(layer: str, cx: int, cy: int) -> Optional[str]:
+    if layer not in ("m00", "m01", "m10"):
+        return None
+    if not (0 <= cx < 16 and 0 <= cy < 16):
+        return None
+    fname = f"{cx}_{cy}.jpg"
+    base = app_base_dir()
+    for root in (base, os.path.dirname(base), getattr(sys, "_MEIPASS", base)):
+        candidate = os.path.join(root, "map_cache", "tiles", layer, fname)
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 
 def load_weapon_data() -> Dict:
@@ -95,30 +140,59 @@ def _save_summary_key(parsed: Dict[str, Any]) -> str:
     return json.dumps({"lastSlot": parsed.get("lastSlot"), "characters": chars}, sort_keys=True)
 
 
+def _save_pos_key(parsed: Dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "lastSlot": parsed.get("lastSlot"),
+            "positions": {str(c["slot"]): c.get("playerPos") for c in parsed.get("characters", [])},
+        },
+        sort_keys=True,
+    )
+
+
 class CalculatorApi:
     def __init__(self, self_test_mode: bool = False):
         self._self_test_mode = self_test_mode
         self._window: Optional[webview.Window] = None
         self._data = load_weapon_data()
         self._known_weapon_ids = set(self._data["_byId"].keys())
+        self._save_lock = threading.Lock()
         self._save_path: Optional[str] = None
         self._save_mtime: float = 0.0
         self._save_fingerprint: Optional[str] = None
         self._save_stat_offsets: Dict[str, int] = {}
         self._save_summary_key: Optional[str] = None
+        self._save_pos_key: Optional[str] = None
+        self._live_watch: bool = bool(self._load_settings().get("liveWatch", True))
+        self._watcher_stop = threading.Event()
+        self._watcher_thread: Optional[threading.Thread] = None
+        self._map_data: Optional[Dict[str, Any]] = None
+        self._map_icons: Optional[Dict[str, str]] = None
+        self._mem = memory_reader.EldenRingMemoryReader()
+        self._known_armor_ids = {int(k) for k in (self._data.get("armors") or {}).keys() if int(k) > 10300}
+        self._known_talisman_ids = {int(k) for k in (self._data.get("talismans") or {}).keys()}
+        self._ui_view: str = "calc"
+        self._map_follow: bool = False
+        self._ram_active: bool = False
+        self._pip_mode: str = "off"
+        self._pip_opacity: float = 1.0
+        self._normal_bounds = None
+        self._pip_bounds: Dict[str, Any] = {}
 
     def _read_save(self, path: Optional[str]) -> Dict[str, Any]:
         if not path or not os.path.exists(path):
             return {"characters": [], "error": "No ER save found (manual stats)"}
         try:
-            parsed = save_reader.read_save_characters(path, self._known_weapon_ids)
-            if parsed.get("characters"):
-                self._save_path = path
-                self._save_mtime = parsed["mtime"]
-                self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
-                self._save_fingerprint = save_reader.read_save_fingerprint(path, self._save_stat_offsets)
-                self._save_summary_key = _save_summary_key(parsed)
-            return parsed
+            with self._save_lock:
+                parsed = save_reader.read_save_characters(path, self._known_weapon_ids)
+                if parsed.get("characters"):
+                    self._save_path = path
+                    self._save_mtime = parsed["mtime"]
+                    self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
+                    self._save_fingerprint = save_reader.read_save_fingerprint(path, self._save_stat_offsets)
+                    self._save_summary_key = _save_summary_key(parsed)
+                    self._save_pos_key = _save_pos_key(parsed)
+                return parsed
         except Exception as exc:
             return {"characters": [], "error": f"Save read failed: {exc}"}
 
@@ -168,13 +242,19 @@ class CalculatorApi:
         res["cancelled"] = False
         return res
 
-    def poll_save(self) -> Dict[str, Any]:
+    def _poll_unlocked(self) -> Dict[str, Any]:
         if not self._save_path or not os.path.exists(self._save_path):
             cand = save_reader.find_default_save()
             if cand and os.path.exists(cand):
-                parsed = self._read_save(cand)
+                parsed = save_reader.read_save_characters(cand, self._known_weapon_ids)
                 if parsed.get("characters"):
-                    return {"changed": True, "save": parsed}
+                    self._save_path = cand
+                    self._save_mtime = parsed["mtime"]
+                    self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
+                    self._save_fingerprint = save_reader.read_save_fingerprint(cand, self._save_stat_offsets)
+                    self._save_summary_key = _save_summary_key(parsed)
+                    self._save_pos_key = _save_pos_key(parsed)
+                    return {"changed": True, "kind": "full", "save": parsed}
             return {"changed": False}
         try:
             fp1 = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
@@ -188,15 +268,273 @@ class CalculatorApi:
             if not parsed.get("characters"):
                 return {"changed": False}
             new_key = _save_summary_key(parsed)
+            new_pos_key = _save_pos_key(parsed)
             self._save_mtime = parsed["mtime"]
             self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
             self._save_fingerprint = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
             if new_key != self._save_summary_key:
                 self._save_summary_key = new_key
-                return {"changed": True, "save": parsed}
+                self._save_pos_key = new_pos_key
+                return {"changed": True, "kind": "full", "save": parsed}
+            if new_pos_key != self._save_pos_key:
+                self._save_pos_key = new_pos_key
+                return {
+                    "changed": True,
+                    "kind": "pos",
+                    "lastSlot": parsed.get("lastSlot"),
+                    "positions": {str(c["slot"]): c.get("playerPos") for c in parsed.get("characters", [])},
+                }
         except Exception:
             pass
         return {"changed": False}
+
+    def poll_save(self) -> Dict[str, Any]:
+        with self._save_lock:
+            return self._poll_unlocked()
+
+    def set_live_watch(self, enabled: bool) -> Dict[str, Any]:
+        self._live_watch = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["liveWatch"] = self._live_watch
+            self.save_settings(cfg)
+        return {"liveWatch": self._live_watch}
+
+    def set_live_stream_mode(self, view: str, follow: bool) -> Dict[str, Any]:
+        self._ui_view = "map" if view == "map" else "calc"
+        self._map_follow = bool(follow)
+        return {"view": self._ui_view, "follow": self._map_follow, "ramActive": self._ram_active}
+
+    def _get_winforms_form(self):
+        if not self._window or self._self_test_mode:
+            return None
+        try:
+            from webview.platforms.winforms import BrowserView
+
+            return BrowserView.instances.get(self._window.uid)
+        except Exception:
+            return None
+
+    def _invoke_ui(self, fn):
+        bv = self._get_winforms_form()
+        if bv is None:
+            return False
+        try:
+            if getattr(bv, "InvokeRequired", False):
+                from System import Action
+
+                bv.Invoke(Action(fn))
+            else:
+                fn()
+            return True
+        except Exception:
+            return False
+
+    def set_pip_mode(self, mode: str, opacity: Optional[float] = None) -> Dict[str, Any]:
+        target = mode if mode in ("off", "map", "stats") else "off"
+        if opacity is not None:
+            self._pip_opacity = max(0.45, min(1.0, float(opacity)))
+        prev = self._pip_mode
+        self._pip_mode = target
+        if target == "map":
+            self._ui_view = "map"
+        if self._self_test_mode or target == prev:
+            if not self._self_test_mode and target != "off":
+                self.set_pip_opacity(self._pip_opacity)
+            return {"mode": self._pip_mode, "opacity": self._pip_opacity}
+
+        bv = self._get_winforms_form()
+        if bv is not None:
+            def _apply():
+                import System.Drawing as SD
+
+                if prev == "off":
+                    self._normal_bounds = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
+                else:
+                    self._pip_bounds[prev] = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
+
+                if target == "off":
+                    bv.TopMost = False
+                    bv.Opacity = 1.0
+                    bv.MinimumSize = SD.Size(1060, 680)
+                    if self._normal_bounds:
+                        bv.SetBounds(*self._normal_bounds)
+                else:
+                    bv.MinimumSize = SD.Size(260, 200)
+                    bv.TopMost = True
+                    bv.Opacity = self._pip_opacity
+                    def_w, def_h = (380, 380) if target == "map" else (350, 310)
+                    if target in self._pip_bounds:
+                        px, py, pw, ph = self._pip_bounds[target]
+                    elif prev != "off" and prev in self._pip_bounds:
+                        ox, oy, ow, _ = self._pip_bounds[prev]
+                        px, py, pw, ph = (ox + ow - def_w, oy, def_w, def_h)
+                    else:
+                        try:
+                            scr = webview.screens[0]
+                            sw = int(scr.width)
+                        except Exception:
+                            sw = 1920
+                        px, py, pw, ph = (max(16, sw - def_w - 24), 24, def_w, def_h)
+                    bv.SetBounds(int(px), int(py), int(pw), int(ph))
+
+            self._invoke_ui(_apply)
+        return {"mode": self._pip_mode, "opacity": self._pip_opacity}
+
+    def set_pip_opacity(self, opacity: float) -> Dict[str, Any]:
+        self._pip_opacity = max(0.45, min(1.0, float(opacity)))
+        if not self._self_test_mode and self._pip_mode != "off":
+            bv = self._get_winforms_form()
+            if bv is not None:
+                def _apply_op():
+                    bv.Opacity = self._pip_opacity
+
+                self._invoke_ui(_apply_op)
+        return {"mode": self._pip_mode, "opacity": self._pip_opacity}
+
+    def _start_watcher(self):
+        if self._self_test_mode or self._watcher_thread is not None:
+            return
+
+        def _loop():
+            last_pos_key = None
+            last_char_key = None
+            last_char_t = 0.0
+            last_save_t = 0.0
+            miss_streak = 0
+            while True:
+                if self._ram_active:
+                    if self._ui_view == "map" and self._map_follow:
+                        dt = 0.033
+                    elif self._ui_view == "map":
+                        dt = 0.10
+                    else:
+                        dt = 0.25
+                else:
+                    dt = 0.5
+                if self._watcher_stop.wait(dt):
+                    break
+                if not self._live_watch or not self._window:
+                    continue
+
+                now = time.monotonic()
+                try:
+                    if self._mem.ensure_attached(min_retry_secs=2.0):
+                        pos = self._mem.read_player_pos()
+                        ch = None
+                        if not self._ram_active or (now - last_char_t >= 0.25):
+                            last_char_t = now
+                            ch = self._mem.read_character_state(
+                                self._known_weapon_ids,
+                                self._known_armor_ids,
+                                self._known_talisman_ids,
+                            )
+                        if pos is not None or ch is not None:
+                            miss_streak = 0
+                            was_active = self._ram_active
+                            self._ram_active = True
+                            if ch is not None:
+                                ckey = (
+                                    ch["name"],
+                                    ch["level"],
+                                    tuple(ch["stats"].values()),
+                                    tuple(e["rawId"] for e in ch["equipped"]),
+                                    tuple(ch["armor"]),
+                                    tuple(ch["talismans"]),
+                                )
+                                if not was_active or ckey != last_char_key:
+                                    last_char_key = ckey
+                                    self._window.evaluate_js(
+                                        f"window.__onLiveRamChar && window.__onLiveRamChar({json.dumps(ch)});"
+                                    )
+                            if pos is not None:
+                                pkey = (
+                                    pos["area"],
+                                    pos["gridX"],
+                                    pos["gridZ"],
+                                    pos["sub"],
+                                    round(pos["x"], 2),
+                                    round(pos["z"], 2),
+                                    round(pos["yaw"], 3),
+                                )
+                                if not was_active or pkey != last_pos_key:
+                                    last_pos_key = pkey
+                                    self._window.evaluate_js(
+                                        f"window.__onLiveRamPos && window.__onLiveRamPos({json.dumps(pos)});"
+                                    )
+                            continue
+                        miss_streak += 1
+                        if self._ram_active and miss_streak >= 6:
+                            self._ram_active = False
+                            last_pos_key = None
+                            last_char_key = None
+                            self._window.evaluate_js(
+                                'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
+                            )
+                    elif self._ram_active:
+                        self._ram_active = False
+                        last_pos_key = None
+                        last_char_key = None
+                        self._window.evaluate_js(
+                            'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
+                        )
+                except Exception:
+                    pass
+
+                if not self._ram_active and (now - last_save_t >= 1.0):
+                    last_save_t = now
+                    try:
+                        upd = self.poll_save()
+                        if not upd or not upd.get("changed"):
+                            continue
+                        if upd.get("kind") == "full":
+                            js = f"window.__onLiveSavePush && window.__onLiveSavePush({json.dumps(upd['save'])});"
+                        else:
+                            payload = {"lastSlot": upd.get("lastSlot"), "positions": upd.get("positions", {})}
+                            js = f"window.__onLivePlayerPos && window.__onLivePlayerPos({json.dumps(payload)});"
+                        self._window.evaluate_js(js)
+                    except Exception:
+                        pass
+
+        self._watcher_thread = threading.Thread(target=_loop, daemon=True, name="SaveWatcher")
+        self._watcher_thread.start()
+
+    def get_map_data(self) -> Dict[str, Any]:
+        if self._map_data is None:
+            p = map_data_path()
+            if not p:
+                return {"error": "err_map_data.json.gz not found", "markers": [], "counts": {}, "layers": {}, "legacyConv": [], "availableImages": {}}
+            with gzip.open(p, "rt", encoding="utf-8") as fh:
+                self._map_data = json.load(fh)
+        out = dict(self._map_data)
+        out["availableImages"] = {layer: bool(map_image_path(layer)) for layer in ("m00", "m01", "m10")}
+        return out
+
+    def get_map_image(self, layer: str) -> Dict[str, Any]:
+        p = map_image_path(layer)
+        if not p:
+            return {"ok": False, "layer": layer}
+        with open(p, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        return {"ok": True, "layer": layer, "dataUrl": f"data:image/jpeg;base64,{b64}"}
+
+    def get_map_tile(self, layer: str, cx: int, cy: int) -> Dict[str, Any]:
+        p = map_tile_path(layer, int(cx), int(cy))
+        if not p:
+            return {"ok": False, "layer": layer, "cx": int(cx), "cy": int(cy)}
+        with open(p, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        return {"ok": True, "layer": layer, "cx": int(cx), "cy": int(cy), "dataUrl": f"data:image/jpeg;base64,{b64}"}
+
+    def get_map_icons(self) -> Dict[str, str]:
+        if self._map_icons is None:
+            p = map_icons_path()
+            if not p:
+                self._map_icons = {}
+            else:
+                with gzip.open(p, "rt", encoding="utf-8") as fh:
+                    self._map_icons = json.load(fh)
+        return dict(self._map_icons)
 
     def optimize_weapon(
         self,
@@ -261,7 +599,7 @@ class CalculatorApi:
         if not getattr(sys, "frozen", False):
             py_exe = sys.executable
         else:
-            for cand in (shutil.which("python"), shutil.which("py"), r"C:\Python313\python.exe"):
+            for cand in (r"C:\Python313\python.exe", shutil.which("python"), shutil.which("py")):
                 if cand and os.path.exists(cand):
                     py_exe = cand
                     break
@@ -352,19 +690,18 @@ def run_self_test(report_path: Optional[str]):
 
             summary = w.evaluate_js("window.__ERR_TEST.getSummary()")
             assert summary["weaponsLoaded"] == 6454, f"Expected 6454 weapons, got {summary}"
+            has_save = summary["charCount"] > 0
             assert summary["totalItems"] > 5000, f"Expected all-affinity rows > 5000, got {summary}"
             assert summary["visibleDomRows"] > 5, f"Expected rendered virtual rows > 5, got {summary}"
             assert len(summary["jsErrors"]) == 0, f"Initial JS errors: {summary['jsErrors']}"
             assert w.evaluate_js("document.getElementById('liveDot') === null"), "liveDot should be removed"
-            has_save = summary["charCount"] > 0
             if has_save:
                 assert w.evaluate_js("document.getElementById('saveAcceptedIcon').classList.contains('active')"), "saveAcceptedIcon should be active when save is loaded"
-                lw_prev = bool(w.evaluate_js("document.getElementById('liveWatchCb').checked"))
-                w.evaluate_js("window.__ERR_TEST.toggleOption('liveWatchCb', false)")
+            lw_prev = bool(w.evaluate_js("document.getElementById('liveWatchCb').checked"))
+            w.evaluate_js("window.__ERR_TEST.toggleOption('liveWatchCb', false)")
+            if has_save:
                 assert w.evaluate_js("document.getElementById('saveAcceptedIcon').classList.contains('active')"), "saveAcceptedIcon should stay active when Live Watch is off"
-                w.evaluate_js(f"window.__ERR_TEST.toggleOption('liveWatchCb', {'true' if lw_prev else 'false'})")
-            else:
-                assert not w.evaluate_js("document.getElementById('saveAcceptedIcon').classList.contains('active')"), "saveAcceptedIcon should be inactive when no save is loaded"
+            w.evaluate_js(f"window.__ERR_TEST.toggleOption('liveWatchCb', {'true' if lw_prev else 'false'})")
 
             # Exact JS vs Python Math Parity Check across 10 diverse weapons (unbuffed + buffed)
             test_weapons = _pick_parity_weapons(api._data["weapons"])
@@ -422,10 +759,7 @@ def run_self_test(report_path: Optional[str]):
                 eq_tal = [x for x in gear_info["talismanIds"] if x is not None]
                 assert len(eq_armor) == 4 and len(eq_tal) >= 3, f"Unexpected active gear: {eq_armor} / {eq_tal}"
             else:
-                c0_armor = []
-                c0_tal = []
-                eq_armor = []
-                eq_tal = []
+                c0_armor, c0_tal, eq_armor, eq_tal = [], [], [], []
 
             # Extra Optional Columns check
             for cb_id in ("colCritCb", "colDTypeCb", "colBuffCb", "colStamCb", "colStanceCb"):
@@ -504,6 +838,78 @@ def run_self_test(report_path: Optional[str]):
             curve_res = w.evaluate_js(f"window.__ERR_TEST.testScalingCurve({clay['id']})")
             assert curve_res["polyCount"] >= 1 and curve_res["dotCount"] >= 1, f"Curve SVG bad: {curve_res}"
 
+            # Map tab & 7-category / PiP overlay verification (handles both cached tiles & CI grid fallback)
+            map_init = w.evaluate_js("window.__ERR_TEST.openMapTab()")
+            has_local_maps = any(bool(map_image_path(l)) for l in ("m00", "m01", "m10"))
+            has_local_icons = bool(map_icons_path())
+            map_deadline = time.time() + 15.0
+            map_state = None
+            while time.time() < map_deadline:
+                st = w.evaluate_js("window.__ERR_TEST.getMapState()")
+                if st and st.get("loaded") and st.get("visibleCount", 0) > 0 and (not has_local_maps or st.get("imgLoaded")):
+                    map_state = st
+                    break
+                time.sleep(0.05)
+            assert map_state and map_state.get("loaded"), f"Map failed to load: {map_state}"
+            for req_cat in ("grace", "weapon", "talisman", "armor", "boss", "merchant", "poi"):
+                assert map_state["counts"].get(req_cat, 0) > 0, f"Empty map category {req_cat}: {map_state['counts']}"
+            if has_local_maps:
+                w.evaluate_js("window.__ERR_TEST.startMapImagesTest()")
+                img_check = None
+                img_deadline = time.time() + 10.0
+                while time.time() < img_deadline:
+                    img_check = w.evaluate_js("window.__ERR_MAP_IMAGES")
+                    if img_check is not None:
+                        break
+                    time.sleep(0.03)
+                assert img_check and "error" not in img_check and all(img_check.get(l) for l in ("m00", "m01", "m10")), f"Map images missing: {img_check}"
+                w.evaluate_js("window.__ERR_TEST.startMapTilesTest()")
+                tile_check = None
+                tile_deadline = time.time() + 10.0
+                while time.time() < tile_deadline:
+                    tile_check = w.evaluate_js("window.__ERR_MAP_TILES")
+                    if tile_check is not None:
+                        break
+                    time.sleep(0.03)
+                assert tile_check and tile_check.get("m00") and tile_check.get("m10"), f"Map L0 tiles missing: {tile_check}"
+            else:
+                img_check = {}
+                tile_check = {}
+            if has_local_icons:
+                assert map_state.get("iconsLoaded", 0) >= 20, f"Expected >=20 game icons, got {map_state.get('iconsLoaded')}"
+            assert map_state.get("dummyCount", 1) == 0, f"Unexpected dummy markers: {map_state.get('dummyCount')}"
+            assert w.evaluate_js("document.getElementById('mapCenterPlayerBtn') === null"), "Redundant mapCenterPlayerBtn should be removed"
+            assert w.evaluate_js("document.getElementById('mapStagePlayerBtn') !== null"), "mapStagePlayerBtn should remain"
+            assert w.evaluate_js("document.getElementById('topPipBtn') !== null && document.getElementById('mapPipBtn') !== null"), "PiP toggle buttons should exist"
+            normal_px = map_state.get("iconPx", 0)
+            assert normal_px >= 21.0, f"Expected enlarged normal iconPx >= 21.0, got {normal_px}"
+            clay_hits = w.evaluate_js('window.__ERR_TEST.searchMap("Claymore")')
+            assert clay_hits >= 1, f"Claymore not found on map: {clay_hits}"
+            st_search = w.evaluate_js("window.__ERR_TEST.getMapState()")
+            assert st_search.get("iconPx", 0) >= normal_px * 1.95, f"Expected search iconPx >= 2x normal ({normal_px}), got {st_search.get('iconPx')}"
+            w.evaluate_js('window.__ERR_TEST.searchMap("")')
+            w.evaluate_js("window.__ERR_TEST.toggleMapCat('grace', false)")
+            st_no_grace = w.evaluate_js("window.__ERR_TEST.getMapState()")
+            assert st_no_grace["visibleCount"] < map_state["visibleCount"], "Map category toggle did not filter markers"
+            w.evaluate_js("window.__ERR_TEST.toggleMapCat('grace', true)")
+            acc = w.evaluate_js("window.__ERR_TEST.getMapAccuracyCheck()")
+            for lyr in ("m00", "m01", "m10"):
+                lc = acc["layers"][lyr]
+                assert lc["ox"] == 7040.0 and lc["oz"] == 16512.0 and lc["span"] == 10496.0, f"Bad cal for {lyr}: {lc}"
+            assert acc["besideGreatBridge"] and acc["besideGreatBridge"]["layer"] == "m00" and acc["besideGreatBridge"]["u"] > 0.78, f"Bad Beside Great Bridge: {acc['besideGreatBridge']}"
+            assert acc["audiencePathway"] and acc["audiencePathway"]["layer"] == "m00" and acc["audiencePathway"]["u"] < 0.25 and acc["audiencePathway"]["v"] < 0.30, f"Bad Audience Pathway: {acc['audiencePathway']}"
+            assert acc["haligtreeRoots"] and acc["haligtreeRoots"]["layer"] == "m00" and acc["haligtreeRoots"]["v"] < 0.12, f"Bad Haligtree Roots: {acc['haligtreeRoots']}"
+            assert acc["erdtreeSanctuary"] and acc["erdtreeSanctuary"]["layer"] == "m00", f"Missing Erdtree Sanctuary: {acc['erdtreeSanctuary']}"
+            assert acc["fireGiant"] and acc["fireGiant"]["layer"] == "m00" and acc["fireGiant"]["u"] > 0.55 and acc["fireGiant"]["v"] < 0.35, f"Bad Fire Giant: {acc['fireGiant']}"
+            assert w.evaluate_js("document.getElementById('mapFollowBtn') !== null"), "mapFollowBtn should exist"
+            ram_test = w.evaluate_js("window.__ERR_TEST.testLiveRamHooks()")
+            assert ram_test["followOn"] and not ram_test["followOff"], f"Follow toggle failed: {ram_test}"
+            assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
+            assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
+            pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
+            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"], f"PiP modes failed: {pip_res}"
+            w.evaluate_js("window.__ERR_TEST.openCalcTab()")
+
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
             assert len(final_sum["jsErrors"]) == 0, f"Runtime JS errors: {final_sum['jsErrors']}"
 
@@ -528,6 +934,13 @@ def run_self_test(report_path: Optional[str]):
                 f"INSPECTOR_AFF_ROWS={insp['affRows']}",
                 f"OPTIMIZER_TOP={opt_res['topAff']}|{opt_res['topEff']:.1f}|count={opt_res['count']}",
                 f"COMPARE_TRAY_COUNT={cmp_n}",
+                f"MAP_TOTAL_MARKERS={map_state['totalCount']}",
+                f"MAP_CATS_OK=7",
+                f"MAP_IMAGES={','.join(k for k, v in img_check.items() if v)}",
+                f"MAP_ICONS_LOADED={map_state['iconsLoaded']}",
+                f"MAP_TILES_OK={bool(tile_check and tile_check.get('m00') and tile_check.get('m10'))}",
+                f"MAP_DUMMY_COUNT={map_state['dummyCount']}",
+                f"MAP_CLAYMORE_HITS={clay_hits}",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]
@@ -571,7 +984,11 @@ def main():
         text_select=True,
     )
     api._window = win
-    webview.start(gui="edgechromium", icon=resource_icon_path(), private_mode=True)
+    try:
+        webview.start(lambda w: api._start_watcher(), win, gui="edgechromium", icon=resource_icon_path(), private_mode=True)
+    finally:
+        api._watcher_stop.set()
+        api._mem.close()
 
 
 if __name__ == "__main__":

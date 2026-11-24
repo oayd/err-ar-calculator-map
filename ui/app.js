@@ -439,11 +439,57 @@
     inspectedRes: null,
     compareIds: [],
     activeTab: "details",
+    activeView: "calc",
     optResults: [],
     liveWatch: true,
+    ramLive: false,
+    ramChar: null,
+    ramPos: null,
+    pipMode: "off",
+    pipOpacity: 1.0,
     bannerDismissed: false,
     lastRenderedKey: "",
     domColsSpec: [],
+  };
+
+  const MAP_CAT_META = {
+    grace: { label: "Site of Grace", color: "#ffe48a", shape: "star" },
+    weapon: { label: "Weapon", color: "#f2685a", shape: "diamond" },
+    talisman: { label: "Talisman", color: "#5ee08a", shape: "hex" },
+    armor: { label: "Armor", color: "#6eb3fa", shape: "square" },
+    boss: { label: "Boss", color: "#ff4466", shape: "triangle" },
+    merchant: { label: "Merchant", color: "#f0b840", shape: "ring" },
+    poi: { label: "Landmark", color: "#c5cbd6", shape: "circle" },
+  };
+
+  const mapState = {
+    loaded: false,
+    loading: false,
+    data: null,
+    icons: {},
+    iconImgs: {},
+    images: {},
+    imgPromises: {},
+    tiles: new Map(),
+    tilePromises: new Map(),
+    tileInFlight: 0,
+    layer: "m00",
+    cats: { grace: true, weapon: true, talisman: true, armor: true, boss: true, merchant: true, poi: true },
+    showPlayer: true,
+    followPlayer: false,
+    search: "",
+    selectedPin: null,
+    hoveredPin: null,
+    panX: 0,
+    panY: 0,
+    zoom: 1,
+    fitDone: false,
+    dragging: false,
+    dragMoved: false,
+    lastX: 0,
+    lastY: 0,
+    visibleMarkers: [],
+    firstOpenDone: false,
   };
 
   const ROW_HEIGHT = 31;
@@ -1191,6 +1237,7 @@
       }
     }
     refreshCompareTray();
+    if (state.pipMode === "stats") renderPipStats();
   }
 
   function formatCellNum(v, dashZero = true) {
@@ -1919,6 +1966,9 @@
     $("liveWatchCb").addEventListener("change", (e) => {
       state.liveWatch = e.target.checked;
       persistSettings();
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_watch) {
+        window.pywebview.api.set_live_watch(state.liveWatch);
+      }
     });
 
     $("topMatchEqBtn").addEventListener("click", () => matchEquippedLevels(true));
@@ -2255,7 +2305,9 @@
         $("searchInput").focus();
         $("searchInput").select();
       } else if (e.key === "Escape") {
-        if (document.activeElement === $("searchInput") && state.search) {
+        if (state.pipMode !== "off") {
+          setPipMode("off");
+        } else if (document.activeElement === $("searchInput") && state.search) {
           $("searchInput").value = "";
           state.search = "";
           $("searchClearBtn").classList.remove("visible");
@@ -2273,12 +2325,1123 @@
       }
     });
 
+    $("tabCalcBtn").addEventListener("click", () => switchMainView("calc"));
+    $("tabMapBtn").addEventListener("click", () => switchMainView("map"));
+    $("showOnMapBtn").addEventListener("click", () => {
+      if (state.inspectedRes) locateWeaponOnMap(state.inspectedRes.weapon);
+    });
+
     window.addEventListener("resize", () => {
       renderVirtualViewport(true);
       if (state.activeTab === "curve" && !$("inspectorDrawer").classList.contains("hidden")) {
         renderScalingCurve();
       }
+      if (state.activeView === "map") renderMapCanvas();
     });
+  }
+
+  let syncPulseTimer = null;
+  function pulseSavePill() {
+    const pill = $("saveStatusPill");
+    if (!pill) return;
+    pill.classList.add("synced");
+    if (syncPulseTimer) clearTimeout(syncPulseTimer);
+    syncPulseTimer = setTimeout(() => pill.classList.remove("synced"), 1200);
+  }
+
+  function applyIncomingSaveUpdate(saveObj) {
+    if (!saveObj || state.ramLive) return;
+    if (applySavePayload(saveObj, true)) {
+      recalculateAndRender();
+      pulseSavePill();
+      if (state.activeView === "map") {
+        updateMapPlayerReadout();
+        renderMapCanvas();
+      }
+    }
+  }
+
+  function applyIncomingPlayerPosUpdate(posPayload) {
+    if (!posPayload || !posPayload.positions || state.ramLive) return;
+    const prevSlot = state.activeSlot;
+    for (const ch of state.characters) {
+      const k = String(ch.slot);
+      if (k in posPayload.positions) ch.playerPos = posPayload.positions[k];
+    }
+    if (typeof posPayload.lastSlot === "number" && posPayload.lastSlot !== prevSlot) {
+      const nextCh = state.characters.find((c) => c.slot === posPayload.lastSlot);
+      if (nextCh) {
+        $("charSelect").value = String(nextCh.slot);
+        applyCharacter(nextCh);
+        recalculateAndRender();
+      }
+    }
+    updateMapPlayerReadout();
+    if (state.activeView === "map") renderMapCanvas();
+  }
+
+  function applyLiveRamCharacter(ch) {
+    if (!ch || !ch.stats) return;
+    state.ramLive = true;
+    state.ramChar = ch;
+    state.savedSnapshot = {
+      str: ch.stats.str,
+      dex: ch.stats.dex,
+      int: ch.stats.int,
+      fai: ch.stats.fai,
+      arc: ch.stats.arc,
+    };
+    state.stats = Object.assign({}, state.savedSnapshot);
+    state.equippedMap = new Map();
+    for (const eq of ch.equipped || []) {
+      state.equippedMap.set(eq.weaponId, eq.level);
+    }
+    const ar = ch.armor || [null, null, null, null];
+    const tl = ch.talismans || [null, null, null, null];
+    state.savedGear = {
+      armor: [ar[0] || null, ar[1] || null, ar[2] || null, ar[3] || null],
+      talismans: [tl[0] || null, tl[1] || null, tl[2] || null, tl[3] || null],
+    };
+    state.armorIds = state.savedGear.armor.slice();
+    state.talismanIds = state.savedGear.talismans.slice();
+    syncGearDropdownValues();
+    recomputeActiveBuffs();
+
+    matchEquippedLevels(false);
+    updateStatInputsDom();
+    $("charMetaText").textContent = `LIVE RAM · ${ch.name} Lv.${ch.level} · Vig ${ch.stats.vig} Mnd ${ch.stats.mnd} End ${ch.stats.end}`;
+    $("saveAcceptedIcon").classList.add("active");
+    $("saveStatusPill").classList.add("ram-live");
+    $("infoBannerText").innerHTML =
+      `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>LIVE RAM</strong>`;
+    recalculateAndRender();
+    pulseSavePill();
+    updateMapPlayerReadout();
+  }
+
+  function applyLiveRamPos(pos) {
+    if (!pos) return;
+    state.ramLive = true;
+    state.ramPos = pos;
+    updateMapPlayerReadout();
+    if (state.activeView === "map") {
+      if (mapState.followPlayer) {
+        const lp = resolvePlayerToMapLayer(pos);
+        if (lp) {
+          if (mapState.layer !== lp.layer) {
+            mapState.layer = lp.layer;
+            syncMapLayerButtons();
+            ensureMapImage(lp.layer).then(() => renderMapCanvas());
+          }
+          const { w, h } = getMapLayout();
+          const scale = Math.min(w, h) * 0.96 * mapState.zoom;
+          mapState.panX = (0.5 - lp.u) * scale;
+          mapState.panY = (0.5 - lp.v) * scale;
+        }
+      }
+      renderMapCanvas();
+    }
+  }
+
+  function applyLiveRamStatus(st) {
+    if (!st || st.attached) return;
+    if (!state.ramLive) return;
+    state.ramLive = false;
+    state.ramChar = null;
+    state.ramPos = null;
+    $("saveStatusPill").classList.remove("ram-live");
+    const ch = state.characters.find((c) => c.slot === state.activeSlot) || state.characters[0];
+    if (ch) {
+      applyCharacter(ch);
+      recalculateAndRender();
+    }
+    updateMapPlayerReadout();
+    if (state.activeView === "map") renderMapCanvas();
+  }
+
+  window.__onLiveSavePush = applyIncomingSaveUpdate;
+  window.__onLivePlayerPos = applyIncomingPlayerPosUpdate;
+  window.__onLiveRamChar = applyLiveRamCharacter;
+  window.__onLiveRamPos = applyLiveRamPos;
+  window.__onLiveRamStatus = applyLiveRamStatus;
+
+  function resolvePlayerToMapLayer(pp) {
+    if (!pp || !mapState.data) return null;
+    if (pp.area === 11 && pp.gridX === 10) {
+      const rt = mapState.data.markers.find((m) => m.cat === "grace" && m.name && m.name.toLowerCase().includes("table of lost grace"));
+      if (rt) return { layer: rt.layer, u: rt.u, v: rt.v, yaw: pp.yaw || 0, label: "Roundtable Hold" };
+    }
+    let dstArea, wx, wz;
+    if (pp.area === 60 || pp.area === 61) {
+      const sub = pp.sub || 0;
+      if (sub === 99) return null;
+      const tier = sub % 10;
+      const sc = tier <= 2 ? (1 << tier) : 1;
+      wx = (pp.gridX * sc + (sc - 1) * 0.5) * 256 + pp.x;
+      wz = (pp.gridZ * sc + (sc - 1) * 0.5) * 256 + pp.z;
+      dstArea = pp.area;
+    } else {
+      const key = `${pp.area}_${pp.gridX}_${pp.gridZ}`;
+      const off = mapState.data.legacyOffsets && mapState.data.legacyOffsets[key];
+      if (!off) return null;
+      dstArea = off[0];
+      wx = off[1] + pp.x;
+      wz = off[2] + pp.z;
+    }
+    const layer = dstArea === 61 ? "m10" : (pp.area === 12 ? "m01" : "m00");
+    const cal = mapState.data.layers[layer];
+    if (!cal) return null;
+    const u = (wx - cal.ox) / cal.span;
+    const v = (cal.oz - wz) / cal.span;
+    if (u < -0.08 || u > 1.08 || v < -0.08 || v > 1.08) return null;
+    return { layer, u, v, yaw: pp.yaw || 0, label: `m${pp.area}_${pp.gridX}_${pp.gridZ}` };
+  }
+
+  function getActiveLivePlayerPos() {
+    if (state.ramLive && state.ramPos) {
+      return resolvePlayerToMapLayer(state.ramPos);
+    }
+    const ch = state.characters.find((c) => c.slot === state.activeSlot);
+    if (!ch || !ch.playerPos) return null;
+    return resolvePlayerToMapLayer(ch.playerPos);
+  }
+
+  function yawToCompass(yaw) {
+    if (typeof yaw !== "number" || !Number.isFinite(yaw)) return "";
+    const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const deg = ((((yaw + Math.PI) * 180) / Math.PI) % 360 + 360) % 360;
+    return dirs[Math.round(deg / 45) % 8];
+  }
+
+  function updateMapPlayerReadout() {
+    const el = $("mapPlayerStatus");
+    if (!el) return;
+    if (state.ramLive && state.ramPos) {
+      const pos = state.ramPos;
+      const chName = (state.ramChar && state.ramChar.name) || "Player";
+      const resolved = resolvePlayerToMapLayer(pos);
+      const layerName = resolved && mapState.data && mapState.data.layers[resolved.layer]
+        ? mapState.data.layers[resolved.layer].title
+        : `m${pos.area}`;
+      const hz = mapState.followPlayer ? " 30Hz" : "";
+      el.textContent = `LIVE${hz}: ${chName} · ${layerName} (${Math.round(pos.x)}, ${Math.round(pos.z)}) ${yawToCompass(pos.yaw)}`;
+      return;
+    }
+    const ch = state.characters.find((c) => c.slot === state.activeSlot);
+    if (!ch || !ch.playerPos) {
+      el.textContent = "Player position: unavailable in current slot";
+      return;
+    }
+    const resolved = resolvePlayerToMapLayer(ch.playerPos);
+    const layerName = resolved && mapState.data && mapState.data.layers[resolved.layer]
+      ? mapState.data.layers[resolved.layer].title
+      : `m${ch.playerPos.area}`;
+    el.textContent = `${ch.name}: ${layerName} (${Math.round(ch.playerPos.x)}, ${Math.round(ch.playerPos.z)}) ${yawToCompass(ch.playerPos.yaw)}`;
+  }
+
+  async function ensureMapImage(layer) {
+    if (mapState.images[layer]) return mapState.images[layer];
+    if (mapState.imgPromises[layer]) return mapState.imgPromises[layer];
+    const p = (async () => {
+      if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_map_image) return null;
+      const res = await window.pywebview.api.get_map_image(layer);
+      if (!res || !res.ok || !res.dataUrl) return null;
+      const img = new Image();
+      await new Promise((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+        img.src = res.dataUrl;
+      });
+      if (img.naturalWidth > 0) {
+        mapState.images[layer] = img;
+        return img;
+      }
+      return null;
+    })();
+    mapState.imgPromises[layer] = p;
+    return p;
+  }
+
+  async function ensureMapIcons() {
+    if (Object.keys(mapState.icons).length > 0) return;
+    if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_map_icons) return;
+    const rawIcons = await window.pywebview.api.get_map_icons();
+    if (!rawIcons || typeof rawIcons !== "object") return;
+    mapState.icons = rawIcons;
+    const decodes = [];
+    for (const [k, url] of Object.entries(rawIcons)) {
+      if (!url) continue;
+      const img = new Image();
+      decodes.push(new Promise((resolve) => {
+        img.onload = () => {
+          mapState.iconImgs[k] = img;
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = url;
+      }));
+    }
+    await Promise.all(decodes);
+    for (const k of ["player", "grace", "weapon", "talisman", "armor", "boss", "merchant", "poi"]) {
+      const el = $(`icon-legend-${k}`);
+      if (el && rawIcons[k]) {
+        el.src = rawIcons[k];
+        el.classList.add("loaded");
+      }
+    }
+  }
+
+  function requestMapTile(layer, cx, cy) {
+    const key = `${layer}_${cx}_${cy}`;
+    if (mapState.tiles.has(key) || mapState.tilePromises.has(key)) return;
+    if (mapState.tileInFlight >= 4) return;
+    if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_map_tile) return;
+    mapState.tileInFlight++;
+    const p = (async () => {
+      try {
+        const res = await window.pywebview.api.get_map_tile(layer, cx, cy);
+        if (!res || !res.ok || !res.dataUrl) {
+          mapState.tiles.set(key, null);
+          return;
+        }
+        const img = new Image();
+        await new Promise((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = res.dataUrl;
+        });
+        if (img.naturalWidth > 0) {
+          if (mapState.tiles.size >= 48) {
+            const oldestKey = mapState.tiles.keys().next().value;
+            mapState.tiles.delete(oldestKey);
+          }
+          mapState.tiles.set(key, img);
+          if (state.activeView === "map" && mapState.layer === layer) renderMapCanvas();
+        }
+      } finally {
+        mapState.tileInFlight = Math.max(0, mapState.tileInFlight - 1);
+        mapState.tilePromises.delete(key);
+      }
+    })();
+    mapState.tilePromises.set(key, p);
+  }
+
+  async function ensureMapLoaded() {
+    if (mapState.loaded) return;
+    if (mapState.loading) {
+      while (mapState.loading) await new Promise((r) => setTimeout(r, 30));
+      return;
+    }
+    mapState.loading = true;
+    const ov = $("mapLoadingOverlay");
+    if (ov) ov.classList.remove("hidden");
+    try {
+      const [data] = await Promise.all([
+        window.pywebview.api.get_map_data(),
+        ensureMapIcons(),
+      ]);
+      mapState.data = data;
+      mapState.loaded = Boolean(data && Array.isArray(data.markers));
+      computeVisibleMarkers();
+      const cnts = (data && data.counts) || {};
+      for (const k of Object.keys(MAP_CAT_META)) {
+        const cel = $(`cnt-${k}`);
+        if (cel) cel.textContent = String(cnts[k] || 0);
+      }
+      if (!mapState.firstOpenDone) {
+        mapState.firstOpenDone = true;
+        const lp = getActiveLivePlayerPos();
+        if (lp && lp.layer) mapState.layer = lp.layer;
+      }
+      syncMapLayerButtons();
+      await ensureMapImage(mapState.layer);
+      updateMapSearchList();
+      updateMapPlayerReadout();
+      resetMapView(false);
+    } finally {
+      mapState.loading = false;
+      if (ov) ov.classList.add("hidden");
+    }
+  }
+
+  function syncMapLayerButtons() {
+    document.querySelectorAll(".map-layer-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.layer === mapState.layer);
+    });
+  }
+
+  function getMapLayout() {
+    const canvas = $("mapCanvas");
+    const rect = canvas.getBoundingClientRect();
+    const w = Math.max(100, rect.width);
+    const h = Math.max(100, rect.height);
+    const baseSize = Math.min(w, h) * 0.96;
+    const scale = baseSize * mapState.zoom;
+    const ox = w * 0.5 + mapState.panX - scale * 0.5;
+    const oy = h * 0.5 + mapState.panY - scale * 0.5;
+    return { w, h, scale, ox, oy };
+  }
+
+  function resetMapView(redraw = true) {
+    mapState.panX = 0;
+    mapState.panY = 0;
+    mapState.zoom = 1.0;
+    mapState.fitDone = true;
+    if (redraw) renderMapCanvas();
+  }
+
+  function centerMapOnUV(u, v, targetZoom = null) {
+    const { w, h } = getMapLayout();
+    if (targetZoom !== null) mapState.zoom = Math.max(0.7, Math.min(24, targetZoom));
+    const baseSize = Math.min(w, h) * 0.96;
+    const scale = baseSize * mapState.zoom;
+    mapState.panX = (0.5 - u) * scale;
+    mapState.panY = (0.5 - v) * scale;
+    renderMapCanvas();
+  }
+
+  function markerMatchesSearch(m, q) {
+    if (!q) return true;
+    if (m.name && m.name.toLowerCase().includes(q)) return true;
+    if (m.sub && m.sub.toLowerCase().includes(q)) return true;
+    if (m.baseName && m.baseName.toLowerCase().includes(q)) return true;
+    if (Array.isArray(m.items)) {
+      for (const it of m.items) {
+        if (String(it).toLowerCase().includes(q)) return true;
+      }
+    }
+    return false;
+  }
+
+  function computeVisibleMarkers() {
+    if (!mapState.data || !mapState.data.markers) {
+      mapState.visibleMarkers = [];
+      return [];
+    }
+    const q = mapState.search.trim().toLowerCase();
+    const out = [];
+    for (const m of mapState.data.markers) {
+      if (m.layer !== mapState.layer) continue;
+      if (!mapState.cats[m.cat]) continue;
+      if (!markerMatchesSearch(m, q)) continue;
+      out.push(m);
+    }
+    mapState.visibleMarkers = out;
+    return out;
+  }
+
+  function drawMarkerShape(ctx, shape, x, y, r, color, isSelected) {
+    ctx.save();
+    ctx.beginPath();
+    if (shape === "star") {
+      for (let i = 0; i < 8; i++) {
+        const ang = (i * Math.PI) / 4;
+        const rad = i % 2 === 0 ? r * 1.28 : r * 0.48;
+        const px = x + Math.cos(ang) * rad;
+        const py = y + Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (shape === "diamond") {
+      ctx.moveTo(x, y - r * 1.15);
+      ctx.lineTo(x + r * 1.05, y);
+      ctx.lineTo(x, y + r * 1.15);
+      ctx.lineTo(x - r * 1.05, y);
+      ctx.closePath();
+    } else if (shape === "triangle") {
+      ctx.moveTo(x, y - r * 1.2);
+      ctx.lineTo(x + r * 1.1, y + r * 0.9);
+      ctx.lineTo(x - r * 1.1, y + r * 0.9);
+      ctx.closePath();
+    } else if (shape === "square") {
+      ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
+    } else if (shape === "hex") {
+      for (let i = 0; i < 6; i++) {
+        const ang = (i * Math.PI) / 3 - Math.PI / 6;
+        const px = x + Math.cos(ang) * r * 1.05;
+        const py = y + Math.sin(ang) * r * 1.05;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else {
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+    }
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = isSelected ? 2.4 : 1.4;
+    ctx.strokeStyle = isSelected ? "#ffffff" : "#0b0d10";
+    ctx.stroke();
+    if (isSelected) {
+      ctx.beginPath();
+      ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = "#f2cf7e";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function getMarkerIconKey(m) {
+    if (m.icon && mapState.iconImgs[m.icon]) return m.icon;
+    return m.cat;
+  }
+
+  function drawMarkerPin(ctx, m, x, y, iconPx, isSelected, isHovered) {
+    const ikey = getMarkerIconKey(m);
+    const sprite = mapState.iconImgs[ikey];
+    if (sprite && sprite.naturalWidth > 0) {
+      const ratio = sprite.naturalWidth / Math.max(1, sprite.naturalHeight);
+      let dw = iconPx;
+      let dh = iconPx;
+      if (ratio > 1) dh = iconPx / ratio;
+      else if (ratio < 1) dw = iconPx * ratio;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(dw, dh) * 0.448, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? "rgba(25, 20, 14, 0.88)" : "rgba(12, 11, 10, 0.58)";
+      ctx.fill();
+      if (isSelected || isHovered) {
+        ctx.strokeStyle = isSelected ? "#f2cf7e" : "#ffffff";
+        ctx.lineWidth = isSelected ? 2.2 : 1.4;
+        ctx.stroke();
+      }
+      ctx.drawImage(sprite, x - dw * 0.5, y - dh * 0.5, dw, dh);
+      ctx.restore();
+      return;
+    }
+    const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
+    drawMarkerShape(ctx, meta.shape, x, y, iconPx * 0.34, meta.color, isSelected);
+  }
+
+  function getMapIconPx() {
+    const z = Math.max(0.7, mapState.zoom);
+    const baseIconPx = Math.max(21.25, Math.min(32.5, (17 + Math.log2(Math.max(1, z)) * 2.2) * 1.25));
+    if (mapState.search.trim().length > 0) {
+      const zoomOutBonus = z < 2.0 ? (2.0 - z) * 4.5 : 0;
+      return Math.min(66, Math.max(46, baseIconPx * 2.0 + zoomOutBonus));
+    }
+    return baseIconPx;
+  }
+
+  function renderMapCanvas() {
+    if (state.activeView !== "map") return;
+    const canvas = $("mapCanvas");
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cw = Math.round(rect.width * dpr);
+    const ch = Math.round(rect.height * dpr);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const { w, h, scale, ox, oy } = getMapLayout();
+
+    ctx.fillStyle = "#0d1115";
+    ctx.fillRect(0, 0, w, h);
+
+    const img = mapState.images[mapState.layer];
+    if (img && img.naturalWidth > 0) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, ox, oy, scale, scale);
+    } else {
+      ctx.fillStyle = "#14191f";
+      ctx.fillRect(ox, oy, scale, scale);
+      ctx.strokeStyle = "#262f3a";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 16; i++) {
+        const g = (i / 16) * scale;
+        ctx.beginPath(); ctx.moveTo(ox + g, oy); ctx.lineTo(ox + g, oy + scale); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ox, oy + g); ctx.lineTo(ox + scale, oy + g); ctx.stroke();
+      }
+      ctx.fillStyle = "#8a94a0";
+      ctx.font = "600 13px Segoe UI, sans-serif";
+      ctx.fillText("Map tiles not cached locally — run extract_err_map.py --maps to extract", ox + 20, oy + 32);
+    }
+
+    // Native L0 8x8 high-res tile overlay when zoomed in beyond overview detail
+    const tileGrid = (mapState.data && mapState.data.tileGrid) || 8;
+    if (scale > 2200 && tileGrid > 0) {
+      const tilePx = scale / tileGrid;
+      const cxMin = Math.max(0, Math.floor(-ox / tilePx));
+      const cxMax = Math.min(tileGrid - 1, Math.floor((w - ox) / tilePx));
+      const cyMin = Math.max(0, Math.floor(-oy / tilePx));
+      const cyMax = Math.min(tileGrid - 1, Math.floor((h - oy) / tilePx));
+      for (let cy = cyMin; cy <= cyMax; cy++) {
+        for (let cx = cxMin; cx <= cxMax; cx++) {
+          const tkey = `${mapState.layer}_${cx}_${cy}`;
+          const timg = mapState.tiles.get(tkey);
+          if (timg && timg.naturalWidth > 0) {
+            ctx.drawImage(timg, ox + cx * tilePx, oy + cy * tilePx, tilePx + 0.75, tilePx + 0.75);
+          } else if (timg === undefined) {
+            requestMapTile(mapState.layer, cx, cy);
+          }
+        }
+      }
+    }
+
+    const vis = computeVisibleMarkers();
+    const isSearching = mapState.search.trim().length > 0;
+    const iconPx = getMapIconPx();
+    const cullPad = Math.ceil(iconPx * 0.75 + 8);
+    const drawOrder = ["poi", "armor", "talisman", "weapon", "merchant", "boss", "grace"];
+    const byCat = new Map(drawOrder.map((c) => [c, []]));
+    for (const m of vis) {
+      if (m === mapState.selectedPin || m === mapState.hoveredPin) continue;
+      if (byCat.has(m.cat)) byCat.get(m.cat).push(m);
+    }
+
+    for (const cat of drawOrder) {
+      const list = byCat.get(cat);
+      for (const m of list) {
+        const sx = ox + m.u * scale;
+        const sy = oy + m.v * scale;
+        if (sx < -cullPad || sx > w + cullPad || sy < -cullPad || sy > h + cullPad) continue;
+        drawMarkerPin(ctx, m, sx, sy, iconPx, false, false);
+      }
+    }
+
+    // Labels when zoomed in cleanly on Graces / Bosses / Landmarks
+    if (mapState.zoom >= 3.2 || (isSearching && vis.length <= 40)) {
+      ctx.font = "600 11px Segoe UI, sans-serif";
+      ctx.textBaseline = "middle";
+      let labelsDrawn = 0;
+      const lblOff = iconPx * 0.52 + 4;
+      for (const m of vis) {
+        if (labelsDrawn >= 60) break;
+        if (m.cat !== "grace" && m.cat !== "boss" && m.cat !== "merchant" && !mapState.search) continue;
+        const sx = ox + m.u * scale;
+        const sy = oy + m.v * scale;
+        if (sx < 10 || sx > w - 40 || sy < 10 || sy > h - 10) continue;
+        labelsDrawn++;
+        const txt = m.name;
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = "rgba(15, 13, 11, 0.80)";
+        ctx.fillRect(sx + lblOff, sy - 8, tw + 8, 16);
+        ctx.fillStyle = "#ece4d8";
+        ctx.fillText(txt, sx + lblOff + 4, sy);
+      }
+    }
+
+    // Highlight hovered and selected pin on top
+    for (const special of [mapState.hoveredPin, mapState.selectedPin]) {
+      if (!special || special.layer !== mapState.layer) continue;
+      const sx = ox + special.u * scale;
+      const sy = oy + special.v * scale;
+      drawMarkerPin(ctx, special, sx, sy, iconPx + (isSearching ? 6 : 4), special === mapState.selectedPin, special === mapState.hoveredPin);
+    }
+
+    // Live Player marker (official player cursor sprite + heading cone)
+    const lp = mapState.showPlayer ? getActiveLivePlayerPos() : null;
+    if (lp && lp.layer === mapState.layer) {
+      const px = ox + lp.u * scale;
+      const py = oy + lp.v * scale;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.beginPath();
+      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(77, 240, 136, 0.22)";
+      ctx.fill();
+      ctx.strokeStyle = "#4df088";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.rotate(lp.yaw + Math.PI);
+      const pSprite = mapState.iconImgs.player_arrow || mapState.iconImgs.player;
+      if (pSprite && pSprite.naturalWidth > 0) {
+        const pr = pSprite.naturalWidth / Math.max(1, pSprite.naturalHeight);
+        const ph = 28;
+        const pw = Math.max(10, ph * pr);
+        ctx.drawImage(pSprite, -pw * 0.5, -ph * 0.5, pw, ph);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(0, -10);
+        ctx.lineTo(7, 8);
+        ctx.lineTo(0, 4);
+        ctx.lineTo(-7, 8);
+        ctx.closePath();
+        ctx.fillStyle = "#4df088";
+        ctx.fill();
+        ctx.strokeStyle = "#0b120e";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function findHitMarker(clientX, clientY) {
+    const canvas = $("mapCanvas");
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const { scale, ox, oy } = getMapLayout();
+    let best = null;
+    const hitR = Math.max(15, getMapIconPx() * 0.52);
+    let bestDist2 = hitR * hitR;
+    for (const m of mapState.visibleMarkers) {
+      const sx = ox + m.u * scale;
+      const sy = oy + m.v * scale;
+      const d2 = (sx - mx) ** 2 + (sy - my) ** 2;
+      if (d2 <= bestDist2) {
+        bestDist2 = d2;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  function showMapPinCard(m) {
+    const card = $("mapPinCard");
+    if (!m) {
+      mapState.selectedPin = null;
+      card.classList.add("hidden");
+      renderMapCanvas();
+      return;
+    }
+    mapState.selectedPin = m;
+    const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
+    const badge = $("mapPinBadge");
+    badge.textContent = meta.label;
+    badge.style.color = meta.color;
+    badge.style.borderColor = meta.color;
+    $("mapPinTitle").textContent = m.name;
+    $("mapPinSub").textContent = m.sub || "";
+    const itemsEl = $("mapPinItems");
+    if (Array.isArray(m.items) && m.items.length) {
+      itemsEl.innerHTML = m.items.map((it) => `<div>&bull; ${escHtml(String(it))}</div>`).join("");
+    } else {
+      itemsEl.innerHTML = "";
+    }
+    const layerTitle = (mapState.data && mapState.data.layers[m.layer] && mapState.data.layers[m.layer].title) || m.layer;
+    $("mapPinCoords").textContent = `${layerTitle} · ${m.mapId || ""} (${m.wx ?? 0}, ${m.wz ?? 0})`;
+    const acts = $("mapPinActions");
+    acts.innerHTML = "";
+    if (m.calcId) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "top-btn gold-outline";
+      btn.textContent = "Open in Calculator";
+      btn.addEventListener("click", () => openWeaponInCalculator(m.calcId, m.baseName || m.name));
+      acts.appendChild(btn);
+    }
+    card.classList.remove("hidden");
+    renderMapCanvas();
+  }
+
+  function updateMapSearchList() {
+    const listEl = $("mapSearchList");
+    const metaEl = $("mapSearchMeta");
+    if (!listEl || !mapState.data) return;
+    const q = mapState.search.trim().toLowerCase();
+    const matches = [];
+    for (const m of mapState.data.markers) {
+      if (!mapState.cats[m.cat]) continue;
+      if (q && !markerMatchesSearch(m, q)) continue;
+      matches.push(m);
+      if (!q && matches.length >= 40) break;
+    }
+    const total = q ? matches.length : Object.keys(mapState.cats).reduce((a, k) => a + (mapState.cats[k] ? (mapState.data.counts[k] || 0) : 0), 0);
+    metaEl.textContent = q ? `${matches.length} matching markers` : `${total} enabled markers (${mapState.layer})`;
+    const slice = matches.slice(0, 80);
+    listEl.innerHTML = slice.map((m, idx) => {
+      const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
+      const layerTag = m.layer === "m10" ? "DLC" : (m.layer === "m01" ? "UG" : "LB");
+      const ikey = getMarkerIconKey(m);
+      const iurl = mapState.icons[ikey] || mapState.icons[m.cat];
+      const iconHtml = iurl
+        ? `<img class="map-search-icon" src="${iurl}" alt="" />`
+        : `<span class="map-dot ${m.cat}" style="background:${meta.color}"></span>`;
+      return `<button type="button" class="map-search-item" data-midx="${idx}">
+        ${iconHtml}
+        <span class="map-search-item-txt">
+          <div class="map-search-item-name">${escHtml(m.name)}</div>
+          <div class="map-search-item-sub">[${layerTag}] ${escHtml(m.sub || meta.label)}</div>
+        </span>
+      </button>`;
+    }).join("");
+    listEl.querySelectorAll(".map-search-item").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const m = slice[Number(btn.dataset.midx)];
+        if (!m) return;
+        await focusMarkerOnMap(m, 4.5);
+      });
+    });
+  }
+
+  async function focusMarkerOnMap(m, targetZoom = 4.5) {
+    if (!m) return;
+    if (mapState.layer !== m.layer) {
+      mapState.layer = m.layer;
+      syncMapLayerButtons();
+      await ensureMapImage(m.layer);
+    }
+    centerMapOnUV(m.u, m.v, targetZoom);
+    showMapPinCard(m);
+  }
+
+  function notifyStreamMode() {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_stream_mode) {
+      window.pywebview.api.set_live_stream_mode(state.activeView, mapState.followPlayer).catch(() => {});
+    }
+  }
+
+  async function setMapFollow(enabled) {
+    mapState.followPlayer = Boolean(enabled);
+    const btn = $("mapFollowBtn");
+    if (btn) btn.classList.toggle("following", mapState.followPlayer);
+    const pbtn = $("pipFollowBtn");
+    if (pbtn) pbtn.classList.toggle("following", mapState.followPlayer);
+    updateMapPlayerReadout();
+    notifyStreamMode();
+    if (mapState.followPlayer) {
+      const lp = getActiveLivePlayerPos();
+      if (lp) {
+        if (mapState.layer !== lp.layer) {
+          mapState.layer = lp.layer;
+          syncMapLayerButtons();
+          await ensureMapImage(lp.layer);
+        }
+        centerMapOnUV(lp.u, lp.v, Math.max(mapState.zoom, 4.0));
+      }
+    }
+  }
+
+  function renderPipStats() {
+    const ch = state.ramLive && state.ramChar
+      ? state.ramChar
+      : (state.characters.find((c) => c.slot === state.activeSlot) || null);
+    const chName = ch ? `${ch.name} (Lv.${ch.level})` : "Manual Stats";
+    $("pipCharName").textContent = chName;
+    const badge = $("pipRamBadge");
+    badge.textContent = state.ramLive ? "LIVE RAM" : (ch ? "SAVE" : "MANUAL");
+    badge.classList.toggle("live", Boolean(state.ramLive));
+
+    const vig = ch && ch.stats ? ch.stats.vig : "-";
+    const mnd = ch && ch.stats ? ch.stats.mnd : "-";
+    const end = ch && ch.stats ? ch.stats.end : "-";
+    const entries = [
+      ["VIG", vig], ["MND", mnd], ["END", end], ["STR", state.stats.str],
+      ["DEX", state.stats.dex], ["INT", state.stats.int], ["FAI", state.stats.fai], ["ARC", state.stats.arc],
+    ];
+    $("pipStatsGrid").innerHTML = entries.map(([k, v]) =>
+      `<div class="pip-stat-cell"><span class="pip-stat-lbl">${k}</span><span class="pip-stat-val">${escHtml(String(v))}</span></div>`
+    ).join("");
+
+    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+    $("pipPresetTag").textContent = `${state.twoHand ? "2H · " : "1H · "}${showEff ? state.enemyPreset : "Raw AR"}`;
+    const thBtn = $("pipTwoHandBtn");
+    if (thBtn) thBtn.classList.toggle("active", state.twoHand);
+
+    const weps = [];
+    for (const [wid, eqLv] of state.equippedMap.entries()) {
+      const w = state.byId.get(wid);
+      if (!w) continue;
+      weps.push(computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, eqLv, state.enemyPreset, state.activeBuffs));
+    }
+    weps.sort((a, b) => (showEff ? b.eff - a.eff : b.total - a.total));
+    const listEl = $("pipWeaponsList");
+    if (!weps.length) {
+      listEl.innerHTML = `<div class="pip-wep-row"><span class="pip-wep-name" style="color:var(--text-muted)">No equipped weapons detected</span></div>`;
+    } else {
+      listEl.innerHTML = weps.slice(0, 6).map((r) => {
+        const w = r.weapon;
+        const effHtml = showEff ? `<span class="pip-wep-eff">(${Math.round(r.eff)})</span>` : "";
+        return `<div class="pip-wep-row">
+          <span class="pip-wep-name">${escHtml(w.baseName)} +${r.lv} <span class="pip-wep-aff">${escHtml(w.aff)}</span></span>
+          <span class="pip-wep-ar${r.met ? "" : " ar-unmet"}">${Math.round(r.total)}</span>
+          ${effHtml}
+        </div>`;
+      }).join("");
+    }
+
+    const armNames = (state.armorIds || []).map((id) => (id && state.data.armors && state.data.armors[String(id)] ? state.data.armors[String(id)].n : null)).filter(Boolean);
+    const talNames = (state.talismanIds || []).map((id) => (id && state.data.talismans && state.data.talismans[String(id)] ? state.data.talismans[String(id)].n : null)).filter(Boolean);
+    const parts = [];
+    if (talNames.length) parts.push(`Talismans: ${talNames.join(", ")}`);
+    if (armNames.length) parts.push(`Armor: ${armNames.join(", ")}`);
+    $("pipGearLine").textContent = parts.join(" · ") || "Equip armor/talismans or buffs in Gear & Buffs";
+  }
+
+  async function setPipMode(mode) {
+    const next = (mode === "map" || mode === "stats") ? mode : "off";
+    state.pipMode = next;
+    document.body.classList.toggle("pip-active", next !== "off");
+    document.body.classList.toggle("pip-map", next === "map");
+    document.body.classList.toggle("pip-stats", next === "stats");
+    $("pipModeMapBtn").classList.toggle("active", next === "map");
+    $("pipModeStatsBtn").classList.toggle("active", next === "stats");
+    if (next === "stats") renderPipStats();
+
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
+      await window.pywebview.api.set_pip_mode(next, state.pipOpacity);
+    }
+
+    if (next === "map") {
+      await switchMainView("map");
+      if (getActiveLivePlayerPos() && !mapState.followPlayer) {
+        await setMapFollow(true);
+      } else {
+        setTimeout(() => renderMapCanvas(), 60);
+      }
+    } else if (next === "stats") {
+      renderPipStats();
+      notifyStreamMode();
+    } else {
+      notifyStreamMode();
+      setTimeout(() => {
+        if (state.activeView === "map") renderMapCanvas();
+        else renderVirtualViewport(true);
+      }, 60);
+    }
+  }
+
+  async function switchMainView(view) {
+    state.activeView = view === "map" ? "map" : "calc";
+    const isMap = state.activeView === "map";
+    $("tabCalcBtn").classList.toggle("active", !isMap);
+    $("tabMapBtn").classList.toggle("active", isMap);
+    $("calcWorkspace").classList.toggle("hidden", isMap);
+    $("mapWorkspace").classList.toggle("hidden", !isMap);
+    $("drawerToggleBtn").style.visibility = isMap ? "hidden" : "visible";
+    notifyStreamMode();
+    if (isMap) {
+      await ensureMapLoaded();
+      renderMapCanvas();
+    } else {
+      renderVirtualViewport(true);
+    }
+  }
+
+  async function locateWeaponOnMap(weapon) {
+    await switchMainView("map");
+    if (!mapState.loaded || !mapState.data) return;
+    if (!mapState.cats.weapon) {
+      mapState.cats.weapon = true;
+      const cb = document.querySelector(".map-cat-cb[data-cat='weapon']");
+      if (cb) cb.checked = true;
+    }
+    const baseLower = (weapon.baseName || weapon.name || "").toLowerCase();
+    const hit =
+      mapState.data.markers.find((m) => m.cat === "weapon" && m.calcId === weapon.id) ||
+      mapState.data.markers.find((m) => m.cat === "weapon" && (m.baseName || "").toLowerCase() === baseLower) ||
+      mapState.data.markers.find((m) => m.cat === "weapon" && m.name.toLowerCase().includes(baseLower));
+    mapState.search = weapon.baseName || "";
+    $("mapSearchInput").value = mapState.search;
+    updateMapSearchList();
+    if (hit) {
+      await focusMarkerOnMap(hit, 4.5);
+    } else {
+      renderMapCanvas();
+    }
+  }
+
+  function openWeaponInCalculator(calcId, fallbackSearch) {
+    switchMainView("calc");
+    const w = state.byId.get(Number(calcId));
+    if (w) {
+      const res = computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, -1, state.enemyPreset, state.activeBuffs);
+      renderInspectorDetails(res, true);
+      openDrawer("details");
+    } else if (fallbackSearch) {
+      $("searchInput").value = fallbackSearch;
+      state.search = fallbackSearch;
+      recalculateAndRender();
+    }
+  }
+
+  function bindMapUiEvents() {
+    document.querySelectorAll(".map-layer-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const layer = btn.dataset.layer;
+        if (!layer || mapState.layer === layer) return;
+        mapState.layer = layer;
+        syncMapLayerButtons();
+        showMapPinCard(null);
+        await ensureMapImage(layer);
+        updateMapSearchList();
+        resetMapView(true);
+      });
+    });
+
+    document.querySelectorAll(".map-cat-cb").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        mapState.cats[cb.dataset.cat] = cb.checked;
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    });
+    $("mapCatPlayer").addEventListener("change", (e) => {
+      mapState.showPlayer = e.target.checked;
+      renderMapCanvas();
+    });
+    $("mapCatAllBtn").addEventListener("click", () => {
+      document.querySelectorAll(".map-cat-cb").forEach((cb) => {
+        cb.checked = true;
+        mapState.cats[cb.dataset.cat] = true;
+      });
+      mapState.showPlayer = true;
+      $("mapCatPlayer").checked = true;
+      updateMapSearchList();
+      renderMapCanvas();
+    });
+    $("mapCatNoneBtn").addEventListener("click", () => {
+      document.querySelectorAll(".map-cat-cb").forEach((cb) => {
+        cb.checked = false;
+        mapState.cats[cb.dataset.cat] = false;
+      });
+      updateMapSearchList();
+      renderMapCanvas();
+    });
+
+    let mapSearchTimer = null;
+    $("mapSearchInput").addEventListener("input", (e) => {
+      mapState.search = e.target.value;
+      clearTimeout(mapSearchTimer);
+      mapSearchTimer = setTimeout(() => {
+        updateMapSearchList();
+        renderMapCanvas();
+      }, 60);
+    });
+    $("mapSearchClearBtn").addEventListener("click", () => {
+      $("mapSearchInput").value = "";
+      mapState.search = "";
+      updateMapSearchList();
+      renderMapCanvas();
+    });
+
+    const centerPlayer = async () => {
+      const lp = getActiveLivePlayerPos();
+      if (!lp) return;
+      if (mapState.layer !== lp.layer) {
+        mapState.layer = lp.layer;
+        syncMapLayerButtons();
+        await ensureMapImage(lp.layer);
+      }
+      centerMapOnUV(lp.u, lp.v, Math.max(mapState.zoom, 4.0));
+    };
+    $("mapStagePlayerBtn").addEventListener("click", centerPlayer);
+    $("mapFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
+    $("mapPipBtn").addEventListener("click", () => setPipMode("map"));
+    $("topPipBtn").addEventListener("click", () => setPipMode(state.activeView === "map" ? "map" : "stats"));
+    $("pipModeMapBtn").addEventListener("click", () => setPipMode("map"));
+    $("pipModeStatsBtn").addEventListener("click", () => setPipMode("stats"));
+    $("pipExitBtn").addEventListener("click", () => setPipMode("off"));
+    $("pipFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
+    $("pipTwoHandBtn").addEventListener("click", () => {
+      state.twoHand = !state.twoHand;
+      $("twoHandCb").checked = state.twoHand;
+      update2hHint();
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("pipOpacityBtn").addEventListener("click", () => {
+      const nextOp = state.pipOpacity > 0.9 ? 0.85 : (state.pipOpacity > 0.75 ? 0.70 : 1.0);
+      state.pipOpacity = nextOp;
+      $("pipOpacityBtn").textContent = `${Math.round(nextOp * 100)}%`;
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_opacity) {
+        window.pywebview.api.set_pip_opacity(nextOp);
+      }
+    });
+
+    $("mapZoomInBtn").addEventListener("click", () => {
+      mapState.zoom = Math.min(24, mapState.zoom * 1.45);
+      renderMapCanvas();
+    });
+    $("mapZoomOutBtn").addEventListener("click", () => {
+      mapState.zoom = Math.max(0.7, mapState.zoom / 1.45);
+      renderMapCanvas();
+    });
+    $("mapZoomResetBtn").addEventListener("click", () => resetMapView(true));
+    $("mapPinCloseBtn").addEventListener("click", () => showMapPinCard(null));
+
+    const canvas = $("mapCanvas");
+    const stage = canvas.parentElement;
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      mapState.dragging = true;
+      mapState.dragMoved = false;
+      mapState.lastX = e.clientX;
+      mapState.lastY = e.clientY;
+      stage.classList.add("dragging");
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (mapState.dragging) {
+        const dx = e.clientX - mapState.lastX;
+        const dy = e.clientY - mapState.lastY;
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+          mapState.dragMoved = true;
+          if (mapState.followPlayer) setMapFollow(false);
+        }
+        mapState.panX += dx;
+        mapState.panY += dy;
+        mapState.lastX = e.clientX;
+        mapState.lastY = e.clientY;
+        $("mapHoverTip").classList.add("hidden");
+        renderMapCanvas();
+      }
+    });
+    window.addEventListener("mouseup", () => {
+      if (mapState.dragging) {
+        mapState.dragging = false;
+        stage.classList.remove("dragging");
+      }
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      if (mapState.dragging || state.activeView !== "map") return;
+      const hit = findHitMarker(e.clientX, e.clientY);
+      const tip = $("mapHoverTip");
+      if (hit !== mapState.hoveredPin) {
+        mapState.hoveredPin = hit;
+        renderMapCanvas();
+      }
+      if (hit) {
+        const rect = stage.getBoundingClientRect();
+        tip.textContent = `${hit.name}${hit.sub ? " — " + hit.sub : ""}`;
+        tip.style.left = `${Math.min(rect.width - 180, e.clientX - rect.left + 12)}px`;
+        tip.style.top = `${Math.max(8, e.clientY - rect.top - 24)}px`;
+        tip.classList.remove("hidden");
+        canvas.style.cursor = "pointer";
+      } else {
+        tip.classList.add("hidden");
+        canvas.style.cursor = "grab";
+      }
+    });
+    canvas.addEventListener("mouseleave", () => {
+      $("mapHoverTip").classList.add("hidden");
+      if (mapState.hoveredPin) {
+        mapState.hoveredPin = null;
+        renderMapCanvas();
+      }
+    });
+    canvas.addEventListener("click", (e) => {
+      if (mapState.dragMoved) return;
+      const hit = findHitMarker(e.clientX, e.clientY);
+      showMapPinCard(hit);
+    });
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { w, h, scale, ox, oy } = getMapLayout();
+      const u = (mx - ox) / scale;
+      const v = (my - oy) / scale;
+      const factor = e.deltaY < 0 ? 1.24 : 1 / 1.24;
+      const nextZoom = Math.max(0.7, Math.min(24, mapState.zoom * factor));
+      const baseSize = Math.min(w, h) * 0.96;
+      const newScale = baseSize * nextZoom;
+      const newOx = mx - u * newScale;
+      const newOy = my - v * newScale;
+      mapState.zoom = nextZoom;
+      mapState.panX = newOx + newScale * 0.5 - w * 0.5;
+      mapState.panY = newOy + newScale * 0.5 - h * 0.5;
+      renderMapCanvas();
+    }, { passive: false });
   }
 
   async function initApp() {
@@ -2329,6 +3492,7 @@
     $("enemySelect").value = state.enemyPreset;
     if (state.bannerDismissed) $("infoBanner").classList.add("hidden");
     updateExtraColsButtonLabel();
+    notifyStreamMode();
 
     populateLevelSelect();
     syncGearDropdownValues();
@@ -2336,27 +3500,26 @@
     updateStatInputsDom();
     renderTableHeader();
     bindUiEvents();
+    bindMapUiEvents();
     recalculateAndRender();
 
-    // Live save file watcher (1.5s content-fingerprinted polling)
+    // Live save sync: Python daemon thread pushes updates, plus focus & backup checks
     if (!payload.selfTestMode) {
       let pollInFlight = false;
-      let syncPulseTimer = null;
-      setInterval(async () => {
+      const pollSaveOnce = async () => {
         if (!state.liveWatch || pollInFlight) return;
         pollInFlight = true;
         try {
           const upd = await window.pywebview.api.poll_save();
-          if (upd && upd.changed && applySavePayload(upd.save, true)) {
-            recalculateAndRender();
-            const pill = $("saveStatusPill");
-            pill.classList.add("synced");
-            if (syncPulseTimer) clearTimeout(syncPulseTimer);
-            syncPulseTimer = setTimeout(() => pill.classList.remove("synced"), 1200);
+          if (upd && upd.changed) {
+            if (upd.kind === "pos") applyIncomingPlayerPosUpdate(upd);
+            else if (upd.save) applyIncomingSaveUpdate(upd.save);
           }
         } catch (_) {}
         pollInFlight = false;
-      }, 1500);
+      };
+      window.addEventListener("focus", pollSaveOnce);
+      setInterval(pollSaveOnce, 4000);
     }
 
     // Expose automated test hooks for --self-test verification
@@ -2472,6 +3635,129 @@
           .catch((err) => {
             window.__ERR_OPT_RESULT = { error: String(err) };
           });
+      },
+      openMapTab() {
+        switchMainView("map");
+        return state.activeView;
+      },
+      openCalcTab() {
+        switchMainView("calc");
+        return state.activeView;
+      },
+      getMapState() {
+        const markers = (mapState.data && mapState.data.markers) || [];
+        const dummyCount = markers.filter((m) => m.name && m.name.toLowerCase().includes("dummy")).length;
+        return {
+          loaded: mapState.loaded,
+          imgLoaded: Boolean(mapState.images[mapState.layer]),
+          iconsLoaded: Object.keys(mapState.iconImgs).length,
+          dummyCount,
+          layer: mapState.layer,
+          counts: mapState.data ? mapState.data.counts : {},
+          totalCount: markers.length,
+          visibleCount: mapState.visibleMarkers.length,
+          iconPx: getMapIconPx(),
+          hasLivePlayer: Boolean(getActiveLivePlayerPos()),
+        };
+      },
+      toggleMapCat(cat, checked) {
+        const cb = document.querySelector(`.map-cat-cb[data-cat='${cat}']`);
+        if (!cb) return null;
+        cb.checked = checked;
+        cb.dispatchEvent(new Event("change"));
+        return mapState.visibleMarkers.length;
+      },
+      searchMap(txt) {
+        const inp = $("mapSearchInput");
+        inp.value = txt;
+        mapState.search = txt;
+        updateMapSearchList();
+        renderMapCanvas();
+        return document.querySelectorAll("#mapSearchList .map-search-item").length;
+      },
+      getMapAccuracyCheck() {
+        const markers = (mapState.data && mapState.data.markers) || [];
+        const pick = (nameLower, cat = null) => {
+          const m = markers.find((x) => x.name && x.name.toLowerCase() === nameLower && (!cat || x.cat === cat))
+            || markers.find((x) => x.name && x.name.toLowerCase().includes(nameLower) && (!cat || x.cat === cat));
+          return m ? { layer: m.layer, cat: m.cat, name: m.name, u: m.u, v: m.v, wx: m.wx, wz: m.wz } : null;
+        };
+        return {
+          layers: mapState.data ? mapState.data.layers : {},
+          besideGreatBridge: pick("beside the great bridge", "grace"),
+          audiencePathway: pick("audience pathway", "grace"),
+          haligtreeRoots: pick("haligtree roots", "grace"),
+          stormveilMainGate: pick("stormveil main gate", "grace"),
+          erdtreeSanctuary: pick("erdtree sanctuary", "grace"),
+          fireGiant: pick("fire giant", "boss"),
+          starscourgeRadahn: pick("starscourge radahn", "boss"),
+        };
+      },
+      testLiveRamHooks() {
+        setMapFollow(true);
+        const followOn = mapState.followPlayer;
+        setMapFollow(false);
+        const followOff = mapState.followPlayer;
+        window.__onLiveRamChar({
+          name: "TestRam",
+          level: 120,
+          stats: { vig: 40, mnd: 20, end: 25, str: 55, dex: 30, int: 10, fai: 10, arc: 9 },
+          equipped: [],
+          armor: [null, null, null, null],
+          talismans: [null, null, null, null],
+        });
+        window.__onLiveRamPos({ area: 60, gridX: 42, gridZ: 36, sub: 0, x: 10.0, y: 0.0, z: 20.0, yaw: 1.5 });
+        const ramActive = state.ramLive;
+        const ramMeta = $("charMetaText").textContent;
+        const ramStr = state.stats.str;
+        const ramHasPos = Boolean(getActiveLivePlayerPos());
+        window.__onLiveRamStatus({ attached: false });
+        return {
+          followOn,
+          followOff,
+          ramActive,
+          ramMeta,
+          ramStr,
+          ramHasPos,
+          restoredRamActive: state.ramLive,
+          restoredMeta: $("charMetaText").textContent,
+        };
+      },
+      testPipModes() {
+        setPipMode("map");
+        const mapBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-map");
+        setPipMode("stats");
+        const statsBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-stats");
+        const statsCells = document.querySelectorAll("#pipStatsGrid .pip-stat-cell").length;
+        setPipMode("off");
+        const offClean = !document.body.classList.contains("pip-active");
+        return { mapBody, statsBody, statsCells, offClean };
+      },
+      startMapImagesTest() {
+        window.__ERR_MAP_IMAGES = null;
+        (async () => {
+          const out = {};
+          for (const l of ["m00", "m01", "m10"]) {
+            const r = await window.pywebview.api.get_map_image(l);
+            out[l] = Boolean(r && r.ok && r.dataUrl && r.dataUrl.length > 10000);
+          }
+          window.__ERR_MAP_IMAGES = out;
+        })().catch((err) => {
+          window.__ERR_MAP_IMAGES = { error: String(err) };
+        });
+      },
+      startMapTilesTest() {
+        window.__ERR_MAP_TILES = null;
+        (async () => {
+          const r0 = await window.pywebview.api.get_map_tile("m00", 3, 5);
+          const r1 = await window.pywebview.api.get_map_tile("m10", 3, 5);
+          window.__ERR_MAP_TILES = {
+            m00: Boolean(r0 && r0.ok && r0.dataUrl && r0.dataUrl.length > 5000),
+            m10: Boolean(r1 && r1.ok && r1.dataUrl && r1.dataUrl.length > 5000),
+          };
+        })().catch((err) => {
+          window.__ERR_MAP_TILES = { error: String(err) };
+        });
       },
     };
 
