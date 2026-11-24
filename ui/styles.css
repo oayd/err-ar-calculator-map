@@ -145,6 +145,11 @@ select {
   border: 1px solid var(--border-subtle);
   padding: 4px 10px;
   border-radius: 999px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.save-pill.synced {
+  border-color: var(--text-green);
+  box-shadow: 0 0 8px rgba(126, 201, 122, 0.35);
 }
 .save-check {
   display: none;

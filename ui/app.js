@@ -2338,17 +2338,25 @@
     bindUiEvents();
     recalculateAndRender();
 
-    // Live save file watcher (2s)
+    // Live save file watcher (1.5s content-fingerprinted polling)
     if (!payload.selfTestMode) {
+      let pollInFlight = false;
+      let syncPulseTimer = null;
       setInterval(async () => {
-        if (!state.liveWatch) return;
+        if (!state.liveWatch || pollInFlight) return;
+        pollInFlight = true;
         try {
           const upd = await window.pywebview.api.poll_save();
           if (upd && upd.changed && applySavePayload(upd.save, true)) {
             recalculateAndRender();
+            const pill = $("saveStatusPill");
+            pill.classList.add("synced");
+            if (syncPulseTimer) clearTimeout(syncPulseTimer);
+            syncPulseTimer = setTimeout(() => pill.classList.remove("synced"), 1200);
           }
         } catch (_) {}
-      }, 2000);
+        pollInFlight = false;
+      }, 1500);
     }
 
     // Expose automated test hooks for --self-test verification

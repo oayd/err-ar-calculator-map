@@ -79,6 +79,22 @@ def build_inlined_html() -> str:
     return html
 
 
+def _save_summary_key(parsed: Dict[str, Any]) -> str:
+    chars = [
+        {
+            "slot": c["slot"],
+            "name": c["name"],
+            "level": c["level"],
+            "stats": c["stats"],
+            "equipped": c.get("equipped", []),
+            "armor": c.get("armor", []),
+            "talismans": c.get("talismans", []),
+        }
+        for c in parsed.get("characters", [])
+    ]
+    return json.dumps({"lastSlot": parsed.get("lastSlot"), "characters": chars}, sort_keys=True)
+
+
 class CalculatorApi:
     def __init__(self, self_test_mode: bool = False):
         self._self_test_mode = self_test_mode
@@ -87,6 +103,9 @@ class CalculatorApi:
         self._known_weapon_ids = set(self._data["_byId"].keys())
         self._save_path: Optional[str] = None
         self._save_mtime: float = 0.0
+        self._save_fingerprint: Optional[str] = None
+        self._save_stat_offsets: Dict[str, int] = {}
+        self._save_summary_key: Optional[str] = None
 
     def _read_save(self, path: Optional[str]) -> Dict[str, Any]:
         if not path or not os.path.exists(path):
@@ -96,6 +115,9 @@ class CalculatorApi:
             if parsed.get("characters"):
                 self._save_path = path
                 self._save_mtime = parsed["mtime"]
+                self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
+                self._save_fingerprint = save_reader.read_save_fingerprint(path, self._save_stat_offsets)
+                self._save_summary_key = _save_summary_key(parsed)
             return parsed
         except Exception as exc:
             return {"characters": [], "error": f"Save read failed: {exc}"}
@@ -148,13 +170,31 @@ class CalculatorApi:
 
     def poll_save(self) -> Dict[str, Any]:
         if not self._save_path or not os.path.exists(self._save_path):
+            cand = save_reader.find_default_save()
+            if cand and os.path.exists(cand):
+                parsed = self._read_save(cand)
+                if parsed.get("characters"):
+                    return {"changed": True, "save": parsed}
             return {"changed": False}
         try:
-            cur_mt = os.path.getmtime(self._save_path)
-            if cur_mt > self._save_mtime + 0.1:
-                parsed = self._read_save(self._save_path)
-                return {"changed": bool(parsed.get("characters")), "save": parsed}
-        except OSError:
+            fp1 = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
+            if fp1 == self._save_fingerprint:
+                return {"changed": False}
+            time.sleep(0.12)
+            fp2 = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
+            if fp2 != fp1:
+                return {"changed": False}
+            parsed = save_reader.read_save_characters(self._save_path, self._known_weapon_ids)
+            if not parsed.get("characters"):
+                return {"changed": False}
+            new_key = _save_summary_key(parsed)
+            self._save_mtime = parsed["mtime"]
+            self._save_stat_offsets = dict(parsed.get("statOffsets") or {})
+            self._save_fingerprint = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
+            if new_key != self._save_summary_key:
+                self._save_summary_key = new_key
+                return {"changed": True, "save": parsed}
+        except Exception:
             pass
         return {"changed": False}
 

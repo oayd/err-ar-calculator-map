@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import os
 import struct
 from typing import Dict, List, Optional, Set, Tuple
@@ -59,6 +60,7 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
     active_flags = list(u10[0x1964 : 0x1964 + 10])
 
     characters = []
+    stat_offsets: Dict[str, int] = {}
     for slot in range(10):
         if not active_flags[slot]:
             continue
@@ -110,6 +112,7 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
         if pos < 0:
             continue
 
+        stat_offsets[str(slot)] = s_off + pos - 0x60
         vig, mnd, end, strength, dex, intel, fai, arc = struct.unpack_from("<8I", sdata, pos - 0x60)
         characters.append(
             {
@@ -142,5 +145,35 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
         "savePath": save_path,
         "mtime": os.path.getmtime(save_path),
         "lastSlot": last_slot,
+        "statOffsets": stat_offsets,
         "characters": characters,
     }
+
+
+def read_save_fingerprint(save_path: str, stat_offsets: Optional[Dict[str, int]] = None) -> str:
+    """Fast read-only SHA-256 fingerprint of save headers, profile summaries, and cached stat blocks."""
+    h = hashlib.sha256()
+    with open(save_path, "rb") as fh:
+        file_size = os.fstat(fh.fileno()).st_size
+        h.update(struct.pack("<Q", file_size))
+        hdr = fh.read(4096)
+        entries = _parse_bnd4_entries(hdr)
+        for off, _ in entries[:11]:
+            if off + 16 <= file_size:
+                fh.seek(off)
+                h.update(fh.read(16))
+        u10_off, u10_sz = entries[10]
+        if u10_off + 0x1348 <= file_size:
+            fh.seek(u10_off + 0x1344)
+            h.update(fh.read(4))
+        prof_end = 0x196E + 10 * 0x24C
+        if u10_sz >= prof_end and u10_off + prof_end <= file_size:
+            fh.seek(u10_off + 0x1964)
+            h.update(fh.read(prof_end - 0x1964))
+        if stat_offsets:
+            for slot_key in sorted(stat_offsets.keys()):
+                abs_off = int(stat_offsets[slot_key])
+                if 0 <= abs_off and abs_off + 64 <= file_size:
+                    fh.seek(abs_off)
+                    h.update(fh.read(64))
+    return h.hexdigest()
