@@ -180,6 +180,7 @@ class CalculatorApi:
         self._pip_opacity: float = 1.0
         self._normal_bounds = None
         self._pip_bounds: Dict[str, Any] = {}
+        self._resize_drag = None
         self._extract_lock = threading.Lock()
         self._extract_state: Dict[str, Any] = {
             "running": False,
@@ -344,9 +345,10 @@ class CalculatorApi:
     def set_pip_mode(self, mode: str, opacity: Optional[float] = None) -> Dict[str, Any]:
         target = mode if mode in ("off", "map", "stats") else "off"
         if opacity is not None:
-            self._pip_opacity = max(0.45, min(1.0, float(opacity)))
+            self._pip_opacity = max(0.15, min(1.0, float(opacity)))
         prev = self._pip_mode
         self._pip_mode = target
+        self._resize_drag = None
         if target == "map":
             self._ui_view = "map"
         if self._self_test_mode or target == prev:
@@ -396,7 +398,7 @@ class CalculatorApi:
         return {"mode": self._pip_mode, "opacity": self._pip_opacity}
 
     def set_pip_opacity(self, opacity: float) -> Dict[str, Any]:
-        self._pip_opacity = max(0.45, min(1.0, float(opacity)))
+        self._pip_opacity = max(0.15, min(1.0, float(opacity)))
         if not self._self_test_mode and self._pip_mode != "off":
             bv = self._get_winforms_form()
             if bv is not None:
@@ -424,8 +426,75 @@ class CalculatorApi:
     def start_window_drag(self) -> bool:
         return self._win32_nc_hit(2)  # HTCAPTION
 
-    def start_window_resize(self) -> bool:
-        return self._win32_nc_hit(17)  # HTBOTTOMRIGHT
+    @staticmethod
+    def _get_cursor_pos():
+        class _POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        pt = _POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+        return int(pt.x), int(pt.y)
+
+    def begin_pip_resize(self, edge: str) -> bool:
+        if self._self_test_mode or self._pip_mode == "off" or edge not in ("n", "s", "e", "w", "ne", "nw", "se", "sw"):
+            return False
+        bv = self._get_winforms_form()
+        if bv is None:
+            return False
+        mx, my = self._get_cursor_pos()
+        bounds = []
+
+        def _read():
+            bounds.append((int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height)))
+
+        if not self._invoke_ui(_read) or not bounds:
+            return False
+        x0, y0, w0, h0 = bounds[0]
+        self._resize_drag = (edge, mx, my, x0, y0, w0, h0)
+        return True
+
+    def step_pip_resize(self) -> bool:
+        if not self._resize_drag or self._self_test_mode or self._pip_mode == "off":
+            return False
+        bv = self._get_winforms_form()
+        if bv is None:
+            return False
+        edge, mx0, my0, x0, y0, w0, h0 = self._resize_drag
+        mx, my = self._get_cursor_pos()
+        dx = mx - mx0
+        dy = my - my0
+        nx, ny, nw, nh = x0, y0, w0, h0
+        min_w, min_h = 220, 180
+        if "e" in edge:
+            nw = max(min_w, w0 + dx)
+        if "w" in edge:
+            nw = max(min_w, w0 - dx)
+            nx = x0 + (w0 - nw)
+        if "s" in edge:
+            nh = max(min_h, h0 + dy)
+        if "n" in edge:
+            nh = max(min_h, h0 - dy)
+            ny = y0 + (h0 - nh)
+
+        def _apply_bounds():
+            bv.SetBounds(int(nx), int(ny), int(nw), int(nh))
+
+        return self._invoke_ui(_apply_bounds)
+
+    def end_pip_resize(self) -> bool:
+        if not self._resize_drag:
+            return False
+        self._resize_drag = None
+        if self._self_test_mode or self._pip_mode == "off":
+            return False
+        bv = self._get_winforms_form()
+        if bv is None:
+            return False
+
+        def _save():
+            self._pip_bounds[self._pip_mode] = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
+
+        return self._invoke_ui(_save)
 
     def get_map_extract_status(self) -> Dict[str, Any]:
         with self._extract_lock:
@@ -1003,7 +1072,10 @@ def run_self_test(report_path: Optional[str]):
             assert w.evaluate_js("document.getElementById('mapCenterPlayerBtn') === null"), "Redundant mapCenterPlayerBtn should be removed"
             assert w.evaluate_js("document.getElementById('mapStagePlayerBtn') !== null"), "mapStagePlayerBtn should remain"
             assert w.evaluate_js("document.getElementById('topPipBtn') !== null && document.getElementById('mapPipBtn') !== null"), "PiP toggle buttons should exist"
-            assert w.evaluate_js("document.getElementById('pipResizeGrip') !== null"), "pipResizeGrip should exist"
+            assert w.evaluate_js("document.getElementById('pipResizeGrip') !== null && document.querySelectorAll('.pip-resize-edge').length === 8"), "All 8 PiP resize handles should exist"
+            assert w.evaluate_js("document.getElementById('pipFollowBtn').textContent.trim() === 'Follow'"), "pipFollowBtn should say Follow"
+            assert w.evaluate_js("document.getElementById('pipOpacityBtn').textContent.includes('Opacity')"), "pipOpacityBtn should include Opacity label"
+            assert w.evaluate_js("document.getElementById('pipOpacityPopover') !== null && document.getElementById('pipOpacityRange') !== null && document.getElementById('pipOpacityNum') !== null"), "PiP opacity popover inputs should exist"
             assert w.evaluate_js("document.getElementById('mapExtractBtn') !== null && document.getElementById('mapExtractBanner') !== null"), "Map extractor UI should exist"
             ex_st = api.get_map_extract_status()
             assert "hasMaps" in ex_st and "hasIcons" in ex_st and "detectedGameDir" in ex_st, f"Bad extract status: {ex_st}"
@@ -1033,7 +1105,7 @@ def run_self_test(report_path: Optional[str]):
             assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
             assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
             pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
-            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"], f"PiP modes failed: {pip_res}"
+            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"], f"PiP modes failed: {pip_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")

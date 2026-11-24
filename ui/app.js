@@ -1934,6 +1934,7 @@
       enemyPreset: state.enemyPreset,
       liveWatch: state.liveWatch,
       bannerDismissed: state.bannerDismissed,
+      pipOpacity: state.pipOpacity,
     });
   }
 
@@ -2306,7 +2307,10 @@
         $("searchInput").focus();
         $("searchInput").select();
       } else if (e.key === "Escape") {
-        if (state.pipMode !== "off") {
+        const opPop = $("pipOpacityPopover");
+        if (opPop && !opPop.classList.contains("hidden")) {
+          setPipOpacityPopover(false);
+        } else if (state.pipMode !== "off") {
           setPipMode("off");
         } else if (document.activeElement === $("searchInput") && state.search) {
           $("searchInput").value = "";
@@ -2894,6 +2898,25 @@
     drawMarkerShape(ctx, meta.shape, x, y, iconPx * 0.34, meta.color, isSelected);
   }
 
+  function computePipProximityScale(baseIconPx, distPx) {
+    if (!Number.isFinite(distPx) || distPx >= 110) {
+      return { iconPx: baseIconPx, near: false };
+    }
+    const t = Math.max(0, Math.min(1, (distPx - 14) / (110 - 14)));
+    const ease = t * t * (3 - 2 * t);
+    const minPx = Math.min(baseIconPx, 14);
+    return {
+      iconPx: minPx + (baseIconPx - minPx) * ease,
+      near: distPx < 85,
+    };
+  }
+
+  function computePipPlayerScale(nearestDistPx) {
+    if (!Number.isFinite(nearestDistPx) || nearestDistPx >= 55) return 1.0;
+    const t = Math.max(0, Math.min(1, (nearestDistPx - 8) / (55 - 8)));
+    return 0.55 + 0.45 * t;
+  }
+
   function getMapIconPx() {
     const z = Math.max(0.7, mapState.zoom);
     const baseIconPx = Math.max(21.25, Math.min(32.5, (17 + Math.log2(Math.max(1, z)) * 2.2) * 1.25));
@@ -2969,6 +2992,37 @@
     const isSearching = mapState.search.trim().length > 0;
     const iconPx = getMapIconPx();
     const cullPad = Math.ceil(iconPx * 0.75 + 8);
+    const lp = mapState.showPlayer ? getActiveLivePlayerPos() : null;
+    const hasPlayerOnLayer = Boolean(lp && lp.layer === mapState.layer);
+    const playerX = hasPlayerOnLayer ? ox + lp.u * scale : 0;
+    const playerY = hasPlayerOnLayer ? oy + lp.v * scale : 0;
+    const pipSearchProx = state.pipMode === "map" && isSearching && hasPlayerOnLayer;
+    let nearestSearchDist = Infinity;
+
+    const drawPinWithProx = (m, sx, sy, basePinPx, isSel, isHov) => {
+      let pinPx = basePinPx;
+      let near = false;
+      if (pipSearchProx) {
+        const dist = Math.hypot(sx - playerX, sy - playerY);
+        if (dist < nearestSearchDist) nearestSearchDist = dist;
+        const prox = computePipProximityScale(basePinPx, dist);
+        pinPx = prox.iconPx;
+        near = prox.near;
+      }
+      drawMarkerPin(ctx, m, sx, sy, pinPx, isSel, isHov);
+      if (near) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffe48a";
+        ctx.fill();
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = "#0e0c0a";
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
     const drawOrder = ["poi", "armor", "talisman", "weapon", "merchant", "boss", "grace"];
     const byCat = new Map(drawOrder.map((c) => [c, []]));
     for (const m of vis) {
@@ -2982,7 +3036,7 @@
         const sx = ox + m.u * scale;
         const sy = oy + m.v * scale;
         if (sx < -cullPad || sx > w + cullPad || sy < -cullPad || sy > h + cullPad) continue;
-        drawMarkerPin(ctx, m, sx, sy, iconPx, false, false);
+        drawPinWithProx(m, sx, sy, iconPx, false, false);
       }
     }
 
@@ -3013,42 +3067,40 @@
       if (!special || special.layer !== mapState.layer) continue;
       const sx = ox + special.u * scale;
       const sy = oy + special.v * scale;
-      drawMarkerPin(ctx, special, sx, sy, iconPx + (isSearching ? 6 : 4), special === mapState.selectedPin, special === mapState.hoveredPin);
+      drawPinWithProx(special, sx, sy, iconPx + (isSearching ? 6 : 4), special === mapState.selectedPin, special === mapState.hoveredPin);
     }
 
     // Live Player marker (official player cursor sprite + heading cone)
-    const lp = mapState.showPlayer ? getActiveLivePlayerPos() : null;
-    if (lp && lp.layer === mapState.layer) {
-      const px = ox + lp.u * scale;
-      const py = oy + lp.v * scale;
+    if (hasPlayerOnLayer) {
+      const pScale = pipSearchProx ? computePipPlayerScale(nearestSearchDist) : 1.0;
       ctx.save();
-      ctx.translate(px, py);
+      ctx.translate(playerX, playerY);
       ctx.beginPath();
-      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.arc(0, 0, 16 * pScale, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(77, 240, 136, 0.22)";
       ctx.fill();
       ctx.strokeStyle = "#4df088";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = Math.max(1.2, 2 * pScale);
       ctx.stroke();
 
       ctx.rotate(lp.yaw + Math.PI);
       const pSprite = mapState.iconImgs.player_arrow || mapState.iconImgs.player;
       if (pSprite && pSprite.naturalWidth > 0) {
         const pr = pSprite.naturalWidth / Math.max(1, pSprite.naturalHeight);
-        const ph = 28;
-        const pw = Math.max(10, ph * pr);
+        const ph = 28 * pScale;
+        const pw = Math.max(6, ph * pr);
         ctx.drawImage(pSprite, -pw * 0.5, -ph * 0.5, pw, ph);
       } else {
         ctx.beginPath();
-        ctx.moveTo(0, -10);
-        ctx.lineTo(7, 8);
-        ctx.lineTo(0, 4);
-        ctx.lineTo(-7, 8);
+        ctx.moveTo(0, -10 * pScale);
+        ctx.lineTo(7 * pScale, 8 * pScale);
+        ctx.lineTo(0, 4 * pScale);
+        ctx.lineTo(-7 * pScale, 8 * pScale);
         ctx.closePath();
         ctx.fillStyle = "#4df088";
         ctx.fill();
         ctx.strokeStyle = "#0b120e";
-        ctx.lineWidth = 1.6;
+        ctx.lineWidth = Math.max(1.0, 1.6 * pScale);
         ctx.stroke();
       }
       ctx.restore();
@@ -3248,13 +3300,41 @@
     $("pipGearLine").textContent = parts.join(" · ") || "Equip armor/talismans or buffs in Gear & Buffs";
   }
 
+  function setPipOpacityPopover(open) {
+    const pop = $("pipOpacityPopover");
+    if (!pop) return;
+    const next = Boolean(open);
+    pop.classList.toggle("hidden", !next);
+    document.body.classList.toggle("pip-popover-open", next);
+  }
+
+  function applyPipOpacity(pct, persist = true) {
+    const num = Math.round(Number(pct));
+    const clamped = Number.isFinite(num) ? Math.max(15, Math.min(100, num)) : 100;
+    state.pipOpacity = clamped / 100;
+    const btn = $("pipOpacityBtn");
+    if (btn) btn.textContent = `Opacity ${clamped}%`;
+    const rng = $("pipOpacityRange");
+    if (rng) rng.value = String(clamped);
+    const numInp = $("pipOpacityNum");
+    if (numInp) numInp.value = String(clamped);
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_opacity) {
+      window.pywebview.api.set_pip_opacity(state.pipOpacity);
+    }
+    if (persist) persistSettings();
+    return clamped;
+  }
+
   async function setPipMode(mode) {
     const next = (mode === "map" || mode === "stats") ? mode : "off";
     state.pipMode = next;
     document.body.classList.toggle("pip-active", next !== "off");
     document.body.classList.toggle("pip-map", next === "map");
     document.body.classList.toggle("pip-stats", next === "stats");
-    if (next === "off") document.body.classList.remove("pip-hover");
+    if (next === "off") {
+      document.body.classList.remove("pip-hover");
+      setPipOpacityPopover(false);
+    }
     $("pipModeMapBtn").classList.toggle("active", next === "map");
     $("pipModeStatsBtn").classList.toggle("active", next === "stats");
     if (next === "stats") renderPipStats();
@@ -3422,11 +3502,49 @@
       recalculateAndRender();
     });
     $("pipOpacityBtn").addEventListener("click", () => {
-      const nextOp = state.pipOpacity > 0.9 ? 0.85 : (state.pipOpacity > 0.75 ? 0.70 : 1.0);
-      state.pipOpacity = nextOp;
-      $("pipOpacityBtn").textContent = `${Math.round(nextOp * 100)}%`;
-      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_opacity) {
-        window.pywebview.api.set_pip_opacity(nextOp);
+      setPipOpacityPopover(false);
+      const curPct = Math.round(state.pipOpacity * 100);
+      const presets = [100, 85, 70, 50];
+      let nextPct = 100;
+      for (const p of presets) {
+        if (p < curPct - 1) {
+          nextPct = p;
+          break;
+        }
+      }
+      applyPipOpacity(nextPct, true);
+    });
+    $("pipOpacityBtn").addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pop = $("pipOpacityPopover");
+      const openNow = pop.classList.contains("hidden");
+      setPipOpacityPopover(openNow);
+      if (openNow) {
+        const curPct = Math.max(15, Math.min(100, Math.round(state.pipOpacity * 100)));
+        $("pipOpacityRange").value = String(curPct);
+        $("pipOpacityNum").value = String(curPct);
+        $("pipOpacityNum").focus();
+        $("pipOpacityNum").select();
+      }
+    });
+    $("pipOpacityRange").addEventListener("input", (e) => {
+      applyPipOpacity(e.target.value, true);
+    });
+    $("pipOpacityNum").addEventListener("input", (e) => {
+      const v = parseInt(e.target.value, 10);
+      if (!Number.isNaN(v) && v >= 15 && v <= 100) {
+        applyPipOpacity(v, false);
+      }
+    });
+    $("pipOpacityNum").addEventListener("change", (e) => {
+      applyPipOpacity(e.target.value, true);
+    });
+    $("pipOpacityPopover").addEventListener("mousedown", (e) => e.stopPropagation());
+    document.addEventListener("mousedown", (e) => {
+      const pop = $("pipOpacityPopover");
+      if (pop && !pop.classList.contains("hidden") && !e.target.closest("#pipOpacityPopover, #pipOpacityBtn")) {
+        setPipOpacityPopover(false);
       }
     });
 
@@ -3447,13 +3565,44 @@
         window.pywebview.api.start_window_drag();
       }
     });
-    $("pipResizeGrip").addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || state.pipMode === "off") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (window.pywebview && window.pywebview.api && window.pywebview.api.start_window_resize) {
-        window.pywebview.api.start_window_resize();
-      }
+    let activeResizeEdge = null;
+    let resizeRafPending = false;
+    document.querySelectorAll(".pip-resize-edge").forEach((el) => {
+      el.addEventListener("pointerdown", async (e) => {
+        if (e.button !== 0 || state.pipMode === "off") return;
+        e.preventDefault();
+        e.stopPropagation();
+        activeResizeEdge = el.dataset.edge || "se";
+        try {
+          el.setPointerCapture(e.pointerId);
+        } catch (_) {}
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.begin_pip_resize) {
+          await window.pywebview.api.begin_pip_resize(activeResizeEdge);
+        }
+      });
+      el.addEventListener("pointermove", () => {
+        if (!activeResizeEdge || resizeRafPending) return;
+        resizeRafPending = true;
+        requestAnimationFrame(async () => {
+          resizeRafPending = false;
+          if (activeResizeEdge && window.pywebview && window.pywebview.api && window.pywebview.api.step_pip_resize) {
+            await window.pywebview.api.step_pip_resize();
+          }
+        });
+      });
+      const finishResize = (e) => {
+        if (!activeResizeEdge) return;
+        activeResizeEdge = null;
+        resizeRafPending = false;
+        try {
+          el.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.end_pip_resize) {
+          window.pywebview.api.end_pip_resize();
+        }
+      };
+      el.addEventListener("pointerup", finishResize);
+      el.addEventListener("pointercancel", finishResize);
     });
 
     $("mapExtractBtn").addEventListener("click", () => triggerMapExtraction(false));
@@ -3591,6 +3740,9 @@
     if (typeof cfg.liveWatch === "boolean") state.liveWatch = cfg.liveWatch;
     if (cfg.enemyPreset && cfg.enemyPreset in state.enemyPresets) state.enemyPreset = cfg.enemyPreset;
     if (cfg.bannerDismissed) state.bannerDismissed = true;
+    if (typeof cfg.pipOpacity === "number" && Number.isFinite(cfg.pipOpacity)) {
+      applyPipOpacity(Math.round(cfg.pipOpacity * 100), false);
+    }
 
     $("twoHandCb").checked = state.twoHand;
     $("groupByTypeCb").checked = state.groupByType;
@@ -3843,13 +3995,27 @@
         setPipMode("map");
         const mapBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-map");
         document.body.classList.add("pip-hover");
+        const prevOp = Math.round(state.pipOpacity * 100);
+        const opacityClampedLow = applyPipOpacity(5, false);
+        applyPipOpacity(prevOp, false);
         setPipMode("stats");
         const statsBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-stats");
         const statsCells = document.querySelectorAll("#pipStatsGrid .pip-stat-cell").length;
         setPipMode("off");
         const offClean = !document.body.classList.contains("pip-active");
         const hoverClean = !document.body.classList.contains("pip-hover");
-        return { mapBody, statsBody, statsCells, offClean, hoverClean };
+        const proxFar = computePipProximityScale(52, 120);
+        const proxMid = computePipProximityScale(52, 50);
+        const proxZero = computePipProximityScale(52, 0);
+        const pFar = computePipPlayerScale(60);
+        const pZero = computePipPlayerScale(0);
+        const proxShrinkOk = (
+          proxFar.iconPx === 52 && !proxFar.near &&
+          proxMid.iconPx < 40 && proxMid.near &&
+          proxZero.iconPx === 14 &&
+          pFar === 1.0 && pZero < 0.6
+        );
+        return { mapBody, statsBody, statsCells, offClean, hoverClean, opacityClampedLow, proxShrinkOk };
       },
       startMapImagesTest() {
         window.__ERR_MAP_IMAGES = null;

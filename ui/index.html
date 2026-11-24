@@ -517,15 +517,27 @@
   <!-- Picture-in-Picture / Mini Overlay Controls & Compact Stats HUD -->
   <div id="pipBar" class="pip-bar">
     <div class="pip-group">
-      <span class="pip-drag-grip" title="Drag to move overlay">&#8942;&#8942;</span>
-      <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch Overlay to Live Minimap">Map</button>
-      <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch Overlay to Compact Stats &amp; Equipped AR">Stats</button>
+      <span class="pip-drag-grip" title="Drag bar to move overlay">&#8942;&#8942;</span>
+      <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch overlay to Live Minimap">Map</button>
+      <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
     </div>
     <div class="pip-group">
-      <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player at 30 Hz">30Hz</button>
-      <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed AR">2H</button>
-      <button id="pipOpacityBtn" class="pip-pill" type="button" title="Cycle Overlay Opacity (100% / 85% / 70%)">100%</button>
-      <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to Full Window (Esc)">Expand</button>
+      <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player position at 30 Hz">Follow</button>
+      <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
+      <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)">Opacity 100%</button>
+      <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to full window (Esc)">Expand</button>
+    </div>
+  </div>
+
+  <div id="pipOpacityPopover" class="pip-opacity-popover hidden" role="dialog" aria-label="Overlay Opacity">
+    <div class="pip-op-hdr">
+      <span>Overlay Opacity</span>
+      <span class="pip-op-hint">15% – 100%</span>
+    </div>
+    <div class="pip-op-row">
+      <input id="pipOpacityRange" type="range" min="15" max="100" step="1" value="100" />
+      <input id="pipOpacityNum" type="number" min="15" max="100" step="1" value="100" />
+      <span class="pip-op-pct">%</span>
     </div>
   </div>
 
@@ -542,7 +554,14 @@
     <div id="pipWeaponsList" class="pip-weapons-list"></div>
     <div id="pipGearLine" class="pip-gear-line"></div>
   </div>
-  <div id="pipResizeGrip" class="pip-resize-grip" title="Drag corner to resize"></div>
+  <div class="pip-resize-edge pip-edge-n" data-edge="n" title="Drag edge to resize"></div>
+  <div class="pip-resize-edge pip-edge-s" data-edge="s" title="Drag edge to resize"></div>
+  <div class="pip-resize-edge pip-edge-e" data-edge="e" title="Drag edge to resize"></div>
+  <div class="pip-resize-edge pip-edge-w" data-edge="w" title="Drag edge to resize"></div>
+  <div class="pip-resize-edge pip-edge-nw" data-edge="nw" title="Drag corner to resize"></div>
+  <div class="pip-resize-edge pip-edge-ne" data-edge="ne" title="Drag corner to resize"></div>
+  <div class="pip-resize-edge pip-edge-sw" data-edge="sw" title="Drag corner to resize"></div>
+  <div id="pipResizeGrip" class="pip-resize-edge pip-edge-se pip-resize-grip" data-edge="se" title="Drag corner to resize"></div>
 
   <!-- INJECT_JS -->
 </body>
