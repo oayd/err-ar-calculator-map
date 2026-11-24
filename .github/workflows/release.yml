@@ -84,4 +84,8 @@ jobs:
           files: |
             release_assets/ERR_AR_Calculator.exe
             release_assets/SHA256SUMS.txt
+          body: |
+            Standalone Windows executable for **ELDEN RING Reforged (ERR v2.3.9.1)**.
+
+            Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator#privacy-policy).
           generate_release_notes: true
