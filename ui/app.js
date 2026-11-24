@@ -2454,6 +2454,12 @@
     if (ch) {
       applyCharacter(ch);
       recalculateAndRender();
+    } else {
+      $("charMetaText").textContent = "Manual stats";
+      $("saveAcceptedIcon").classList.remove("active");
+      $("infoBannerText").innerHTML =
+        `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong>`;
+      recalculateAndRender();
     }
     updateMapPlayerReadout();
     if (state.activeView === "map") renderMapCanvas();

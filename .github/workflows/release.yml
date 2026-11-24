@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,7 +44,14 @@ jobs:
         shell: powershell
         run: |
           $rep = Join-Path $env:TEMP 'ci_selftest_report.txt'
-          $p = Start-Process -FilePath 'dist\ERR_AR_Calculator.exe' -ArgumentList '--self-test', $rep -PassThru -Wait
+          if (Test-Path $rep) { Remove-Item -Force $rep }
+          $p = Start-Process -FilePath 'dist\ERR_AR_Calculator.exe' -ArgumentList '--self-test', $rep -PassThru
+          if (-not $p.WaitForExit(120000)) {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            if (Test-Path $rep) { Get-Content $rep }
+            Write-Error 'Self-test timed out after 120 seconds'
+            exit 1
+          }
           if (Test-Path $rep) { Get-Content $rep }
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 

@@ -955,7 +955,13 @@ def run_self_test(report_path: Optional[str]):
 
     webview.start(runner, win, gui="edgechromium", private_mode=True)
     if not test_result["ok"]:
-        raise RuntimeError(f"Self-test failed: {test_result['error']}")
+        err_msg = f"SELF_TEST_FAILED: {test_result['error']}\n"
+        if report_path:
+            with open(report_path, "w", encoding="utf-8") as fh:
+                fh.write(err_msg)
+        else:
+            sys.stderr.write(err_msg)
+        sys.exit(1)
 
     report = "\n".join(test_result["lines"]) + "\n"
     if report_path:
