@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Elden Ring Weapon Calculator — ERR v2.3.9.1</title>
+  <!-- INJECT_CSS -->
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="drawerToggleBtn" class="icon-btn" title="Toggle filter sidebar (sidebar)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
+        </svg>
+      </button>
+      <span class="app-title">Elden Ring Weapon Calculator</span>
+      <span class="mod-tag">ERR v2.3.9.1</span>
+    </div>
+
+    <div class="topbar-right">
+      <div class="save-pill" id="saveStatusPill" title="Loaded save status">
+        <span id="saveAcceptedIcon" class="save-check" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </span>
+        <span id="charMetaText">Manual stats</span>
+      </div>
+      <button id="topReloadBtn" class="top-btn" title="Reload latest character from ER0000.err (F5)">Reload Save</button>
+      <button id="topMatchEqBtn" class="top-btn" title="Match Weapon Level to equipped weapon upgrades">Match +Lv</button>
+      <button id="topGearBtn" class="top-btn" title="Configure Equipped Armor, Talismans, Greases &amp; Buffs">Gear &amp; Buffs</button>
+      <button id="topCompareBtn" class="top-btn gold-outline" title="Open Compare Tray">Compare (0)</button>
+      <button id="topRefreshModBtn" class="top-btn" title="Re-extract regulation.bin data if extract_err_data.py is present">Refresh Mod</button>
+      <button id="topSearchFocusBtn" class="icon-btn" title="Search weapons (Ctrl+F)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside id="sidebar" class="sidebar">
+      <div class="m-field">
+        <label for="charSelect">Character (Save Slot)</label>
+        <select id="charSelect">
+          <option value="">No save loaded</option>
+        </select>
+      </div>
+      <div class="save-subrow">
+        <div style="display:flex;gap:4px;">
+          <button id="sideReloadBtn" class="mini-link-btn">Reload</button>
+          <button id="sideBrowseBtn" class="mini-link-btn">Browse...</button>
+        </div>
+        <label class="cb-row" style="font-size:11.5px;color:#9e9384;">
+          <input type="checkbox" id="liveWatchCb" checked />
+          <span>Live 2s</span>
+        </label>
+      </div>
+
+      <div class="sidebar-checks">
+        <label class="cb-row" title="Hide weapons whose attribute requirements are not met">
+          <input type="checkbox" id="effectiveOnlyCb" />
+          <span>Effective only</span>
+        </label>
+        <label class="cb-row" title="Show only the highest-AR affinity per weapon instead of all checked affinities">
+          <input type="checkbox" id="bestAffinityOnlyCb" />
+          <span>Best affinity only</span>
+        </label>
+        <label class="cb-row" title="Filter to weapons that can receive greases or weapon buff spells">
+          <input type="checkbox" id="buffableOnlyCb" />
+          <span>Buffable only (Grease)</span>
+        </label>
+        <label class="cb-row" title="Show only weapons currently equipped by the loaded character">
+          <input type="checkbox" id="equippedOnlyCb" />
+          <span>Equipped only</span>
+        </label>
+      </div>
+
+      <div class="m-field search-wrap">
+        <label for="searchInput">Weapons</label>
+        <input id="searchInput" type="text" placeholder="Filter by name, skill, bleed..." />
+        <button id="searchClearBtn" class="clear-x" title="Clear search (Esc)">&times;</button>
+      </div>
+
+      <div class="section-hdr">
+        <span>Affinity</span>
+        <div class="hdr-links">
+          <button id="affAllBtn" class="link-act">All</button>
+          <button id="affNoneBtn" class="link-act">None</button>
+          <button id="affPhysBtn" class="link-act">Phys</button>
+        </div>
+      </div>
+      <div id="affinityGrid" class="aff-grid"></div>
+
+      <div class="section-hdr">
+        <span>Weapon Type</span>
+        <div class="hdr-links">
+          <button id="typeAllBtn" class="link-act">All</button>
+          <button id="typeNoneBtn" class="link-act">None</button>
+        </div>
+      </div>
+      <div id="weaponTypeTree" class="type-tree"></div>
+    </aside>
+
+    <main class="main-area">
+      <section class="controls-strip">
+        <div class="controls-left">
+          <div class="stats-grid">
+            <div class="stats-row">
+              <div class="m-field stat-box">
+                <label id="lblStr" for="strInput">Strength</label>
+                <input id="strInput" type="number" min="1" max="199" value="20" />
+              </div>
+              <div class="m-field stat-box">
+                <label id="lblDex" for="dexInput">Dexterity</label>
+                <input id="dexInput" type="number" min="1" max="199" value="20" />
+              </div>
+              <div class="m-field stat-box">
+                <label id="lblInt" for="intInput">Intelligence</label>
+                <input id="intInput" type="number" min="1" max="199" value="10" />
+              </div>
+              <div class="m-field lvl-box">
+                <label for="levelSelect">Weapon Level</label>
+                <select id="levelSelect"></select>
+              </div>
+            </div>
+
+            <div class="stats-row">
+              <div class="m-field stat-box">
+                <label id="lblFai" for="faiInput">Faith</label>
+                <input id="faiInput" type="number" min="1" max="199" value="10" />
+              </div>
+              <div class="m-field stat-box">
+                <label id="lblArc" for="arcInput">Arcane</label>
+                <input id="arcInput" type="number" min="1" max="199" value="10" />
+              </div>
+              <div class="m-field enemy-box">
+                <label for="enemySelect">Enemy Defense</label>
+                <select id="enemySelect"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="toggles-col">
+            <div class="toggles-grid">
+              <label class="cb-row">
+                <input type="checkbox" id="twoHandCb" checked />
+                <span>Two handing <span id="str2hHint" class="str-2h-hint"></span></span>
+              </label>
+              <label class="cb-row">
+                <input type="checkbox" id="groupByTypeCb" />
+                <span>Group by type</span>
+              </label>
+              <label class="cb-row">
+                <input type="checkbox" id="numericScalingCb" />
+                <span>Numeric scaling</span>
+              </label>
+              <label class="cb-row">
+                <input type="checkbox" id="showDamageSplitCb" />
+                <span>Show damage split</span>
+              </label>
+            </div>
+            <div class="extra-cols-anchor">
+              <button id="extraColsBtn" class="mini-link-btn" type="button">Extra Columns (0) &#9662;</button>
+              <div id="extraColsMenu" class="popover-menu hidden">
+                <label class="cb-row"><input type="checkbox" id="colCritCb" /><span>Crit Multiplier</span></label>
+                <label class="cb-row"><input type="checkbox" id="colDTypeCb" /><span>Damage Type</span></label>
+                <label class="cb-row"><input type="checkbox" id="colBuffCb" /><span>Buffable (Grease)</span></label>
+                <label class="cb-row"><input type="checkbox" id="colStamCb" /><span>Stamina Cost (R1)</span></label>
+                <label class="cb-row"><input type="checkbox" id="colStanceCb" /><span>Stance / Poise Dmg</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls-right">
+          <span id="rowCountLabel" class="meta-count">0 weapons</span>
+          <div class="quick-pills">
+            <button id="maxUpgradeBtn" class="mini-link-btn" title="Set weapon level to +25 / +10">Max +25/+10</button>
+            <button id="revertStatsBtn" class="mini-link-btn" title="Revert attributes back to loaded save">Revert Stats</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="gearPanel" class="gear-panel hidden">
+        <div class="gear-card">
+          <div class="gear-card-hdr">
+            <span>Equipped Armor</span>
+            <button id="gearResetBtn" class="link-act" type="button">Reset to Save</button>
+          </div>
+          <div class="gear-slots-grid">
+            <label class="gear-slot"><span>Head</span><select id="armorHeadSel"></select></label>
+            <label class="gear-slot"><span>Chest</span><select id="armorChestSel"></select></label>
+            <label class="gear-slot"><span>Arms</span><select id="armorArmsSel"></select></label>
+            <label class="gear-slot"><span>Legs</span><select id="armorLegsSel"></select></label>
+          </div>
+        </div>
+
+        <div class="gear-card">
+          <div class="gear-card-hdr">
+            <span>Equipped Talismans</span>
+            <label class="cb-row" style="font-size:11px;color:#d4ab53;" title="Apply conditional bonuses such as Ritual Sword and Red-Feathered Branchsword">
+              <input type="checkbox" id="condTalismansCb" />
+              <span>Conditional Active</span>
+            </label>
+          </div>
+          <div class="gear-slots-grid">
+            <label class="gear-slot"><span>Slot 1</span><select id="tal0Sel"></select></label>
+            <label class="gear-slot"><span>Slot 2</span><select id="tal1Sel"></select></label>
+            <label class="gear-slot"><span>Slot 3</span><select id="tal2Sel"></select></label>
+            <label class="gear-slot"><span>Slot 4</span><select id="tal3Sel"></select></label>
+          </div>
+        </div>
+
+        <div class="gear-card gear-buffs-card">
+          <div class="gear-card-hdr">
+            <span>Weapon Grease &amp; Active Buffs</span>
+            <button id="gearClearBuffsBtn" class="link-act" type="button">Clear All Buffs</button>
+          </div>
+          <div class="grease-row">
+            <label class="gear-slot" style="flex:1;">
+              <span>Grease (Buffable Only)</span>
+              <select id="greaseSel"></select>
+            </label>
+          </div>
+          <div id="buffPillsRow" class="buff-pills">
+            <button type="button" class="buff-pill" data-buff="goldenVow" title="x1.15 all damage">Golden Vow (x1.15)</button>
+            <button type="button" class="buff-pill" data-buff="fgms" title="x1.20 Physical &amp; Fire">FGMS (x1.20 P/F)</button>
+            <button type="button" class="buff-pill" data-buff="howl" title="x1.25 all damage">Howl of Shabriri (x1.25)</button>
+            <button type="button" class="buff-pill" data-buff="exultBleed" title="x1.20 all damage">Lord of Blood (x1.20)</button>
+            <button type="button" class="buff-pill" data-buff="exultPoison" title="x1.20 all damage">Kindred of Rot (x1.20)</button>
+            <button type="button" class="buff-pill" data-buff="twoHandTal" title="x1.15 all damage when Two handing is checked">2H Sword (x1.15)</button>
+          </div>
+          <div id="gearBonusSummary" class="gear-summary">No active gear stat or damage modifiers</div>
+        </div>
+      </section>
+
+      <div id="infoBanner" class="info-banner">
+        <span id="infoBannerText">
+          Using regulation data from your custom <strong>ELDEN RING Reforged mod v2.3.9.1</strong>
+        </span>
+        <button id="bannerCloseBtn" class="banner-close" title="Dismiss banner">&times;</button>
+      </div>
+
+      <div id="tableScroll" class="table-shell">
+        <table id="weaponTable" class="weapon-table">
+          <colgroup id="tableColgroup"></colgroup>
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty-state" style="display:none;">
+          No weapons match the active filters.
+        </div>
+      </div>
+
+      <section id="inspectorDrawer" class="drawer hidden">
+        <div class="drawer-header">
+          <div class="drawer-title-wrap">
+            <span id="drawerTitle" class="drawer-title">Select a weapon</span>
+            <span id="badgeDType" class="badge">Dmg: -</span>
+            <span id="badgeSkill" class="badge gold">Skill: -</span>
+            <span id="badgeBuff" class="badge">Grease</span>
+            <span id="badgeInfuse" class="badge">Unique</span>
+            <span id="badgeMisc" class="badge">Crit 100</span>
+          </div>
+
+          <div class="drawer-tabs">
+            <button class="tab-btn active" data-tab="details">Details &amp; All Affinities</button>
+            <button class="tab-btn" data-tab="optimizer">Respec Optimizer</button>
+            <button id="curveTabBtn" class="tab-btn" data-tab="curve">Scaling Curve</button>
+            <button id="compareTabBtn" class="tab-btn" data-tab="compare">Compare Tray (0/6)</button>
+          </div>
+
+          <div class="drawer-actions">
+            <button id="pinCompareBtn" class="mini-link-btn" title="Pin selected weapon to Compare Tray (P)">+ Pin</button>
+            <button id="copySummaryBtn" class="mini-link-btn">Copy</button>
+            <button id="drawerCloseBtn" class="banner-close" title="Close inspector (Esc)">&times;</button>
+          </div>
+        </div>
+
+        <div class="drawer-body">
+          <!-- Tab 1: Details & All Affinities -->
+          <div id="pane-details" class="tab-pane active">
+            <div class="detail-left">
+              <div id="arSplitBar" class="ar-bar"></div>
+              <div id="breakdownGrid" class="breakdown-grid"></div>
+              <div id="elemLines" class="elem-lines"></div>
+              <div style="font-size:11px;color:#d4ab53;font-weight:600;">Next +5 Attribute Gains</div>
+              <div id="nextGainsRow" class="gains-row"></div>
+            </div>
+            <div class="detail-right">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span id="affPanelTitle" style="font-size:12px;color:#dfb869;font-weight:600;">All Affinities</span>
+                <span style="font-size:11px;color:#9e9384;">Click to preview · Double-click to pin</span>
+              </div>
+              <div class="subtable-wrap">
+                <table class="subtable">
+                  <thead>
+                    <tr>
+                      <th class="left">Affinity</th>
+                      <th>AR</th>
+                      <th>Eff</th>
+                      <th>Phys</th>
+                      <th>Mag</th>
+                      <th>Fire</th>
+                      <th>Ltng</th>
+                      <th>Holy</th>
+                      <th>Spell</th>
+                      <th class="center">Buff</th>
+                      <th class="center">Scaling</th>
+                    </tr>
+                  </thead>
+                  <tbody id="affPanelBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Respec Optimizer -->
+          <div id="pane-optimizer" class="tab-pane col-pane">
+            <div class="opt-bar">
+              <label style="font-size:12px;color:#9e9384;">Budget:
+                <select id="optBudgetSelect">
+                  <option value="respec:0">Respec Current (+0)</option>
+                  <option value="keep:10">Level Up +10</option>
+                  <option value="keep:20">Level Up +20</option>
+                  <option value="keep:30">Level Up +30</option>
+                  <option value="respec:10">Respec +10</option>
+                  <option value="respec:20">Respec +20</option>
+                </select>
+              </label>
+              <label style="font-size:12px;color:#9e9384;">Goal:
+                <select id="optGoalSelect">
+                  <option value="total">Attack Power</option>
+                  <option value="eff">Eff Dmg</option>
+                  <option value="spell">Spell Scaling</option>
+                </select>
+              </label>
+              <button id="optRunBtn" class="top-btn">Optimize</button>
+              <button id="optPreviewBtn" class="top-btn gold-outline">Preview Build</button>
+              <button id="optRevertBtn" class="top-btn">Revert to Save</button>
+              <span id="optStatusText" class="opt-status">Select a weapon row to optimize.</span>
+            </div>
+            <div class="subtable-wrap">
+              <table class="subtable">
+                <thead>
+                  <tr>
+                    <th class="left">Affinity</th>
+                    <th>Opt AR</th>
+                    <th>Opt Eff</th>
+                    <th>Gain</th>
+                    <th>Spell</th>
+                    <th class="center">Optimal S / D / I / F / A</th>
+                    <th class="center">Scaling</th>
+                  </tr>
+                </thead>
+                <tbody id="optTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tab 3: Scaling & Softcap Curve Chart -->
+          <div id="pane-curve" class="tab-pane col-pane">
+            <div class="opt-bar">
+              <label style="font-size:12px;color:#9e9384;">Metric:
+                <select id="curveMetricSelect">
+                  <option value="total">Attack Power</option>
+                  <option value="eff">Eff Dmg</option>
+                  <option value="spell">Spell Scaling</option>
+                </select>
+              </label>
+              <div id="curveSoftcaps" class="softcap-chips"></div>
+              <span id="curveLegend" class="opt-status"></span>
+            </div>
+            <div id="curveChartWrap" class="curve-wrap">
+              <svg id="scalingCurveSvg" class="curve-svg"></svg>
+              <div id="curveTooltip" class="curve-tooltip hidden"></div>
+            </div>
+          </div>
+
+          <!-- Tab 4: Compare Tray -->
+          <div id="pane-compare" class="tab-pane col-pane">
+            <div class="opt-bar">
+              <button id="cmpPinCurrentBtn" class="top-btn gold-outline">+ Pin Selected (P)</button>
+              <button id="cmpRemoveBtn" class="top-btn">Remove Selected</button>
+              <button id="cmpClearBtn" class="top-btn">Clear All</button>
+              <span class="opt-status">Deltas compared against #1 baseline row · Updates live</span>
+            </div>
+            <div class="subtable-wrap">
+              <table class="subtable">
+                <thead>
+                  <tr>
+                    <th class="left">Weapon</th>
+                    <th class="left">Affinity</th>
+                    <th>AR</th>
+                    <th>&Delta;AR</th>
+                    <th>Eff</th>
+                    <th>&Delta;Eff</th>
+                    <th class="left">Element Split</th>
+                    <th>Spell</th>
+                    <th class="left">Status</th>
+                    <th>Crit</th>
+                    <th class="center">Buff</th>
+                    <th class="left">Skill</th>
+                  </tr>
+                </thead>
+                <tbody id="cmpTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- INJECT_JS -->
+</body>
+</html>

@@ -1,0 +1,2478 @@
+(() => {
+  "use strict";
+
+  window.__JS_ERRORS = [];
+  window.addEventListener("error", (e) => {
+    window.__JS_ERRORS.push(e.message || String(e.error || "Unknown JS error"));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    window.__JS_ERRORS.push(String(e.reason || "Unhandled rejection"));
+  });
+
+  const STAT_KEYS = ["str", "dex", "int", "fai", "arc"];
+  const STATUS_KEYS = ["bleed", "poison", "rot", "frost", "sleep", "madness", "death"];
+  const STATUS_CCG_INDEX = [6, 5, null, null, 7, 8, null];
+  // Display column order matching tclark.io: Poison, Scarlet Rot, Blood Loss, Frostbite, Sleep, Madness
+  const STATUS_COL_SPECS = [
+    { key: "poison", idx: 1, title: "Poison", color: "#68c15c", svg: '<path fill="currentColor" d="M12 2c-2.5 3.6-6 6.8-6 10.6a6 6 0 0 0 12 0C18 8.8 14.5 5.6 12 2zm0 15.2a3.2 3.2 0 0 1-3.2-3.2c0-1.1.5-2.1 1.1-3-.1 1.6.7 2.8 2.1 2.8.8 0 1.4-.4 1.8-.9.8.9 1.4 2 1.4 3.1a3.2 3.2 0 0 1-3.2 1.2z"/>' },
+    { key: "rot", idx: 2, title: "Scarlet Rot", color: "#d65249", svg: '<path fill="currentColor" d="M12 2C9 5.5 7 8 7 11.5c0 2.1 1.2 4 3 4.8V21h4v-4.7c1.8-.8 3-2.7 3-4.8C17 8 15 5.5 12 2zm0 5.2c1.2 1.8 2.1 3.3 2.1 4.8a2.1 2.1 0 0 1-4.2 0c0-1.5.9-3 2.1-4.8z"/>' },
+    { key: "bleed", idx: 0, title: "Blood Loss", color: "#c93b3b", svg: '<path fill="currentColor" d="M12 2.2C8.3 7 5.5 10.7 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10.7 15.7 7 12 2.2zm2.2 14.6a2.8 2.8 0 0 1-3.9.2c-.8-.8-.9-2.1-.4-3.1.2 1.2 1 2 2.1 2.2.9.2 1.7-.1 2.2-.6z"/>' },
+    { key: "frost", idx: 3, title: "Frostbite", color: "#69b9f0", svg: '<path fill="currentColor" d="M11 2h2v4.2l2.6-2.6 1.4 1.4-4 4V11h2l4-4 1.4 1.4L17.8 11H22v2h-4.2l2.6 2.6-1.4 1.4-4-4H13v2l4 4-1.4 1.4L13 17.8V22h-2v-4.2l-2.6 2.6-1.4-1.4 4-4V13H9l-4 4-1.4-1.4L6.2 13H2v-2h4.2L3.6 8.4 5 7l4 4h2V9L7 5l1.4-1.4L11 6.2V2z"/>' },
+    { key: "sleep", idx: 4, title: "Sleep", color: "#a982e8", svg: '<path fill="currentColor" d="M14.5 3a8.8 8.8 0 1 0 6.5 14.7A7.2 7.2 0 0 1 14.5 3z"/>' },
+    { key: "mad", idx: 5, title: "Madness", color: "#e8a838", svg: '<path fill="currentColor" d="M12 4.5C6.5 4.5 2.2 8.2 1 12c1.2 3.8 5.5 7.5 11 7.5s9.8-3.7 11-7.5c-1.2-3.8-5.5-7.5-11-7.5zm0 11.5a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>' },
+  ];
+
+  // Two-column Affinity sidebar matching ERR v2.3.9.1 & tclark.io layout
+  const AFFINITY_LEFT = [
+    "Standard", "Heavy", "Keen", "Quality", "Magic", "Magma",
+    "Fell", "Bolt", "Sacred", "Night", "Fire", "Lightning",
+  ];
+  const AFFINITY_RIGHT = [
+    "Blessed", "Poison", "Bloody", "Occult", "Bestial", "Gravitational",
+    "Rotten", "Cursed", "Cold", "Soporific", "Frenzied", "Fated", "Unique",
+  ];
+  const PHYSICAL_AFFS = new Set(["Standard", "Heavy", "Keen", "Quality", "Bestial", "Unique"]);
+
+  const RANGED_WT_SET = new Set([50, 51, 53, 55, 56]);
+  const CATALYST_WT_SET = new Set([27, 57, 59, 61]);
+  const SHIELD_WT_SET = new Set([65, 67, 69, 90]);
+
+  const AFF_COLOR = {
+    Standard: "#c6ccd4",
+    Heavy: "#c49c68",
+    Keen: "#8fb8d6",
+    Quality: "#d9b977",
+    Magic: "#5ba9f2",
+    Magma: "#f06a38",
+    Fell: "#d95b5b",
+    Bolt: "#f5df66",
+    Sacred: "#ebd275",
+    Night: "#6b7fc9",
+    Fire: "#f08543",
+    Lightning: "#f2d656",
+    Blessed: "#f2e2a0",
+    Poison: "#6ec45e",
+    Bloody: "#cf4040",
+    Occult: "#a6a6b8",
+    Bestial: "#c28f53",
+    Gravitational: "#a579db",
+    Rotten: "#c95349",
+    Cursed: "#9980b5",
+    Cold: "#7bc7f5",
+    Soporific: "#b58df2",
+    Frenzied: "#e8a538",
+    Fated: "#b84f5c",
+    Unique: "#9c8f7d",
+  };
+
+  function affIconSvg(aff) {
+    const col = AFF_COLOR[aff] || "#b8afa2";
+    let glyph = '<path fill="currentColor" d="M12 3l6 4v5c0 4.2-2.6 7.4-6 9-3.4-1.6-6-4.8-6-9V7l6-4z"/>';
+    if (["Fire", "Magma", "Fell", "Frenzied"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M13.5 2s.8 3.2-1.5 5.4c-1.5 1.4-1.8 3.2-.8 4.4.8-1 1.9-1.4 2.8-1.1 2.2.8 3.2 3.3 2.3 5.7-.9 2.3-3.2 3.6-5.7 3.6-3.4 0-6-2.5-6-5.9 0-3.2 2.2-6 5.2-8.2C11.4 4.8 13.5 2 13.5 2z"/>';
+    } else if (["Lightning", "Bolt"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M13.5 2L5 13.2h6.2L9.8 22 19 10.4h-6.2z"/>';
+    } else if (["Magic", "Gravitational", "Cold"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M12 2l5.5 6.5L12 22 6.5 8.5z"/>';
+    } else if (["Sacred", "Blessed"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M12 2l2.1 6.2L20 10l-5.9 2.1L12 20l-2.1-7.9L4 10l5.9-1.8z"/>';
+    } else if (["Bloody", "Fated"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M12 2.5C8.5 7.2 6 10.8 6 14.5a6 6 0 0 0 12 0c0-3.7-2.5-7.3-6-12z"/>';
+    } else if (["Poison", "Rotten"].includes(aff)) {
+      glyph = '<circle cx="12" cy="13" r="6" fill="currentColor"/><circle cx="9.5" cy="6.5" r="2" fill="currentColor"/><circle cx="14.5" cy="6" r="1.5" fill="currentColor"/>';
+    } else if (["Soporific", "Night"].includes(aff)) {
+      glyph = '<path fill="currentColor" d="M14.5 3.5a8.5 8.5 0 1 0 6 14 7 7 0 0 1-6-14z"/>';
+    } else if (["Occult", "Cursed"].includes(aff)) {
+      glyph = '<circle cx="12" cy="11" r="6.5" fill="currentColor"/><rect x="9" y="16" width="6" height="4" rx="1" fill="currentColor"/>';
+    }
+    return `<svg viewBox="0 0 24 24" style="color:${col}" aria-hidden="true">${glyph}</svg>`;
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // Exact JS port of ar_engine.py math
+  function calcCorrect(stat, ccgEntry) {
+    const vals = ccgEntry[0];
+    const grow = ccgEntry[1];
+    const adj = ccgEntry[2];
+    let s = stat;
+    if (s < vals[0]) s = vals[0];
+    else if (s > vals[4]) s = vals[4];
+
+    let stage = 3;
+    for (let i = 0; i < 4; i++) {
+      if (vals[i + 1] > vals[i] && s <= vals[i + 1]) {
+        stage = i;
+        break;
+      }
+    }
+    const span = vals[stage + 1] - vals[stage];
+    if (span <= 0) return grow[stage] / 100.0;
+
+    const ratio = (s - vals[stage]) / span;
+    const a = adj[stage];
+    let growth;
+    if (a > 0) growth = Math.pow(ratio, a);
+    else if (a < 0) growth = 1.0 - Math.pow(1.0 - ratio, -a);
+    else growth = ratio;
+
+    return (grow[stage] + (grow[stage + 1] - grow[stage]) * growth) / 100.0;
+  }
+
+  function calcFromsoftDefense(atk, def) {
+    if (atk <= 0) return 0.0;
+    if (def <= 0) return atk;
+    const r = atk / def;
+    let mult;
+    if (r < 0.125) mult = 0.10;
+    else if (r < 1.0) mult = 0.10 + Math.pow(r - 0.125, 2) * (19.2 / 49.0);
+    else if (r < 2.5) mult = 0.70 - Math.pow(2.5 - r, 2) * (0.4 / 3.0);
+    else if (r < 8.0) mult = 0.90 - Math.pow(8.0 - r, 2) * (0.8 / 121.0);
+    else mult = 0.90;
+    return atk * mult;
+  }
+
+  function calcEffectiveDamage(elemAr, enemyPresetName, enemyPresets) {
+    const preset = enemyPresets[enemyPresetName];
+    if (!preset) {
+      const sum = elemAr[0] + elemAr[1] + elemAr[2] + elemAr[3] + elemAr[4];
+      return { total: sum, elems: elemAr.slice() };
+    }
+    const defs = preset.def;
+    const negs = preset.neg;
+    const dmg = [0, 0, 0, 0, 0];
+    let sum = 0;
+    for (let i = 0; i < 5; i++) {
+      const v = calcFromsoftDefense(elemAr[i], defs[i]) * (1.0 - negs[i]);
+      dmg[i] = v;
+      sum += v;
+    }
+    return { total: sum, elems: dmg };
+  }
+
+  function scalingGrade(val, gradeTable) {
+    if (val <= 0) return "-";
+    for (let i = 0; i < gradeTable.length; i++) {
+      if (val >= gradeTable[i][0]) return gradeTable[i][1];
+    }
+    return "F";
+  }
+
+  function resolveUpgradeLevel(weapon, regLv, somberLv) {
+    const maxLv = weapon.maxLv;
+    const lv = maxLv === 25 ? regLv : somberLv;
+    if (lv < 0) return 0;
+    return lv > maxLv ? maxLv : lv;
+  }
+
+  function computeWeapon(weapon, data, enemyPresets, stats, regLv, somberLv, twoHand, overrideLv = -1, enemyPreset = "Raw AR (No Defense)", buffs = null) {
+    const lv = overrideLv >= 0 ? Math.max(0, Math.min(overrideLv, weapon.maxLv)) : resolveUpgradeLevel(weapon, regLv, somberLv);
+    const reinfMap = data.reinforce;
+    const reinf = reinfMap[String(weapon.rt + lv)] || reinfMap[String(weapon.rt)] || [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0];
+    const aec = data.aec[String(weapon.aec)];
+    const aecF = aec ? aec.f : null;
+    const aecO = aec ? aec.o : null;
+    const aecI = aec ? aec.i : null;
+
+    const sb = (buffs && buffs.statBonus) ? buffs.statBonus : [0, 0, 0, 0, 0];
+    const clampS = (v) => Math.max(1, Math.min(199, Math.trunc(v)));
+    const bStats = [
+      clampS(stats.str + sb[0]),
+      clampS(stats.dex + sb[1]),
+      clampS(stats.int + sb[2]),
+      clampS(stats.fai + sb[3]),
+      clampS(stats.arc + sb[4]),
+    ];
+
+    const effStr = (twoHand && !weapon.dual) ? Math.trunc(bStats[0] * 1.5) : bStats[0];
+    const effStats = [effStr, bStats[1], bStats[2], bStats[3], bStats[4]];
+    const req = weapon.req;
+    const metList = [
+      effStats[0] >= req[0],
+      effStats[1] >= req[1],
+      effStats[2] >= req[2],
+      effStats[3] >= req[3],
+      effStats[4] >= req[4],
+    ];
+    const metAll = metList[0] && metList[1] && metList[2] && metList[3] && metList[4];
+
+    const corr = weapon.corr;
+    const effCorr = [
+      corr[0] * reinf[5],
+      corr[1] * reinf[6],
+      corr[2] * reinf[7],
+      corr[3] * reinf[8],
+      corr[4] * reinf[9],
+    ];
+    const gradeTable = data.gradeTable;
+    const grades = [
+      scalingGrade(effCorr[0], gradeTable),
+      scalingGrade(effCorr[1], gradeTable),
+      scalingGrade(effCorr[2], gradeTable),
+      scalingGrade(effCorr[3], gradeTable),
+      scalingGrade(effCorr[4], gradeTable),
+    ];
+
+    const ccgMap = data.ccg;
+    const baseAtks = weapon.atk;
+    const elemBase = [0, 0, 0, 0, 0];
+    const elemScale = [0, 0, 0, 0, 0];
+    const elemAr = [0, 0, 0, 0, 0];
+
+    for (let el = 0; el < 5; el++) {
+      const base = baseAtks[el] * reinf[el];
+      if (base <= 0) continue;
+      elemBase[el] = base;
+      const offset = el * 5;
+      let missingReq = false;
+      if (aecF) {
+        for (let si = 0; si < 5; si++) {
+          if (aecF[offset + si] && !metList[si]) {
+            missingReq = true;
+            break;
+          }
+        }
+      }
+      if (missingReq) {
+        const pen = -base * 0.4;
+        elemScale[el] = pen;
+        elemAr[el] = base + pen;
+      } else {
+        const ccgEntry = ccgMap[String(weapon.ccg[el])];
+        let scaleSum = 0.0;
+        if (aecF) {
+          for (let si = 0; si < 5; si++) {
+            const idx = offset + si;
+            if (!aecF[idx]) continue;
+            const ovr = aecO[idx];
+            const cVal = ovr >= 0 ? ovr : effCorr[si];
+            if (cVal <= 0) continue;
+            const inf = aecI[idx] / 100.0;
+            scaleSum += calcCorrect(effStats[si], ccgEntry) * (cVal / 100.0) * inf;
+          }
+        }
+        const sc = base * scaleSum;
+        elemScale[el] = sc;
+        elemAr[el] = base + sc;
+      }
+    }
+
+    let spellScaling = 0.0;
+    if (weapon.cat) {
+      let missingReq = false;
+      if (aecF) {
+        for (let si = 0; si < 5; si++) {
+          if (aecF[5 + si] && !metList[si]) {
+            missingReq = true;
+            break;
+          }
+        }
+      }
+      if (missingReq) {
+        spellScaling = 60.0;
+      } else {
+        const ccgM = ccgMap[String(weapon.ccg[1])];
+        let sSum = 0.0;
+        if (aecF) {
+          for (let si = 0; si < 5; si++) {
+            const idx = 5 + si;
+            if (!aecF[idx]) continue;
+            const ovr = aecO[idx];
+            const cVal = ovr >= 0 ? ovr : effCorr[si];
+            if (cVal <= 0) continue;
+            const inf = aecI[idx] / 100.0;
+            sSum += calcCorrect(effStats[si], ccgM) * (cVal / 100.0) * inf;
+          }
+        }
+        spellScaling = 100.0 * (1.0 + sSum);
+      }
+    }
+
+    const statuses = [0, 0, 0, 0, 0, 0, 0];
+    const spStatus = data.spStatus;
+    const arcScaleVal = effCorr[4];
+    const arcMet = metList[4];
+    const spBeh = weapon.spBeh;
+    for (let slotI = 0; slotI < spBeh.length; slotI++) {
+      const behId = spBeh[slotI];
+      if (behId <= 0) continue;
+      const vals = spStatus[String(behId + reinf[10 + slotI])];
+      if (!vals) continue;
+      for (let k = 0; k < vals.length; k++) {
+        const rawV = vals[k];
+        if (rawV <= 0) continue;
+        const ccgIdx = STATUS_CCG_INDEX[k];
+        if (ccgIdx !== null && arcScaleVal > 0 && arcMet) {
+          const ccgSt = ccgMap[String(weapon.ccg[ccgIdx])];
+          const mult = 1.0 + calcCorrect(bStats[4], ccgSt) * (arcScaleVal / 100.0);
+          statuses[k] += rawV * mult;
+        } else {
+          statuses[k] += rawV;
+        }
+      }
+    }
+
+    if (buffs) {
+      if (buffs.grease && weapon.buffable) {
+        const gf = buffs.grease.flat || [0, 0, 0, 0, 0];
+        const gr = buffs.grease.rate || [1, 1, 1, 1, 1];
+        const gst = buffs.grease.status || [0, 0, 0, 0, 0, 0, 0];
+        for (let el = 0; el < 5; el++) {
+          elemAr[el] = elemAr[el] * gr[el] + gf[el];
+        }
+        for (let k = 0; k < 7; k++) {
+          if (gst[k] > 0) statuses[k] += gst[k];
+        }
+      }
+      if (buffs.elemMult) {
+        for (let el = 0; el < 5; el++) {
+          elemAr[el] *= buffs.elemMult[el];
+        }
+      }
+    }
+    const stanceMult = (buffs && buffs.stanceMult) ? buffs.stanceMult : 1.0;
+    const effStance = (weapon.stance || 0) * stanceMult;
+
+    const totalAr = elemAr[0] + elemAr[1] + elemAr[2] + elemAr[3] + elemAr[4];
+    const eff = calcEffectiveDamage(elemAr, enemyPreset, enemyPresets);
+    return {
+      weapon,
+      lv,
+      total: totalAr,
+      eff: eff.total,
+      effElems: eff.elems,
+      ar: elemAr,
+      base: elemBase,
+      scale: elemScale,
+      spell: spellScaling,
+      status: statuses,
+      grades,
+      corr: effCorr,
+      stance: effStance,
+      met: metAll,
+      metList,
+    };
+  }
+
+  function computeNextStatGains(weapon, data, enemyPresets, stats, regLv, somberLv, twoHand, delta, overrideLv, enemyPreset, buffs = null) {
+    const baseRes = computeWeapon(weapon, data, enemyPresets, stats, regLv, somberLv, twoHand, overrideLv, enemyPreset, buffs);
+    const gains = {};
+    for (const k of STAT_KEYS) {
+      const mod = Object.assign({}, stats);
+      mod[k] = mod[k] + delta;
+      const nr = computeWeapon(weapon, data, enemyPresets, mod, regLv, somberLv, twoHand, overrideLv, enemyPreset, buffs);
+      gains[k] = {
+        ar: nr.total - baseRes.total,
+        eff: nr.eff - baseRes.eff,
+        spell: nr.spell - baseRes.spell,
+      };
+    }
+    return gains;
+  }
+
+  // Application State
+  const state = {
+    data: null,
+    byId: new Map(),
+    byBase: new Map(),
+    enemyPresets: {},
+    characters: [],
+    savePath: null,
+    activeSlot: 0,
+    savedSnapshot: null,
+    savedGear: { armor: [null, null, null, null], talismans: [null, null, null, null] },
+    equippedMap: new Map(),
+
+    stats: { str: 20, dex: 20, int: 10, fai: 10, arc: 10 },
+    regLv: 25,
+    somberLv: 10,
+    twoHand: true,
+    groupByType: false,
+    numericScaling: false,
+    showDamageSplit: false,
+    colCrit: false,
+    colDType: false,
+    colBuff: false,
+    colStam: false,
+    colStance: false,
+
+    armorIds: [null, null, null, null],
+    talismanIds: [null, null, null, null],
+    condTalismans: false,
+    greaseId: 0,
+    buffToggles: {
+      goldenVow: false,
+      fgms: false,
+      howl: false,
+      exultBleed: false,
+      exultPoison: false,
+      twoHandTal: false,
+    },
+    activeBuffs: { statBonus: [0, 0, 0, 0, 0], elemMult: [1, 1, 1, 1, 1], grease: null, stanceMult: 1.0 },
+    curveMetric: "total",
+    curveData: null,
+    calcSerial: 0,
+
+    effectiveOnly: false,
+    bestAffinityOnly: false,
+    buffableOnly: false,
+    equippedOnly: false,
+    enemyPreset: "Raw AR (No Defense)",
+    search: "",
+    selectedAffs: new Set(),
+    selectedWts: new Set(),
+    allAffList: [],
+    allWtList: [],
+    typeHierarchy: [],
+    groupCollapsed: new Set(["Ranged Weapons", "Catalysts", "Shields"]),
+
+    sortCol: "total",
+    sortDesc: true,
+
+    flatItems: [],
+    inspectedRes: null,
+    compareIds: [],
+    activeTab: "details",
+    optResults: [],
+    liveWatch: true,
+    bannerDismissed: false,
+    lastRenderedKey: "",
+    domColsSpec: [],
+  };
+
+  const ROW_HEIGHT = 31;
+  const OVERSCAN = 14;
+  let lastRenderSlice = { start: -1, end: -1, key: "" };
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  function buildSearchTags(data) {
+    const wtypes = data.weaponTypes;
+    const spStatus = data.spStatus;
+    const statusTerms = [
+      "bleed blood", "poison", "rot scarlet", "frost cold", "sleep", "madness frenzy", "death blight",
+    ];
+    for (const w of data.weapons) {
+      state.byId.set(w.id, w);
+      if (!state.byBase.has(w.baseId)) state.byBase.set(w.baseId, []);
+      state.byBase.get(w.baseId).push(w);
+
+      const parts = [
+        w.name,
+        w.baseName,
+        w.aff,
+        wtypes[String(w.wt)] || "",
+        w.skill || "",
+        w.physTypes || "",
+        w.buffable ? "buffable grease" : "unbuffable",
+        w.infusable ? "infusable" : "unique",
+        w.cat ? "catalyst" : "",
+      ];
+      for (const behId of w.spBeh) {
+        if (behId <= 0) continue;
+        for (const off of [0, w.maxLv]) {
+          const vals = spStatus[String(behId + off)];
+          if (!vals) continue;
+          for (let k = 0; k < vals.length; k++) {
+            if (vals[k] > 0) parts.push(statusTerms[k]);
+          }
+        }
+      }
+      w._searchBase = parts.join(" ").toLowerCase();
+    }
+  }
+
+  function buildAffinitySidebar() {
+    const known = new Set(state.data.affinities);
+    const ordered = [];
+    const seen = new Set();
+    const maxLen = Math.max(AFFINITY_LEFT.length, AFFINITY_RIGHT.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < AFFINITY_LEFT.length && known.has(AFFINITY_LEFT[i])) {
+        ordered.push(AFFINITY_LEFT[i]);
+        seen.add(AFFINITY_LEFT[i]);
+      }
+      if (i < AFFINITY_RIGHT.length && known.has(AFFINITY_RIGHT[i])) {
+        ordered.push(AFFINITY_RIGHT[i]);
+        seen.add(AFFINITY_RIGHT[i]);
+      }
+    }
+    for (const a of state.data.affinities) {
+      if (!seen.has(a)) ordered.push(a);
+    }
+
+    state.allAffList = ordered.slice();
+    state.selectedAffs = new Set(ordered);
+
+    const grid = $("affinityGrid");
+    grid.innerHTML = "";
+    for (const aff of ordered) {
+      const lbl = document.createElement("label");
+      lbl.className = "aff-item cb-row";
+      lbl.innerHTML = `<input type="checkbox" data-aff="${escHtml(aff)}" checked />${affIconSvg(aff)}<span title="${escHtml(aff)}">${escHtml(aff)}</span>`;
+      const cb = lbl.querySelector("input");
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.selectedAffs.add(aff);
+        else state.selectedAffs.delete(aff);
+        recalculateAndRender();
+      });
+      grid.appendChild(lbl);
+    }
+  }
+
+  function syncAffinityCheckboxesDom() {
+    document.querySelectorAll("#affinityGrid input[data-aff]").forEach((cb) => {
+      cb.checked = state.selectedAffs.has(cb.dataset.aff);
+    });
+  }
+
+  function buildWeaponTypeTree() {
+    const wtypes = state.data.weaponTypes;
+    const byName = new Map();
+    const allIds = [];
+
+    for (const [kStr, label] of Object.entries(wtypes)) {
+      const wt = Number(kStr);
+      allIds.push(wt);
+      if (!byName.has(label)) byName.set(label, []);
+      byName.get(label).push(wt);
+    }
+
+    const meleeNodes = [];
+    const rangedNodes = [];
+    const catNodes = [];
+    const shieldNodes = [];
+
+    for (const [label, wtList] of Array.from(byName.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      const node = { label, wtList };
+      const first = wtList[0];
+      if (RANGED_WT_SET.has(first)) rangedNodes.push(node);
+      else if (CATALYST_WT_SET.has(first)) catNodes.push(node);
+      else if (SHIELD_WT_SET.has(first)) shieldNodes.push(node);
+      else meleeNodes.push(node);
+    }
+
+    state.typeHierarchy = [
+      { name: "Melee Weapons", nodes: meleeNodes },
+      { name: "Ranged Weapons", nodes: rangedNodes },
+      { name: "Catalysts", nodes: catNodes },
+      { name: "Shields", nodes: shieldNodes },
+    ];
+    state.allWtList = allIds;
+    state.selectedWts = new Set(allIds);
+
+    const container = $("weaponTypeTree");
+    container.innerHTML = "";
+    for (const grp of state.typeHierarchy) {
+      const grpWrap = document.createElement("div");
+      const hdr = document.createElement("div");
+      hdr.className = "type-group-hdr";
+
+      const isCol = state.groupCollapsed.has(grp.name);
+      const caretBtn = document.createElement("button");
+      caretBtn.className = "caret-btn";
+      caretBtn.textContent = isCol ? "▸" : "▾";
+      caretBtn.title = "Expand / collapse";
+
+      const pLabel = document.createElement("label");
+      pLabel.className = "cb-row type-group-title";
+      const pCb = document.createElement("input");
+      pCb.type = "checkbox";
+      pCb.checked = true;
+      pCb.dataset.groupParent = grp.name;
+      const pText = document.createElement("span");
+      pText.textContent = grp.name;
+      pLabel.appendChild(pCb);
+      pLabel.appendChild(pText);
+
+      hdr.appendChild(caretBtn);
+      hdr.appendChild(pLabel);
+      grpWrap.appendChild(hdr);
+
+      const childrenDiv = document.createElement("div");
+      childrenDiv.className = "type-children" + (isCol ? " collapsed" : "");
+
+      caretBtn.addEventListener("click", () => {
+        const nowCol = childrenDiv.classList.toggle("collapsed");
+        caretBtn.textContent = nowCol ? "▸" : "▾";
+      });
+
+      pCb.addEventListener("change", () => {
+        for (const n of grp.nodes) {
+          for (const wt of n.wtList) {
+            if (pCb.checked) state.selectedWts.add(wt);
+            else state.selectedWts.delete(wt);
+          }
+        }
+        syncWeaponTypeDom();
+        recalculateAndRender();
+      });
+
+      for (const node of grp.nodes) {
+        const cLbl = document.createElement("label");
+        cLbl.className = "cb-row";
+        const cCb = document.createElement("input");
+        cCb.type = "checkbox";
+        cCb.checked = true;
+        cCb.dataset.wtList = node.wtList.join(",");
+        const cSpan = document.createElement("span");
+        cSpan.textContent = node.label;
+        cLbl.appendChild(cCb);
+        cLbl.appendChild(cSpan);
+
+        cCb.addEventListener("change", () => {
+          for (const wt of node.wtList) {
+            if (cCb.checked) state.selectedWts.add(wt);
+            else state.selectedWts.delete(wt);
+          }
+          syncWeaponTypeDom();
+          recalculateAndRender();
+        });
+        childrenDiv.appendChild(cLbl);
+      }
+
+      grpWrap.appendChild(childrenDiv);
+      container.appendChild(grpWrap);
+    }
+  }
+
+  function syncWeaponTypeDom() {
+    document.querySelectorAll("#weaponTypeTree input[data-wt-list]").forEach((cb) => {
+      const wts = cb.dataset.wtList.split(",").map(Number);
+      cb.checked = wts.every((w) => state.selectedWts.has(w));
+    });
+    for (const grp of state.typeHierarchy) {
+      const pCb = document.querySelector(`#weaponTypeTree input[data-group-parent="${grp.name}"]`);
+      if (!pCb) continue;
+      let checkedCount = 0;
+      for (const n of grp.nodes) {
+        if (n.wtList.every((w) => state.selectedWts.has(w))) checkedCount++;
+      }
+      if (checkedCount === 0) {
+        pCb.checked = false;
+        pCb.indeterminate = false;
+      } else if (checkedCount === grp.nodes.length) {
+        pCb.checked = true;
+        pCb.indeterminate = false;
+      } else {
+        pCb.checked = false;
+        pCb.indeterminate = true;
+      }
+    }
+  }
+
+  function populateLevelSelect() {
+    const sel = $("levelSelect");
+    sel.innerHTML = "";
+    for (let r = 0; r <= 25; r++) {
+      const s = Math.min(10, Math.round((r * 10) / 25));
+      const opt = document.createElement("option");
+      opt.value = `${r}:${s}`;
+      opt.textContent = `+${r} / +${s}`;
+      sel.appendChild(opt);
+    }
+    syncLevelSelectValue();
+  }
+
+  function syncLevelSelectValue() {
+    const sel = $("levelSelect");
+    const pairedSomber = Math.min(10, Math.round((state.regLv * 10) / 25));
+    const existingCustom = sel.querySelector("option[data-custom='1']");
+    if (existingCustom) existingCustom.remove();
+
+    if (state.somberLv === pairedSomber) {
+      sel.value = `${state.regLv}:${state.somberLv}`;
+    } else {
+      const opt = document.createElement("option");
+      opt.dataset.custom = "1";
+      opt.value = `${state.regLv}:${state.somberLv}`;
+      opt.textContent = `+${state.regLv} / +${state.somberLv} (Eq)`;
+      sel.appendChild(opt);
+      sel.value = opt.value;
+    }
+  }
+
+  function populateEnemySelect() {
+    const sel = $("enemySelect");
+    sel.innerHTML = "";
+    for (const name of Object.keys(state.enemyPresets)) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+    sel.value = state.enemyPreset in state.enemyPresets ? state.enemyPreset : "Raw AR (No Defense)";
+  }
+
+  function updateStatInputsDom() {
+    $("strInput").value = state.stats.str;
+    $("dexInput").value = state.stats.dex;
+    $("intInput").value = state.stats.int;
+    $("faiInput").value = state.stats.fai;
+    $("arcInput").value = state.stats.arc;
+    update2hHint();
+  }
+
+  function update2hHint() {
+    const hint = $("str2hHint");
+    if (state.twoHand) {
+      const sb0 = (state.activeBuffs && state.activeBuffs.statBonus) ? state.activeBuffs.statBonus[0] : 0;
+      const bStr = Math.max(1, Math.min(199, state.stats.str + sb0));
+      hint.textContent = `(${Math.trunc(bStr * 1.5)})`;
+    } else {
+      hint.textContent = "";
+    }
+  }
+
+  function formatGearBonusTag(item) {
+    if (!item) return "";
+    const parts = [];
+    const stShort = ["STR", "DEX", "INT", "FAI", "ARC"];
+    const elShort = ["Phys", "Mag", "Fire", "Ltng", "Holy"];
+    if (item.st) {
+      for (let i = 0; i < 5; i++) {
+        if (item.st[i] !== 0) parts.push(`${item.st[i] > 0 ? "+" : ""}${item.st[i]} ${stShort[i]}`);
+      }
+    }
+    if (item.m) {
+      for (let i = 0; i < 5; i++) {
+        if (Math.abs(item.m[i] - 1.0) > 1e-4) parts.push(`x${item.m[i].toFixed(2)} ${elShort[i]}`);
+      }
+    }
+    if (item.cm) {
+      parts.push(`Cond x${item.cm[0].toFixed(2)}`);
+    }
+    if (item.sa && Math.abs(item.sa - 1.0) > 1e-4) {
+      parts.push(`x${item.sa.toFixed(2)} Stance`);
+    }
+    return parts.length ? ` (${parts.join(", ")})` : "";
+  }
+
+  function formatGreaseTag(g) {
+    const parts = [];
+    const elShort = ["Phys", "Mag", "Fire", "Ltng", "Holy"];
+    for (let i = 0; i < 5; i++) {
+      if (g.flat[i] > 0 || Math.abs(g.rate[i] - 1.0) > 1e-4) {
+        const s = g.flat[i] > 0 ? `+${g.flat[i]} ` : "";
+        const r = Math.abs(g.rate[i] - 1.0) > 1e-4 ? `x${g.rate[i].toFixed(3)} ` : "";
+        parts.push(`${s}${r}${elShort[i]}`.trim());
+      }
+    }
+    for (let k = 0; k < 7; k++) {
+      if (g.status[k] > 0) parts.push(`+${g.status[k]} ${STATUS_KEYS[k]}`);
+    }
+    return parts.length ? ` (${parts.join(", ")})` : "";
+  }
+
+  function populateGearDropdowns() {
+    const armors = state.data.armors || {};
+    const armorSelIds = ["armorHeadSel", "armorChestSel", "armorArmsSel", "armorLegsSel"];
+    for (let slot = 0; slot < 4; slot++) {
+      const sel = $(armorSelIds[slot]);
+      const items = Object.entries(armors)
+        .filter(([, a]) => a.s === slot)
+        .map(([id, a]) => ({ id, a, hasBonus: Boolean(a.st || a.m || a.sa) }))
+        .sort((x, y) => (y.hasBonus - x.hasBonus) || x.a.n.localeCompare(y.a.n));
+      sel.innerHTML = `<option value="">-- None --</option>` + items.map((it) => {
+        const tag = formatGearBonusTag(it.a);
+        const prefix = it.hasBonus ? "[★] " : "";
+        return `<option value="${it.id}">${escHtml(prefix + it.a.n + tag)}</option>`;
+      }).join("");
+    }
+
+    const tals = state.data.talismans || {};
+    const talItems = Object.entries(tals)
+      .map(([id, t]) => ({ id, t, hasBonus: Boolean(t.st || t.m || t.cm || t.sa) }))
+      .sort((x, y) => (y.hasBonus - x.hasBonus) || x.t.n.localeCompare(y.t.n));
+    const talOptsHtml = `<option value="">-- None --</option>` + talItems.map((it) => {
+      const tag = formatGearBonusTag(it.t);
+      const prefix = it.hasBonus ? "[★] " : "";
+      return `<option value="${it.id}">${escHtml(prefix + it.t.n + tag)}</option>`;
+    }).join("");
+    for (let s = 0; s < 4; s++) {
+      $(`tal${s}Sel`).innerHTML = talOptsHtml;
+    }
+
+    const greases = state.data.greases || [];
+    $("greaseSel").innerHTML = `<option value="0">-- None --</option>` + greases.map((g) => {
+      return `<option value="${g.id}">${escHtml(g.name + formatGreaseTag(g))}</option>`;
+    }).join("");
+  }
+
+  function syncGearDropdownValues() {
+    const armorSelIds = ["armorHeadSel", "armorChestSel", "armorArmsSel", "armorLegsSel"];
+    const armors = state.data.armors || {};
+    for (let s = 0; s < 4; s++) {
+      const aid = state.armorIds[s];
+      $(armorSelIds[s]).value = (aid && armors[String(aid)]) ? String(aid) : "";
+    }
+    const tals = state.data.talismans || {};
+    for (let s = 0; s < 4; s++) {
+      const tid = state.talismanIds[s];
+      $(`tal${s}Sel`).value = (tid && tals[String(tid)]) ? String(tid) : "";
+    }
+    $("condTalismansCb").checked = Boolean(state.condTalismans);
+    $("greaseSel").value = String(state.greaseId || 0);
+    document.querySelectorAll("#buffPillsRow .buff-pill").forEach((btn) => {
+      btn.classList.toggle("active", Boolean(state.buffToggles[btn.dataset.buff]));
+    });
+  }
+
+  function recomputeActiveBuffs() {
+    const sb = [0, 0, 0, 0, 0];
+    const em = [1, 1, 1, 1, 1];
+    let stanceMult = 1.0;
+    const armors = state.data ? (state.data.armors || {}) : {};
+    const tals = state.data ? (state.data.talismans || {}) : {};
+
+    for (let s = 0; s < 4; s++) {
+      const a = state.armorIds[s] ? armors[String(state.armorIds[s])] : null;
+      if (!a) continue;
+      if (a.st) for (let i = 0; i < 5; i++) sb[i] += a.st[i];
+      if (a.m) for (let i = 0; i < 5; i++) em[i] *= a.m[i];
+      if (a.sa) stanceMult *= a.sa;
+    }
+
+    for (let s = 0; s < 4; s++) {
+      const t = state.talismanIds[s] ? tals[String(state.talismanIds[s])] : null;
+      if (!t) continue;
+      if (t.st) for (let i = 0; i < 5; i++) sb[i] += t.st[i];
+      if (t.m) for (let i = 0; i < 5; i++) em[i] *= t.m[i];
+      if (state.condTalismans && t.cm) for (let i = 0; i < 5; i++) em[i] *= t.cm[i];
+      if (t.sa) stanceMult *= t.sa;
+    }
+
+    const bt = state.buffToggles;
+    if (bt.goldenVow) for (let i = 0; i < 5; i++) em[i] *= 1.15;
+    if (bt.fgms) {
+      em[0] *= 1.20;
+      em[2] *= 1.20;
+    }
+    if (bt.howl) for (let i = 0; i < 5; i++) em[i] *= 1.25;
+    if (bt.exultBleed) for (let i = 0; i < 5; i++) em[i] *= 1.20;
+    if (bt.exultPoison) for (let i = 0; i < 5; i++) em[i] *= 1.20;
+    if (bt.twoHandTal && state.twoHand) for (let i = 0; i < 5; i++) em[i] *= 1.15;
+
+    let grease = null;
+    if (state.greaseId && state.data && state.data.greases) {
+      grease = state.data.greases.find((g) => g.id === state.greaseId) || null;
+    }
+
+    state.activeBuffs = { statBonus: sb, elemMult: em, grease, stanceMult };
+
+    // Update floating stat labels & top button badge
+    const lblIds = [["lblStr", "Strength"], ["lblDex", "Dexterity"], ["lblInt", "Intelligence"], ["lblFai", "Faith"], ["lblArc", "Arcane"]];
+    for (let i = 0; i < 5; i++) {
+      const el = $(lblIds[i][0]);
+      if (!el) continue;
+      const dv = sb[i];
+      if (dv !== 0) {
+        el.innerHTML = `${lblIds[i][1]} <span class="stat-bonus-tag">(${dv > 0 ? "+" : ""}${dv})</span>`;
+      } else {
+        el.textContent = lblIds[i][1];
+      }
+    }
+
+    const sumParts = [];
+    const stShort = ["STR", "DEX", "INT", "FAI", "ARC"];
+    const elShort = ["Phys", "Mag", "Fire", "Ltng", "Holy"];
+    for (let i = 0; i < 5; i++) if (sb[i] !== 0) sumParts.push(`${sb[i] > 0 ? "+" : ""}${sb[i]} ${stShort[i]}`);
+    for (let i = 0; i < 5; i++) if (Math.abs(em[i] - 1.0) > 1e-4) sumParts.push(`${elShort[i]}×${em[i].toFixed(2)}`);
+    if (Math.abs(stanceMult - 1.0) > 1e-4) sumParts.push(`Stance×${stanceMult.toFixed(2)}`);
+    if (grease) sumParts.push(grease.name);
+
+    const activeCount = sumParts.length;
+    const gearBtn = $("topGearBtn");
+    gearBtn.textContent = activeCount > 0 ? `Gear & Buffs (${activeCount})` : "Gear & Buffs";
+    gearBtn.classList.toggle("active-gold", activeCount > 0);
+    $("gearBonusSummary").textContent = activeCount > 0 ? `Active: ${sumParts.join(" · ")}` : "No active gear stat or damage modifiers";
+    update2hHint();
+  }
+
+  // Table Columns Definition & Header Builder (exact 2-row grouped tclark.io header + Extra Columns)
+  function getExtraColDefs() {
+    const extras = [];
+    if (state.colCrit) extras.push({ id: "crit", label: "Crit", width: "52px", numeric: true });
+    if (state.colDType) extras.push({ id: "ptype", label: "Dmg Type", width: "92px", numeric: false });
+    if (state.colBuff) extras.push({ id: "buff", label: "Buff", width: "44px", numeric: true });
+    if (state.colStam) extras.push({ id: "r1stam", label: "Stam", width: "52px", numeric: true });
+    if (state.colStance) extras.push({ id: "stance", label: "Stance", width: "56px", numeric: true });
+    return extras;
+  }
+
+  function updateExtraColsButtonLabel() {
+    const cnt = [state.colCrit, state.colDType, state.colBuff, state.colStam, state.colStance].filter(Boolean).length;
+    $("extraColsBtn").textContent = `Extra Columns (${cnt}) \u25BE`;
+  }
+
+  function getColumnsSpec() {
+    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+    const cols = [{ id: "name", width: "225px", align: "left", numeric: false }];
+
+    if (!state.showDamageSplit) {
+      cols.push({ id: "total", width: "76px", numeric: true, arStyle: true });
+      if (showEff) cols.push({ id: "eff", width: "68px", numeric: true, effStyle: true });
+    } else {
+      cols.push({ id: "phys", width: "52px", numeric: true });
+      cols.push({ id: "mag", width: "50px", numeric: true });
+      cols.push({ id: "fire", width: "50px", numeric: true });
+      cols.push({ id: "thun", width: "50px", numeric: true });
+      cols.push({ id: "holy", width: "50px", numeric: true });
+      cols.push({ id: "spell", width: "52px", numeric: true });
+      cols.push({ id: "total", width: "62px", numeric: true, arStyle: true });
+      if (showEff) cols.push({ id: "eff", width: "62px", numeric: true, effStyle: true });
+    }
+
+    for (const st of STATUS_COL_SPECS) {
+      cols.push({ id: st.key, width: "34px", numeric: true });
+    }
+    for (let i = 0; i < 5; i++) {
+      cols.push({ id: `sc_${i}`, width: "36px", numeric: state.numericScaling });
+    }
+    for (let i = 0; i < 5; i++) {
+      cols.push({ id: `rq_${i}`, width: "34px", numeric: true });
+    }
+    for (const ex of getExtraColDefs()) {
+      cols.push(ex);
+    }
+    return cols;
+  }
+
+  function sortIndicator(colId) {
+    if (state.sortCol !== colId) return "";
+    return `<span class="sort-arrow">${state.sortDesc ? "▾" : "▴"}</span>`;
+  }
+
+  function renderTableHeader() {
+    const cols = getColumnsSpec();
+    state.domColsSpec = cols;
+
+    const cg = $("tableColgroup");
+    cg.innerHTML = cols.map((c) => `<col style="width:${c.width};" />`).join("");
+
+    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+    const split = state.showDamageSplit;
+    const apSpan = split ? (showEff ? 8 : 7) : (showEff ? 2 : 1);
+
+    let row1 = `<th rowspan="2" class="col-left sortable ${state.sortCol === "name" ? "sorted" : ""}" data-sort="name">Weapon${sortIndicator("name")}</th>`;
+    if (!split && !showEff) {
+      row1 += `<th rowspan="2" class="sortable ${state.sortCol === "total" ? "sorted" : ""}" data-sort="total">Attack Power${sortIndicator("total")}</th>`;
+    } else {
+      row1 += `<th colspan="${apSpan}">Attack Power</th>`;
+    }
+    row1 += `<th colspan="6">Status Effects</th>`;
+    row1 += `<th colspan="5">Attribute Scaling</th>`;
+    row1 += `<th colspan="5">Attributes Required</th>`;
+    for (const ex of getExtraColDefs()) {
+      row1 += `<th rowspan="2" class="sortable ${state.sortCol === ex.id ? "sorted" : ""}" data-sort="${ex.id}">${escHtml(ex.label)}${sortIndicator(ex.id)}</th>`;
+    }
+
+    let row2 = "";
+    if (!split && showEff) {
+      row2 += `<th class="sortable ${state.sortCol === "total" ? "sorted" : ""}" data-sort="total">Raw${sortIndicator("total")}</th>`;
+      row2 += `<th class="sortable ${state.sortCol === "eff" ? "sorted" : ""}" data-sort="eff">Eff${sortIndicator("eff")}</th>`;
+    } else if (split) {
+      for (const [cid, lbl] of [["phys", "Phys"], ["mag", "Mag"], ["fire", "Fire"], ["thun", "Ltng"], ["holy", "Holy"], ["spell", "Spell"], ["total", "Total"]]) {
+        row2 += `<th class="sortable ${state.sortCol === cid ? "sorted" : ""}" data-sort="${cid}">${lbl}${sortIndicator(cid)}</th>`;
+      }
+      if (showEff) {
+        row2 += `<th class="sortable ${state.sortCol === "eff" ? "sorted" : ""}" data-sort="eff">Eff${sortIndicator("eff")}</th>`;
+      }
+    }
+
+    for (const st of STATUS_COL_SPECS) {
+      row2 += `<th class="sortable ${state.sortCol === st.key ? "sorted" : ""}" data-sort="${st.key}" title="${st.title}"><svg class="th-icon" viewBox="0 0 24 24" style="color:${st.color}">${st.svg}</svg>${sortIndicator(st.key)}</th>`;
+    }
+    const statShort = ["Str", "Dex", "Int", "Fai", "Arc"];
+    for (let i = 0; i < 5; i++) {
+      const cid = `sc_${i}`;
+      row2 += `<th class="sortable ${state.sortCol === cid ? "sorted" : ""}" data-sort="${cid}">${statShort[i]}${sortIndicator(cid)}</th>`;
+    }
+    for (let i = 0; i < 5; i++) {
+      const cid = `rq_${i}`;
+      row2 += `<th class="sortable ${state.sortCol === cid ? "sorted" : ""}" data-sort="${cid}">${statShort[i]}${sortIndicator(cid)}</th>`;
+    }
+
+    const thead = $("tableHead");
+    thead.innerHTML = `<tr>${row1}</tr><tr>${row2}</tr>`;
+    thead.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const colId = th.dataset.sort;
+        const spec = state.domColsSpec.find((c) => c.id === colId);
+        const defaultDesc = spec ? spec.numeric : true;
+        if (state.sortCol === colId) {
+          state.sortDesc = !state.sortDesc;
+        } else {
+          state.sortCol = colId;
+          state.sortDesc = defaultDesc;
+        }
+        renderTableHeader();
+        if (state.bestAffinityOnly) {
+          recalculateAndRender();
+        } else {
+          sortAndFlattenItems(lastComputedList);
+          lastRenderSlice.key = "";
+          renderVirtualViewport(true);
+        }
+      });
+    });
+  }
+
+  function sortKey(res, col) {
+    if (col === "name") return res.weapon.name.toLowerCase();
+    if (col === "total") return res.total;
+    if (col === "eff") return res.eff;
+    if (col === "phys") return res.ar[0];
+    if (col === "mag") return res.ar[1];
+    if (col === "fire") return res.ar[2];
+    if (col === "thun") return res.ar[3];
+    if (col === "holy") return res.ar[4];
+    if (col === "spell") return res.spell;
+    if (col === "poison") return res.status[1];
+    if (col === "rot") return res.status[2];
+    if (col === "bleed") return res.status[0];
+    if (col === "frost") return res.status[3];
+    if (col === "sleep") return res.status[4];
+    if (col === "mad") return res.status[5];
+    if (col === "crit") return res.weapon.crit;
+    if (col === "ptype") return (res.weapon.physTypes || "").toLowerCase();
+    if (col === "buff") return res.weapon.buffable ? 1 : 0;
+    if (col === "r1stam") return res.weapon.r1Stam || 0;
+    if (col === "stance") return res.stance || 0;
+    if (col.startsWith("sc_")) {
+      const i = Number(col.slice(3));
+      return res.corr[i];
+    }
+    if (col.startsWith("rq_")) {
+      const i = Number(col.slice(3));
+      return res.weapon.req[i];
+    }
+    return res.total;
+  }
+
+  function compareResults(a, b, col, desc) {
+    const ka = sortKey(a, col);
+    const kb = sortKey(b, col);
+    let cmp = 0;
+    if (typeof ka === "string" || typeof kb === "string") {
+      cmp = ka < kb ? -1 : (ka > kb ? 1 : 0);
+    } else {
+      cmp = ka - kb;
+    }
+    if (cmp === 0) cmp = a.total - b.total;
+    if (cmp === 0) return a.weapon.id - b.weapon.id;
+    return desc ? -cmp : cmp;
+  }
+
+  let lastComputedList = [];
+
+  function sortAndFlattenItems(computed) {
+    if (!state.groupByType) {
+      const sorted = computed.slice().sort((a, b) => compareResults(a, b, state.sortCol, state.sortDesc));
+      state.flatItems = sorted.map((res, idx) => ({ kind: "row", res, stripe: idx % 2 }));
+      return;
+    }
+    const wtypes = state.data.weaponTypes;
+    const byType = new Map();
+    for (const r of computed) {
+      const tName = wtypes[String(r.weapon.wt)] || `Type ${r.weapon.wt}`;
+      if (!byType.has(tName)) byType.set(tName, []);
+      byType.get(tName).push(r);
+    }
+    const groupNames = Array.from(byType.keys()).sort((a, b) => a.localeCompare(b));
+    const flat = [];
+    for (const tName of groupNames) {
+      const arr = byType.get(tName).sort((a, b) => compareResults(a, b, state.sortCol, state.sortDesc));
+      flat.push({ kind: "group", label: `${tName} (${arr.length})` });
+      for (let i = 0; i < arr.length; i++) {
+        flat.push({ kind: "row", res: arr[i], stripe: i % 2 });
+      }
+    }
+    state.flatItems = flat;
+  }
+
+  function matchesPreFilter(w, tokens) {
+    if (state.equippedOnly && !state.equippedMap.has(w.id)) return false;
+    if (!state.selectedAffs.has(w.aff)) return false;
+    if (!state.selectedWts.has(w.wt)) return false;
+    if (state.buffableOnly && !w.buffable) return false;
+    if (tokens.length > 0) {
+      const sb = w._searchBase;
+      for (let i = 0; i < tokens.length; i++) {
+        if (!sb.includes(tokens[i])) return false;
+      }
+    }
+    return true;
+  }
+
+  function recalculateAndRender() {
+    recomputeActiveBuffs();
+    state.calcSerial++;
+    const t0 = performance.now();
+    const tokens = state.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const weapons = state.data.weapons;
+    const stats = state.stats;
+    const regLv = state.regLv;
+    const somberLv = state.somberLv;
+    const twoHand = state.twoHand;
+    const ep = state.enemyPreset;
+    const buffs = state.activeBuffs;
+    const effOnly = state.effectiveOnly;
+    const bestOnly = state.bestAffinityOnly;
+
+    let computed = [];
+    if (state.equippedOnly) {
+      for (const [wid, eqLv] of state.equippedMap.entries()) {
+        const w = state.byId.get(wid);
+        if (!w || !matchesPreFilter(w, tokens)) continue;
+        const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, eqLv, ep, buffs);
+        if (effOnly && !r.met) continue;
+        computed.push(r);
+      }
+    } else if (bestOnly) {
+      const bestByBase = new Map();
+      const metricCol = state.sortCol.startsWith("sc_") || state.sortCol.startsWith("rq_") || state.sortCol === "name" || state.sortCol === "ptype"
+        ? (state.enemyPreset !== "Raw AR (No Defense)" ? "eff" : "total")
+        : state.sortCol;
+      for (let i = 0; i < weapons.length; i++) {
+        const w = weapons[i];
+        if (!matchesPreFilter(w, tokens)) continue;
+        const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, -1, ep, buffs);
+        if (effOnly && !r.met) continue;
+        const prev = bestByBase.get(w.baseId);
+        if (!prev) {
+          bestByBase.set(w.baseId, r);
+        } else {
+          const nk = sortKey(r, metricCol);
+          const ok = sortKey(prev, metricCol);
+          if (nk > ok || (nk === ok && (r.eff > prev.eff || (r.eff === prev.eff && r.total > prev.total)))) {
+            bestByBase.set(w.baseId, r);
+          }
+        }
+      }
+      computed = Array.from(bestByBase.values());
+    } else {
+      for (let i = 0; i < weapons.length; i++) {
+        const w = weapons[i];
+        if (!matchesPreFilter(w, tokens)) continue;
+        const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, -1, ep, buffs);
+        if (effOnly && !r.met) continue;
+        computed.push(r);
+      }
+    }
+
+    lastComputedList = computed;
+    sortAndFlattenItems(computed);
+    const ms = Math.round(performance.now() - t0);
+    $("rowCountLabel").textContent = `${computed.length.toLocaleString()} weapons · ${ms} ms`;
+    $("emptyState").style.display = computed.length === 0 ? "flex" : "none";
+
+    lastRenderSlice = { start: -1, end: -1, key: "" };
+    renderVirtualViewport(true);
+
+    if (state.inspectedRes) {
+      const curW = state.byId.get(state.inspectedRes.weapon.id);
+      if (curW) {
+        const updated = computeWeapon(
+          curW, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand,
+          state.equippedMap.has(curW.id) && state.equippedOnly ? state.equippedMap.get(curW.id) : -1,
+          state.enemyPreset,
+          state.activeBuffs
+        );
+        renderInspectorDetails(updated, state.activeTab === "details");
+      }
+    }
+    refreshCompareTray();
+  }
+
+  function formatCellNum(v, dashZero = true) {
+    if (dashZero && v <= 0.05) return "-";
+    return String(Math.round(v));
+  }
+
+  function buildRowHtml(item) {
+    const colCount = state.domColsSpec.length;
+    if (item.kind === "group") {
+      return `<tr class="group-row"><td colspan="${colCount}">${escHtml(item.label)}</td></tr>`;
+    }
+    const r = item.res;
+    const w = r.weapon;
+    const isEq = state.equippedMap.has(w.id);
+    const isSel = state.inspectedRes && state.inspectedRes.weapon.id === w.id;
+    const cls = ["w-row", item.stripe ? "odd" : "even"];
+    if (isEq) cls.push("equipped");
+    if (isSel) cls.push("selected");
+
+    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+    const arUnmetCls = r.met ? "" : " ar-unmet";
+    const star = isEq ? '<span class="eq-star" title="Equipped">&#9733;</span>' : "";
+    const dispName = `${star}${escHtml(w.name)} +${r.lv}`;
+
+    let cells = `<td class="col-weapon" title="${escHtml(w.name)} +${r.lv} (${escHtml(w.aff)})">${dispName}</td>`;
+    if (!state.showDamageSplit) {
+      cells += `<td class="col-ar${arUnmetCls}">${formatCellNum(r.total, false)}</td>`;
+      if (showEff) cells += `<td class="col-eff${arUnmetCls}">${formatCellNum(r.eff, false)}</td>`;
+    } else {
+      for (let i = 0; i < 5; i++) {
+        const val = r.ar[i];
+        cells += `<td class="${val <= 0.05 ? "dim-dash" : ""}${arUnmetCls}">${formatCellNum(val, true)}</td>`;
+      }
+      const spVal = w.cat ? r.spell : 0;
+      cells += `<td class="${spVal <= 0.05 ? "dim-dash" : ""}${arUnmetCls}">${formatCellNum(spVal, true)}</td>`;
+      cells += `<td class="col-ar${arUnmetCls}">${formatCellNum(r.total, false)}</td>`;
+      if (showEff) cells += `<td class="col-eff${arUnmetCls}">${formatCellNum(r.eff, false)}</td>`;
+    }
+
+    for (const st of STATUS_COL_SPECS) {
+      const sv = r.status[st.idx];
+      if (sv <= 0.05) cells += `<td class="dim-dash">-</td>`;
+      else cells += `<td style="color:${st.color};font-weight:600;">${Math.round(sv)}</td>`;
+    }
+
+    for (let i = 0; i < 5; i++) {
+      if (state.numericScaling) {
+        const cv = r.corr[i];
+        cells += cv <= 0.05 ? `<td class="dim-dash">-</td>` : `<td>${Math.round(cv)}</td>`;
+      } else {
+        const g = r.grades[i];
+        cells += g === "-" ? `<td class="dim-dash">-</td>` : `<td>${escHtml(g)}</td>`;
+      }
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const rv = w.req[i];
+      if (rv <= 0) {
+        cells += `<td class="dim-dash">-</td>`;
+      } else {
+        const bad = !r.metList[i];
+        cells += `<td class="${bad ? "req-unmet" : ""}">${rv}</td>`;
+      }
+    }
+
+    if (state.colCrit) cells += `<td>${w.crit}</td>`;
+    if (state.colDType) cells += `<td>${escHtml(w.physTypes || "-")}</td>`;
+    if (state.colBuff) cells += `<td class="${w.buffable ? "col-buff-yes" : "dim-dash"}">${w.buffable ? "✓" : "-"}</td>`;
+    if (state.colStam) {
+      const sv = w.r1Stam || 0;
+      cells += sv > 0.05 ? `<td>${sv.toFixed(1)}</td>` : `<td class="dim-dash">-</td>`;
+    }
+    if (state.colStance) {
+      const stv = r.stance || 0;
+      cells += stv > 0.05 ? `<td>${stv.toFixed(1)}</td>` : `<td class="dim-dash">-</td>`;
+    }
+
+    return `<tr class="${cls.join(" ")}" data-wid="${w.id}">${cells}</tr>`;
+  }
+
+  function renderVirtualViewport(force = false) {
+    const scroller = $("tableScroll");
+    const tbody = $("tableBody");
+    const total = state.flatItems.length;
+    const colCount = state.domColsSpec.length;
+
+    if (total === 0) {
+      tbody.innerHTML = "";
+      lastRenderSlice = { start: 0, end: 0, key: "0" };
+      return;
+    }
+
+    const headEl = $("tableHead");
+    const headH = headEl ? headEl.offsetHeight : 56;
+    const scrollTop = Math.max(0, scroller.scrollTop);
+    const viewH = Math.max(300, scroller.clientHeight - headH);
+    const firstVis = Math.floor(scrollTop / ROW_HEIGHT);
+    const visCount = Math.ceil(viewH / ROW_HEIGHT);
+
+    const start = Math.max(0, firstVis - OVERSCAN);
+    const end = Math.min(total, firstVis + visCount + OVERSCAN);
+
+    const sliceKey = `${start}:${end}:${total}:${state.calcSerial}:${state.showDamageSplit}:${state.numericScaling}:${state.enemyPreset}:${state.colCrit}:${state.colDType}:${state.colBuff}:${state.colStam}:${state.colStance}:${state.inspectedRes ? state.inspectedRes.weapon.id : -1}`;
+    if (!force && lastRenderSlice.key === sliceKey) return;
+    if (!force && start >= lastRenderSlice.start + 2 && end <= lastRenderSlice.end - 2 && lastRenderSlice.total === total) {
+      return;
+    }
+
+    lastRenderSlice = { start, end, total, key: sliceKey };
+
+    const topPad = start * ROW_HEIGHT;
+    const bottomPad = Math.max(0, (total - end) * ROW_HEIGHT);
+    const rowsHtml = [];
+    if (topPad > 0) rowsHtml.push(`<tr class="v-spacer" style="height:${topPad}px"><td colspan="${colCount}"></td></tr>`);
+    for (let i = start; i < end; i++) {
+      rowsHtml.push(buildRowHtml(state.flatItems[i]));
+    }
+    if (bottomPad > 0) rowsHtml.push(`<tr class="v-spacer" style="height:${bottomPad}px"><td colspan="${colCount}"></td></tr>`);
+    tbody.innerHTML = rowsHtml.join("");
+  }
+
+  // Inspector Drawer
+  function openDrawer(tabName = null) {
+    $("inspectorDrawer").classList.remove("hidden");
+    if (tabName) switchDrawerTab(tabName);
+    setTimeout(() => renderVirtualViewport(true), 20);
+  }
+
+  function closeDrawer() {
+    $("inspectorDrawer").classList.add("hidden");
+    setTimeout(() => renderVirtualViewport(true), 20);
+  }
+
+  function switchDrawerTab(tabName) {
+    state.activeTab = tabName;
+    document.querySelectorAll(".drawer-tabs .tab-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.tab === tabName);
+    });
+    document.querySelectorAll(".drawer-body .tab-pane").forEach((p) => {
+      p.classList.toggle("active", p.id === `pane-${tabName}`);
+    });
+    if (tabName === "optimizer" && state.inspectedRes) {
+      runOptimizerNow();
+    } else if (tabName === "curve" && state.inspectedRes) {
+      renderScalingCurve();
+      requestAnimationFrame(renderScalingCurve);
+    }
+  }
+
+  function detectActiveCurveStats(w) {
+    const aec = state.data.aec[String(w.aec)];
+    const active = [];
+    for (let si = 0; si < 5; si++) {
+      if (w.corr[si] > 0) {
+        active.push(si);
+        continue;
+      }
+      if (aec) {
+        let hit = false;
+        for (let el = 0; el < 5; el++) {
+          if (w.atk[el] <= 0 && !(w.cat && el === 1)) continue;
+          const idx = el * 5 + si;
+          if (aec.f[idx] && aec.o[idx] > 0) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) active.push(si);
+      }
+    }
+    return active.length ? active : [0];
+  }
+
+  function renderScalingCurve() {
+    const res = state.inspectedRes;
+    const svg = $("scalingCurveSvg");
+    const tooltip = $("curveTooltip");
+    if (!res) {
+      svg.innerHTML = "";
+      $("curveSoftcaps").innerHTML = "";
+      $("curveLegend").textContent = "";
+      state.curveData = null;
+      return;
+    }
+
+    const w = res.weapon;
+    const metric = state.curveMetric || "total";
+    const activeStats = detectActiveCurveStats(w);
+    const statLabels = ["STR", "DEX", "INT", "FAI", "ARC"];
+    const statColors = ["#e06c75", "#e5c07b", "#61afef", "#d4ab53", "#c678dd"];
+
+    // Softcaps from primary element CalcCorrectGraph
+    let primaryEl = w.cat ? 1 : 0;
+    if (!w.cat) {
+      let bestAtk = -1;
+      for (let el = 0; el < 5; el++) {
+        if (w.atk[el] > bestAtk) {
+          bestAtk = w.atk[el];
+          primaryEl = el;
+        }
+      }
+    }
+    const ccgEntry = state.data.ccg[String(w.ccg[primaryEl])];
+    const softcaps = [];
+    if (ccgEntry && ccgEntry[0]) {
+      for (let i = 1; i <= 3; i++) {
+        const cap = Math.round(ccgEntry[0][i]);
+        if (cap > 10 && cap < 99 && !softcaps.includes(cap)) softcaps.push(cap);
+      }
+    }
+    $("curveSoftcaps").innerHTML = softcaps.length
+      ? softcaps.map((c) => `<span class="badge gold">Softcap: ${c}</span>`).join("")
+      : `<span class="badge">Linear / No intermediate softcap</span>`;
+    $("curveLegend").textContent = activeStats.map((si) => statLabels[si]).join(" · ") + ` (${metric === "eff" ? "Eff Dmg" : (metric === "spell" ? "Spell" : "AR")})`;
+
+    const curves = [];
+    let yMin = Infinity;
+    let yMax = -Infinity;
+    for (const si of activeStats) {
+      const pts = [];
+      const key = STAT_KEYS[si];
+      for (let x = 10; x <= 99; x++) {
+        const modStats = Object.assign({}, state.stats);
+        modStats[key] = x;
+        const r = computeWeapon(w, state.data, state.enemyPresets, modStats, res.lv, res.lv, state.twoHand, res.lv, state.enemyPreset, state.activeBuffs);
+        const y = metric === "eff" ? r.eff : (metric === "spell" ? r.spell : r.total);
+        pts.push({ x, y });
+        if (y < yMin) yMin = y;
+        if (y > yMax) yMax = y;
+      }
+      curves.push({ si, label: statLabels[si], color: statColors[si], curStat: Math.max(10, Math.min(99, state.stats[key])), pts });
+    }
+
+    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return;
+    if (Math.abs(yMax - yMin) < 1) {
+      yMin = Math.max(0, yMin - 5);
+      yMax = yMax + 5;
+    } else {
+      const padY = (yMax - yMin) * 0.08;
+      yMin = Math.max(0, yMin - padY);
+      yMax = yMax + padY;
+    }
+
+    const wrap = $("curveChartWrap");
+    const W = Math.max(460, wrap.clientWidth || 720);
+    const H = Math.max(150, wrap.clientHeight || 192);
+    const padL = 44;
+    const padR = 16;
+    const padT = 14;
+    const padB = 22;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const toPx = (x) => padL + ((x - 10) / 89) * plotW;
+    const toPy = (y) => padT + (1 - (y - yMin) / (yMax - yMin)) * plotH;
+
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const out = [];
+
+    // Horizontal Y grid
+    for (let g = 0; g <= 4; g++) {
+      const yVal = yMin + ((yMax - yMin) * g) / 4;
+      const py = toPy(yVal).toFixed(1);
+      out.push(`<line x1="${padL}" y1="${py}" x2="${W - padR}" y2="${py}" stroke="#2b251f" stroke-width="1"/>`);
+      out.push(`<text x="${padL - 6}" y="${Number(py) + 3}" fill="#8e8375" font-size="10" text-anchor="end">${Math.round(yVal)}</text>`);
+    }
+
+    // X ticks (10..99)
+    for (const xt of [10, 20, 30, 40, 50, 60, 70, 80, 90, 99]) {
+      const px = toPx(xt).toFixed(1);
+      out.push(`<line x1="${px}" y1="${padT}" x2="${px}" y2="${H - padB}" stroke="#231e19" stroke-width="1"/>`);
+      out.push(`<text x="${px}" y="${H - 6}" fill="#8e8375" font-size="10" text-anchor="middle">${xt}</text>`);
+    }
+
+    // Softcap vertical dashed lines
+    for (const sc of softcaps) {
+      const px = toPx(sc).toFixed(1);
+      out.push(`<line x1="${px}" y1="${padT}" x2="${px}" y2="${H - padB}" stroke="#d4ab53" stroke-opacity="0.45" stroke-dasharray="4 3" stroke-width="1"/>`);
+      out.push(`<text x="${Number(px) + 3}" y="${padT + 10}" fill="#d4ab53" font-size="9.5" opacity="0.85">${sc}</text>`);
+    }
+
+    // Curves + current stat marker dots
+    for (const c of curves) {
+      const ptsStr = c.pts.map((p) => `${toPx(p.x).toFixed(1)},${toPy(p.y).toFixed(1)}`).join(" ");
+      out.push(`<polyline fill="none" stroke="${c.color}" stroke-width="2.1" points="${ptsStr}" />`);
+      const curPt = c.pts[c.curStat - 10];
+      if (curPt) {
+        out.push(`<circle cx="${toPx(curPt.x).toFixed(1)}" cy="${toPy(curPt.y).toFixed(1)}" r="4" fill="${c.color}" stroke="#14110f" stroke-width="1.5" />`);
+      }
+    }
+
+    out.push(`<line id="curveCrosshair" x1="0" y1="${padT}" x2="0" y2="${H - padB}" stroke="#ede6dc" stroke-opacity="0.5" stroke-width="1" style="display:none;"/>`);
+    svg.innerHTML = out.join("");
+    tooltip.classList.add("hidden");
+    state.curveData = { W, padL, plotW, curves };
+  }
+
+  function updateCurveHover(clientX) {
+    const cd = state.curveData;
+    const svg = $("scalingCurveSvg");
+    const tooltip = $("curveTooltip");
+    if (!cd || !svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const svgX = ((clientX - rect.left) / rect.width) * cd.W;
+    const norm = Math.max(0, Math.min(1, (svgX - cd.padL) / cd.plotW));
+    const statLevel = Math.round(10 + norm * 89);
+    const idx = Math.max(0, Math.min(89, statLevel - 10));
+    const px = cd.padL + (idx / 89) * cd.plotW;
+
+    const line = $("curveCrosshair");
+    if (line) {
+      line.setAttribute("x1", px.toFixed(1));
+      line.setAttribute("x2", px.toFixed(1));
+      line.style.display = "";
+    }
+
+    const lines = cd.curves.map((c) => {
+      const pt = c.pts[idx];
+      const prevPt = idx > 0 ? c.pts[idx - 1] : pt;
+      const slope = pt.y - prevPt.y;
+      return `<div style="color:${c.color};font-weight:600;">${c.label}: ${pt.y.toFixed(1)} <span style="color:#9e9384;font-weight:400;">(+${slope.toFixed(1)}/pt)</span></div>`;
+    });
+    tooltip.innerHTML = `<div style="color:#e6dfd5;font-weight:600;margin-bottom:2px;">Attribute Lv ${statLevel}</div>${lines.join("")}`;
+    tooltip.classList.remove("hidden");
+  }
+
+  function renderInspectorDetails(res, updateAffTable = true) {
+    state.inspectedRes = res;
+    const w = res.weapon;
+    const wtName = state.data.weaponTypes[String(w.wt)] || "";
+    $("drawerTitle").textContent = `${w.name} +${res.lv} (${wtName})`;
+    $("badgeDType").textContent = `Dmg: ${w.physTypes || "-"}`;
+    $("badgeSkill").textContent = `Skill: ${w.skill || "-"}`;
+
+    const bBuff = $("badgeBuff");
+    bBuff.textContent = w.buffable ? "Grease OK" : "No Grease";
+    bBuff.className = w.buffable ? "badge good" : "badge";
+
+    const bInf = $("badgeInfuse");
+    bInf.textContent = w.infusable ? "Infusable" : "Unique";
+    bInf.className = w.infusable ? "badge gold" : "badge";
+
+    $("badgeMisc").textContent = `Crit ${w.crit} · Wt ${Number(w.weight || 0).toFixed(1)}`;
+
+    // Proportional AR Split Bar
+    const bar = $("arSplitBar");
+    const totPos = res.ar.reduce((a, b) => a + Math.max(0, b), 0);
+    if (totPos <= 0.05) {
+      bar.innerHTML = `<div style="width:100%;display:flex;align-items:center;justify-content:center;color:#9e9384;font-size:11px;">Utility / Non-Damaging</div>`;
+    } else {
+      const clsNames = ["phys", "mag", "fire", "ltng", "holy"];
+      const lblNames = ["Phys", "Mag", "Fire", "Ltng", "Holy"];
+      bar.innerHTML = res.ar.map((v, i) => {
+        if (v <= 0.05) return "";
+        const pct = (v * 100) / totPos;
+        const txt = pct >= 14 ? `${lblNames[i]} ${Math.round(v)} (${Math.round(pct)}%)` : (pct >= 8 ? `${Math.round(v)}` : "");
+        return `<div class="ar-seg ${clsNames[i]}" style="width:${pct.toFixed(2)}%" title="${lblNames[i]}: ${v.toFixed(1)}">${txt}</div>`;
+      }).join("");
+    }
+
+    // Breakdown Grid
+    const stNames = ["STR", "DEX", "INT", "FAI", "ARC"];
+    const reqStr = w.req.map((rv, i) => res.metList[i] ? `${stNames[i]}:${rv}` : `<span style="color:#f05454">${stNames[i]}:${rv}!</span>`).join(" ");
+    const grdStr = res.grades.map((g, i) => `${stNames[i]}:${g}`).join(" ");
+    const stItems = STATUS_KEYS.map((k, i) => res.status[i] > 0.05 ? `${k[0].toUpperCase() + k.slice(1)} ${Math.round(res.status[i])}` : "").filter(Boolean);
+
+    $("breakdownGrid").innerHTML = `
+      <div class="kv-box"><div class="kv-label">Total Attack Power</div><div class="kv-val ${res.met ? "gold" : "red"}">${res.total.toFixed(1)}</div></div>
+      <div class="kv-box"><div class="kv-label">Eff Dmg (${escHtml(state.enemyPreset.split(" (")[0])})</div><div class="kv-val ${res.met ? "blue" : "red"}">${res.eff.toFixed(1)}</div></div>
+      <div class="kv-box"><div class="kv-label">${w.cat ? "Spell Scaling" : "Two-Hand Bonus"}</div><div class="kv-val">${w.cat ? res.spell.toFixed(1) : (w.dual ? "Dual (1x)" : (state.twoHand ? "1.5x STR" : "1x STR"))}</div></div>
+      <div class="kv-box" style="grid-column: span 2;"><div class="kv-label">Requirements</div><div class="kv-val" style="font-size:11.5px;">${reqStr}</div></div>
+      <div class="kv-box"><div class="kv-label">Scaling</div><div class="kv-val" style="font-size:11.5px;">${escHtml(grdStr)}</div></div>
+    `;
+
+    const elemNames = ["Physical", "Magic   ", "Fire    ", "Ltng    ", "Holy    "];
+    const lines = [];
+    for (let i = 0; i < 5; i++) {
+      if (res.base[i] > 0 || res.ar[i] > 0) {
+        const sign = res.scale[i] >= 0 ? "+" : "";
+        lines.push(`${elemNames[i]}: ${res.ar[i].toFixed(1).padStart(6)}  (Base ${res.base[i].toFixed(1).padStart(5)} ${sign}${res.scale[i].toFixed(1).padStart(5)}) -> Eff ${res.effElems[i].toFixed(1)}`);
+      }
+    }
+    if (stItems.length) lines.push(`Status  : ${stItems.join(", ")}`);
+    $("elemLines").textContent = lines.length ? lines.join("\n") : "No offensive scaling base attack.";
+
+    // Next +5 gains
+    const gains = computeNextStatGains(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, 5, res.lv, state.enemyPreset, state.activeBuffs);
+    let bestKey = "str";
+    let bestScore = -1e9;
+    for (const sk of STAT_KEYS) {
+      const g = gains[sk];
+      const sc = (w.cat && g.spell > g.ar && g.spell > g.eff) ? g.spell : (state.enemyPreset !== "Raw AR (No Defense)" ? g.eff : g.ar);
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestKey = sk;
+      }
+    }
+    $("nextGainsRow").innerHTML = STAT_KEYS.map((sk) => {
+      const g = gains[sk];
+      const isBest = sk === bestKey && bestScore > 0.05;
+      const spl = w.cat && Math.abs(g.spell) > 0.05 ? ` / +${g.spell.toFixed(1)} Spl` : "";
+      const effT = state.enemyPreset !== "Raw AR (No Defense)" ? ` (+${g.eff.toFixed(1)} Eff)` : "";
+      return `<span class="gain-chip ${isBest ? "best" : ""}">${sk.toUpperCase()} +${g.ar.toFixed(1)} AR${effT}${spl}</span>`;
+    }).join("");
+
+    if (updateAffTable) {
+      const variants = state.byBase.get(w.baseId) || [w];
+      $("affPanelTitle").textContent = `All Affinities for ${w.baseName} (${variants.length})`;
+      const comp = variants.map((vw) =>
+        computeWeapon(vw, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, res.lv, state.enemyPreset, state.activeBuffs)
+      );
+      comp.sort((a, b) => (state.enemyPreset !== "Raw AR (No Defense)" ? b.eff - a.eff : b.total - a.total) || b.total - a.total);
+
+      const bestId = comp.length ? comp[0].weapon.id : -1;
+      const tbody = $("affPanelBody");
+      tbody.innerHTML = comp.map((cr) => {
+        const vw = cr.weapon;
+        const clss = [];
+        if (!cr.met) clss.push("unmet-sub");
+        else if (vw.id === bestId) clss.push("best-row");
+        if (vw.id === w.id) clss.push("selected-sub");
+        return `<tr class="${clss.join(" ")}" data-aff-wid="${vw.id}">
+          <td class="left">${escHtml(vw.aff)}</td>
+          <td>${formatCellNum(cr.total, false)}</td>
+          <td>${formatCellNum(cr.eff, false)}</td>
+          <td>${formatCellNum(cr.ar[0])}</td>
+          <td>${formatCellNum(cr.ar[1])}</td>
+          <td>${formatCellNum(cr.ar[2])}</td>
+          <td>${formatCellNum(cr.ar[3])}</td>
+          <td>${formatCellNum(cr.ar[4])}</td>
+          <td>${formatCellNum(cr.spell)}</td>
+          <td class="center">${vw.buffable ? "✓" : "-"}</td>
+          <td class="center">${escHtml(cr.grades.join(" "))}</td>
+        </tr>`;
+      }).join("");
+
+      tbody.querySelectorAll("tr[data-aff-wid]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          const wid = Number(tr.dataset.affWid);
+          const found = comp.find((c) => c.weapon.id === wid);
+          if (found) {
+            tbody.querySelectorAll("tr").forEach((x) => x.classList.remove("selected-sub"));
+            tr.classList.add("selected-sub");
+            renderInspectorDetails(found, false);
+          }
+        });
+        tr.addEventListener("dblclick", () => {
+          pinWeaponId(Number(tr.dataset.affWid));
+        });
+      });
+
+      if (state.activeTab === "optimizer") {
+        runOptimizerNow();
+      } else if (state.activeTab === "curve") {
+        renderScalingCurve();
+      }
+    } else if (state.activeTab === "curve") {
+      renderScalingCurve();
+    }
+  }
+
+  async function runOptimizerNow() {
+    const res = state.inspectedRes;
+    const tbody = $("optTableBody");
+    if (!res) {
+      $("optStatusText").textContent = "Select a weapon row to optimize.";
+      tbody.innerHTML = "";
+      return [];
+    }
+    const [floorMode, extraStr] = $("optBudgetSelect").value.split(":");
+    const extra = Number(extraStr) || 0;
+    const goal = $("optGoalSelect").value;
+
+    const result = await window.pywebview.api.optimize_weapon(
+      res.weapon.baseId,
+      state.stats,
+      state.regLv,
+      state.somberLv,
+      state.twoHand,
+      extra,
+      floorMode,
+      goal,
+      state.enemyPreset,
+      res.lv,
+      state.activeBuffs
+    );
+    state.optResults = result.entries || [];
+    const totalPts = STAT_KEYS.reduce((s, k) => s + state.stats[k], 0) + extra;
+    $("optStatusText").textContent = `${res.weapon.baseName} +${res.lv} · Budget ${totalPts} pts (${floorMode === "keep" ? "Level Up" : "Respec min 8"}) · ${result.ms.toFixed(0)} ms`;
+
+    const baseVal = goal === "eff" ? res.eff : (goal === "spell" ? res.spell : res.total);
+    const bestId = state.optResults.length ? state.optResults[0].weaponId : -1;
+
+    tbody.innerHTML = state.optResults.map((ent, i) => {
+      const curVal = goal === "eff" ? ent.eff : (goal === "spell" ? ent.spell : ent.total);
+      const dv = curVal - baseVal;
+      const dStr = dv >= 0 ? `+${dv.toFixed(1)}` : dv.toFixed(1);
+      const st = ent.stats;
+      const statStr = `${st.str} / ${st.dex} / ${st.int} / ${st.fai} / ${st.arc}`;
+      const cls = !ent.met ? "unmet-sub" : (ent.weaponId === bestId ? "best-row" : (i === 0 ? "selected-sub" : ""));
+      return `<tr class="${cls}" data-opt-idx="${i}">
+        <td class="left">${escHtml(ent.aff)}</td>
+        <td>${Math.round(ent.total)}</td>
+        <td>${Math.round(ent.eff)}</td>
+        <td>${dStr}</td>
+        <td>${ent.spell > 0.05 ? Math.round(ent.spell) : "-"}</td>
+        <td class="center">${statStr}</td>
+        <td class="center">${escHtml(ent.grades.join(" "))}</td>
+      </tr>`;
+    }).join("");
+
+    tbody.querySelectorAll("tr[data-opt-idx]").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        tbody.querySelectorAll("tr").forEach((x) => x.classList.remove("selected-sub"));
+        tr.classList.add("selected-sub");
+      });
+      tr.addEventListener("dblclick", () => {
+        applyOptimizerIndex(Number(tr.dataset.optIdx));
+      });
+    });
+    if (tbody.firstElementChild) tbody.firstElementChild.classList.add("selected-sub");
+    return state.optResults;
+  }
+
+  function applyOptimizerIndex(idx) {
+    const ent = state.optResults[idx];
+    if (!ent) return;
+    state.stats = Object.assign({}, ent.stats);
+    updateStatInputsDom();
+    recalculateAndRender();
+  }
+
+  function pinWeaponId(wid) {
+    if (!state.byId.has(wid)) return;
+    if (!state.compareIds.includes(wid)) {
+      if (state.compareIds.length >= 6) state.compareIds.shift();
+      state.compareIds.push(wid);
+    }
+    refreshCompareTray();
+    openDrawer("compare");
+  }
+
+  function refreshCompareTray() {
+    const n = state.compareIds.length;
+    $("topCompareBtn").textContent = `Compare (${n})`;
+    $("compareTabBtn").textContent = `Compare Tray (${n}/6)`;
+    const tbody = $("cmpTableBody");
+    if (!n) {
+      tbody.innerHTML = "";
+      return;
+    }
+    const items = state.compareIds
+      .map((wid) => state.byId.get(wid))
+      .filter(Boolean)
+      .map((w) => computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, -1, state.enemyPreset, state.activeBuffs));
+    if (!items.length) return;
+
+    const baseTot = items[0].total;
+    const baseEff = items[0].eff;
+    const elShort = ["P", "M", "F", "L", "H"];
+
+    tbody.innerHTML = items.map((r, idx) => {
+      const w = r.weapon;
+      const dt = idx === 0 ? "Base" : (r.total - baseTot >= 0 ? `+${Math.round(r.total - baseTot)}` : `${Math.round(r.total - baseTot)}`);
+      const de = idx === 0 ? "Base" : (r.eff - baseEff >= 0 ? `+${Math.round(r.eff - baseEff)}` : `${Math.round(r.eff - baseEff)}`);
+      const splitStr = r.ar.map((v, i) => v > 0.05 ? `${elShort[i]}:${Math.round(v)}` : "").filter(Boolean).join(" / ") || "-";
+      const stStr = STATUS_KEYS.map((k, i) => r.status[i] > 0.05 ? `${k.slice(0, 3)}:${Math.round(r.status[i])}` : "").filter(Boolean).join(", ") || "-";
+      const cls = !r.met ? "unmet-sub" : (idx === 0 ? "best-row" : "");
+      return `<tr class="${cls}" data-cmp-wid="${w.id}">
+        <td class="left">${escHtml(w.baseName)} +${r.lv}</td>
+        <td class="left">${escHtml(w.aff)}</td>
+        <td>${Math.round(r.total)}</td>
+        <td>${dt}</td>
+        <td>${Math.round(r.eff)}</td>
+        <td>${de}</td>
+        <td class="left">${escHtml(splitStr)}</td>
+        <td>${r.spell > 0.05 ? Math.round(r.spell) : "-"}</td>
+        <td class="left">${escHtml(stStr)}</td>
+        <td>${w.crit}</td>
+        <td class="center">${w.buffable ? "✓" : "-"}</td>
+        <td class="left">${escHtml(w.skill || "-")}</td>
+      </tr>`;
+    }).join("");
+
+    tbody.querySelectorAll("tr[data-cmp-wid]").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        tbody.querySelectorAll("tr").forEach((x) => x.classList.remove("selected-sub"));
+        tr.classList.add("selected-sub");
+      });
+    });
+  }
+
+  // Save Loading & Application
+  function applySavePayload(parsed, selectLatest = true) {
+    if (!parsed || !parsed.characters || !parsed.characters.length) {
+      $("charMetaText").textContent = parsed && parsed.error ? parsed.error : "Manual stats";
+      $("saveAcceptedIcon").classList.remove("active");
+      return false;
+    }
+    state.savePath = parsed.savePath;
+    state.characters = parsed.characters;
+
+    const sel = $("charSelect");
+    sel.innerHTML = parsed.characters.map((c) => {
+      const tag = c.slot === parsed.lastSlot ? " [Latest]" : "";
+      return `<option value="${c.slot}">Slot ${c.slot + 1}: ${escHtml(c.name)} (Lv.${c.level} · ${escHtml(c.playTime)})${tag}</option>`;
+    }).join("");
+
+    const targetSlot = selectLatest ? parsed.lastSlot : state.activeSlot;
+    const ch = parsed.characters.find((c) => c.slot === targetSlot) || parsed.characters[0];
+    sel.value = String(ch.slot);
+    applyCharacter(ch);
+    return true;
+  }
+
+  function applyCharacter(ch) {
+    state.activeSlot = ch.slot;
+    state.savedSnapshot = {
+      str: ch.stats.str,
+      dex: ch.stats.dex,
+      int: ch.stats.int,
+      fai: ch.stats.fai,
+      arc: ch.stats.arc,
+    };
+    state.stats = Object.assign({}, state.savedSnapshot);
+    state.equippedMap = new Map();
+    for (const eq of ch.equipped || []) {
+      state.equippedMap.set(eq.weaponId, eq.level);
+    }
+    const ar = ch.armor || [null, null, null, null];
+    const tl = ch.talismans || [null, null, null, null];
+    state.savedGear = {
+      armor: [ar[0] || null, ar[1] || null, ar[2] || null, ar[3] || null],
+      talismans: [tl[0] || null, tl[1] || null, tl[2] || null, tl[3] || null],
+    };
+    state.armorIds = state.savedGear.armor.slice();
+    state.talismanIds = state.savedGear.talismans.slice();
+    syncGearDropdownValues();
+    recomputeActiveBuffs();
+
+    matchEquippedLevels(false);
+    updateStatInputsDom();
+    $("charMetaText").textContent = `${ch.name} Lv.${ch.level} · Vig ${ch.stats.vig} Mnd ${ch.stats.mnd} End ${ch.stats.end}`;
+    $("saveAcceptedIcon").classList.add("active");
+    const saveName = state.savePath ? state.savePath.split(/[/\\]/).pop() : "save";
+    $("infoBannerText").innerHTML =
+      `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
+  }
+
+  function matchEquippedLevels(recalc = true) {
+    let maxReg = null;
+    let maxSomber = null;
+    for (const [wid, lv] of state.equippedMap.entries()) {
+      const w = state.byId.get(wid);
+      if (!w) continue;
+      if (w.maxLv === 25) maxReg = maxReg === null ? lv : Math.max(maxReg, lv);
+      else if (w.maxLv > 0) maxSomber = maxSomber === null ? lv : Math.max(maxSomber, lv);
+    }
+    if (maxReg !== null && maxSomber !== null) {
+      state.regLv = maxReg;
+      state.somberLv = maxSomber;
+    } else if (maxReg !== null) {
+      state.regLv = maxReg;
+      state.somberLv = Math.min(10, Math.round((maxReg * 10) / 25));
+    } else if (maxSomber !== null) {
+      state.somberLv = maxSomber;
+      state.regLv = Math.min(25, Math.round((maxSomber * 25) / 10));
+    }
+    syncLevelSelectValue();
+    if (recalc) recalculateAndRender();
+  }
+
+  function persistSettings() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    window.pywebview.api.save_settings({
+      twoHand: state.twoHand,
+      groupByType: state.groupByType,
+      numericScaling: state.numericScaling,
+      showDamageSplit: state.showDamageSplit,
+      colCrit: state.colCrit,
+      colDType: state.colDType,
+      colBuff: state.colBuff,
+      colStam: state.colStam,
+      colStance: state.colStance,
+      condTalismans: state.condTalismans,
+      greaseId: state.greaseId,
+      buffToggles: state.buffToggles,
+      effectiveOnly: state.effectiveOnly,
+      bestAffinityOnly: state.bestAffinityOnly,
+      buffableOnly: state.buffableOnly,
+      enemyPreset: state.enemyPreset,
+      liveWatch: state.liveWatch,
+      bannerDismissed: state.bannerDismissed,
+    });
+  }
+
+  function bindUiEvents() {
+    $("drawerToggleBtn").addEventListener("click", () => {
+      $("sidebar").classList.toggle("collapsed");
+      setTimeout(() => renderVirtualViewport(true), 200);
+    });
+
+    $("topReloadBtn").addEventListener("click", async () => {
+      const res = await window.pywebview.api.reload_save(true);
+      if (applySavePayload(res, true)) recalculateAndRender();
+    });
+    $("sideReloadBtn").addEventListener("click", async () => {
+      const res = await window.pywebview.api.reload_save(true);
+      if (applySavePayload(res, true)) recalculateAndRender();
+    });
+    $("sideBrowseBtn").addEventListener("click", async () => {
+      const res = await window.pywebview.api.browse_save();
+      if (res && !res.cancelled && applySavePayload(res, true)) recalculateAndRender();
+    });
+    $("charSelect").addEventListener("change", () => {
+      const slot = Number($("charSelect").value);
+      const ch = state.characters.find((c) => c.slot === slot);
+      if (ch) {
+        applyCharacter(ch);
+        recalculateAndRender();
+      }
+    });
+
+    $("liveWatchCb").addEventListener("change", (e) => {
+      state.liveWatch = e.target.checked;
+      persistSettings();
+    });
+
+    $("topMatchEqBtn").addEventListener("click", () => matchEquippedLevels(true));
+    $("maxUpgradeBtn").addEventListener("click", () => {
+      state.regLv = 25;
+      state.somberLv = 10;
+      syncLevelSelectValue();
+      recalculateAndRender();
+    });
+    $("revertStatsBtn").addEventListener("click", () => {
+      if (state.savedSnapshot) {
+        state.stats = Object.assign({}, state.savedSnapshot);
+        updateStatInputsDom();
+        recalculateAndRender();
+      }
+    });
+    $("topCompareBtn").addEventListener("click", () => {
+      const drw = $("inspectorDrawer");
+      if (!drw.classList.contains("hidden") && state.activeTab === "compare") closeDrawer();
+      else openDrawer("compare");
+    });
+    $("topRefreshModBtn").addEventListener("click", async () => {
+      const btn = $("topRefreshModBtn");
+      btn.disabled = true;
+      btn.textContent = "Extracting...";
+      try {
+        const res = await window.pywebview.api.refresh_mod_data();
+        if (res && res.ok) {
+          state.data = res.data;
+          state.byId.clear();
+          state.byBase.clear();
+          buildSearchTags(state.data);
+          populateGearDropdowns();
+          syncGearDropdownValues();
+          recalculateAndRender();
+        } else {
+          alert((res && res.message) || "extract_err_data.py not found alongside executable.");
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Refresh Mod";
+      }
+    });
+    $("topGearBtn").addEventListener("click", () => {
+      $("gearPanel").classList.toggle("hidden");
+      setTimeout(() => renderVirtualViewport(true), 20);
+    });
+    $("extraColsBtn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      $("extraColsMenu").classList.toggle("hidden");
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".extra-cols-anchor")) {
+        $("extraColsMenu").classList.add("hidden");
+      }
+    });
+    for (const [cbId, stateKey] of [
+      ["colCritCb", "colCrit"],
+      ["colDTypeCb", "colDType"],
+      ["colBuffCb", "colBuff"],
+      ["colStamCb", "colStam"],
+      ["colStanceCb", "colStance"],
+    ]) {
+      $(cbId).addEventListener("change", (e) => {
+        state[stateKey] = e.target.checked;
+        updateExtraColsButtonLabel();
+        renderTableHeader();
+        persistSettings();
+        lastRenderSlice.key = "";
+        renderVirtualViewport(true);
+      });
+    }
+
+    const armorSelIds = ["armorHeadSel", "armorChestSel", "armorArmsSel", "armorLegsSel"];
+    armorSelIds.forEach((id, slot) => {
+      $(id).addEventListener("change", (e) => {
+        state.armorIds[slot] = e.target.value ? Number(e.target.value) : null;
+        recalculateAndRender();
+      });
+    });
+    for (let s = 0; s < 4; s++) {
+      ((slot) => {
+        $(`tal${slot}Sel`).addEventListener("change", (e) => {
+          state.talismanIds[slot] = e.target.value ? Number(e.target.value) : null;
+          recalculateAndRender();
+        });
+      })(s);
+    }
+    $("condTalismansCb").addEventListener("change", (e) => {
+      state.condTalismans = e.target.checked;
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("greaseSel").addEventListener("change", (e) => {
+      state.greaseId = Number(e.target.value) || 0;
+      persistSettings();
+      recalculateAndRender();
+    });
+    document.querySelectorAll("#buffPillsRow .buff-pill").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.buff;
+        state.buffToggles[k] = !state.buffToggles[k];
+        btn.classList.toggle("active", state.buffToggles[k]);
+        persistSettings();
+        recalculateAndRender();
+      });
+    });
+    $("gearResetBtn").addEventListener("click", () => {
+      state.armorIds = state.savedGear.armor.slice();
+      state.talismanIds = state.savedGear.talismans.slice();
+      syncGearDropdownValues();
+      recalculateAndRender();
+    });
+    $("gearClearBuffsBtn").addEventListener("click", () => {
+      state.condTalismans = false;
+      state.greaseId = 0;
+      for (const k of Object.keys(state.buffToggles)) state.buffToggles[k] = false;
+      syncGearDropdownValues();
+      persistSettings();
+      recalculateAndRender();
+    });
+
+    $("curveMetricSelect").addEventListener("change", (e) => {
+      state.curveMetric = e.target.value;
+      renderScalingCurve();
+    });
+    $("scalingCurveSvg").addEventListener("mousemove", (e) => {
+      updateCurveHover(e.clientX);
+    });
+    $("scalingCurveSvg").addEventListener("mouseleave", () => {
+      const line = $("curveCrosshair");
+      if (line) line.style.display = "none";
+      $("curveTooltip").classList.add("hidden");
+    });
+    $("topSearchFocusBtn").addEventListener("click", () => {
+      $("sidebar").classList.remove("collapsed");
+      const inp = $("searchInput");
+      inp.focus();
+      inp.select();
+    });
+
+    for (const [id, key] of [["strInput", "str"], ["dexInput", "dex"], ["intInput", "int"], ["faiInput", "fai"], ["arcInput", "arc"]]) {
+      $(id).addEventListener("input", (e) => {
+        const val = parseInt(e.target.value, 10);
+        if (!Number.isNaN(val)) {
+          state.stats[key] = Math.max(1, Math.min(199, val));
+          update2hHint();
+          recalculateAndRender();
+        }
+      });
+    }
+
+    $("levelSelect").addEventListener("change", (e) => {
+      const [r, s] = e.target.value.split(":").map(Number);
+      state.regLv = r;
+      state.somberLv = s;
+      recalculateAndRender();
+    });
+
+    $("enemySelect").addEventListener("change", (e) => {
+      state.enemyPreset = e.target.value;
+      renderTableHeader();
+      persistSettings();
+      recalculateAndRender();
+    });
+
+    $("twoHandCb").addEventListener("change", (e) => {
+      state.twoHand = e.target.checked;
+      update2hHint();
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("groupByTypeCb").addEventListener("change", (e) => {
+      state.groupByType = e.target.checked;
+      persistSettings();
+      sortAndFlattenItems(lastComputedList);
+      lastRenderSlice.key = "";
+      renderVirtualViewport(true);
+    });
+    $("numericScalingCb").addEventListener("change", (e) => {
+      state.numericScaling = e.target.checked;
+      renderTableHeader();
+      persistSettings();
+      lastRenderSlice.key = "";
+      renderVirtualViewport(true);
+    });
+    $("showDamageSplitCb").addEventListener("change", (e) => {
+      state.showDamageSplit = e.target.checked;
+      renderTableHeader();
+      persistSettings();
+      lastRenderSlice.key = "";
+      renderVirtualViewport(true);
+    });
+
+    $("effectiveOnlyCb").addEventListener("change", (e) => {
+      state.effectiveOnly = e.target.checked;
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("bestAffinityOnlyCb").addEventListener("change", (e) => {
+      state.bestAffinityOnly = e.target.checked;
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("buffableOnlyCb").addEventListener("change", (e) => {
+      state.buffableOnly = e.target.checked;
+      persistSettings();
+      recalculateAndRender();
+    });
+    $("equippedOnlyCb").addEventListener("change", (e) => {
+      state.equippedOnly = e.target.checked;
+      recalculateAndRender();
+    });
+
+    let searchTimer = null;
+    $("searchInput").addEventListener("input", (e) => {
+      state.search = e.target.value;
+      $("searchClearBtn").classList.toggle("visible", Boolean(state.search));
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(recalculateAndRender, 50);
+    });
+    $("searchClearBtn").addEventListener("click", () => {
+      $("searchInput").value = "";
+      state.search = "";
+      $("searchClearBtn").classList.remove("visible");
+      recalculateAndRender();
+    });
+
+    $("affAllBtn").addEventListener("click", () => {
+      state.selectedAffs = new Set(state.allAffList);
+      syncAffinityCheckboxesDom();
+      recalculateAndRender();
+    });
+    $("affNoneBtn").addEventListener("click", () => {
+      state.selectedAffs.clear();
+      syncAffinityCheckboxesDom();
+      recalculateAndRender();
+    });
+    $("affPhysBtn").addEventListener("click", () => {
+      state.selectedAffs = new Set(state.allAffList.filter((a) => PHYSICAL_AFFS.has(a)));
+      syncAffinityCheckboxesDom();
+      recalculateAndRender();
+    });
+
+    $("typeAllBtn").addEventListener("click", () => {
+      state.selectedWts = new Set(state.allWtList);
+      syncWeaponTypeDom();
+      recalculateAndRender();
+    });
+    $("typeNoneBtn").addEventListener("click", () => {
+      state.selectedWts.clear();
+      syncWeaponTypeDom();
+      recalculateAndRender();
+    });
+
+    $("bannerCloseBtn").addEventListener("click", () => {
+      state.bannerDismissed = true;
+      $("infoBanner").classList.add("hidden");
+      persistSettings();
+      setTimeout(() => renderVirtualViewport(true), 20);
+    });
+
+    // Virtual table scroll & row click / dblclick
+    $("tableScroll").addEventListener("scroll", () => {
+      renderVirtualViewport(false);
+    });
+    $("tableBody").addEventListener("click", (e) => {
+      const tr = e.target.closest("tr.w-row");
+      if (!tr) return;
+      const wid = Number(tr.dataset.wid);
+      const item = state.flatItems.find((x) => x.kind === "row" && x.res.weapon.id === wid);
+      if (!item) return;
+      renderInspectorDetails(item.res, true);
+      openDrawer();
+      renderVirtualViewport(true);
+    });
+    $("tableBody").addEventListener("dblclick", (e) => {
+      const tr = e.target.closest("tr.w-row");
+      if (!tr) return;
+      pinWeaponId(Number(tr.dataset.wid));
+    });
+
+    // Inspector Drawer controls
+    document.querySelectorAll(".drawer-tabs .tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => switchDrawerTab(btn.dataset.tab));
+    });
+    $("drawerCloseBtn").addEventListener("click", closeDrawer);
+    $("pinCompareBtn").addEventListener("click", () => {
+      if (state.inspectedRes) pinWeaponId(state.inspectedRes.weapon.id);
+    });
+    $("cmpPinCurrentBtn").addEventListener("click", () => {
+      if (state.inspectedRes) pinWeaponId(state.inspectedRes.weapon.id);
+    });
+    $("cmpRemoveBtn").addEventListener("click", () => {
+      const selTr = $("cmpTableBody").querySelector("tr.selected-sub");
+      if (!selTr) return;
+      const wid = Number(selTr.dataset.cmpWid);
+      state.compareIds = state.compareIds.filter((id) => id !== wid);
+      refreshCompareTray();
+    });
+    $("cmpClearBtn").addEventListener("click", () => {
+      state.compareIds = [];
+      refreshCompareTray();
+    });
+    $("copySummaryBtn").addEventListener("click", () => {
+      const r = state.inspectedRes;
+      if (!r) return;
+      const w = r.weapon;
+      const txt = `${w.name} +${r.lv} (${w.aff}) | AR ${Math.round(r.total)} | Eff ${Math.round(r.eff)} (${state.enemyPreset}) | Scaling ${r.grades.join(" ")} | Skill: ${w.skill || "-"}`;
+      window.pywebview.api.copy_text(txt);
+    });
+
+    $("optBudgetSelect").addEventListener("change", runOptimizerNow);
+    $("optGoalSelect").addEventListener("change", runOptimizerNow);
+    $("optRunBtn").addEventListener("click", runOptimizerNow);
+    $("optPreviewBtn").addEventListener("click", () => {
+      const selTr = $("optTableBody").querySelector("tr.selected-sub");
+      const idx = selTr ? Number(selTr.dataset.optIdx) : 0;
+      applyOptimizerIndex(idx);
+    });
+    $("optRevertBtn").addEventListener("click", () => {
+      if (state.savedSnapshot) {
+        state.stats = Object.assign({}, state.savedSnapshot);
+        updateStatInputsDom();
+        recalculateAndRender();
+      }
+    });
+
+    // Keyboard shortcuts
+    window.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        $("sidebar").classList.remove("collapsed");
+        $("searchInput").focus();
+        $("searchInput").select();
+      } else if (e.key === "Escape") {
+        if (document.activeElement === $("searchInput") && state.search) {
+          $("searchInput").value = "";
+          state.search = "";
+          $("searchClearBtn").classList.remove("visible");
+          recalculateAndRender();
+        } else if (!$("inspectorDrawer").classList.contains("hidden")) {
+          closeDrawer();
+        }
+      } else if (e.key === "F5") {
+        e.preventDefault();
+        window.pywebview.api.reload_save(true).then((res) => {
+          if (applySavePayload(res, true)) recalculateAndRender();
+        });
+      } else if (e.key.toLowerCase() === "p" && !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+        if (state.inspectedRes) pinWeaponId(state.inspectedRes.weapon.id);
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      renderVirtualViewport(true);
+      if (state.activeTab === "curve" && !$("inspectorDrawer").classList.contains("hidden")) {
+        renderScalingCurve();
+      }
+    });
+  }
+
+  async function initApp() {
+    const payload = await window.pywebview.api.get_initial_payload();
+    state.data = payload.data;
+    state.enemyPresets = payload.enemyPresets || { "Raw AR (No Defense)": null };
+    buildSearchTags(state.data);
+    buildAffinitySidebar();
+    buildWeaponTypeTree();
+    populateEnemySelect();
+    populateGearDropdowns();
+
+    const cfg = payload.settings || {};
+    if (typeof cfg.twoHand === "boolean") state.twoHand = cfg.twoHand;
+    if (typeof cfg.groupByType === "boolean") state.groupByType = cfg.groupByType;
+    if (typeof cfg.numericScaling === "boolean") state.numericScaling = cfg.numericScaling;
+    if (typeof cfg.showDamageSplit === "boolean") state.showDamageSplit = cfg.showDamageSplit;
+    if (typeof cfg.colCrit === "boolean") state.colCrit = cfg.colCrit;
+    if (typeof cfg.colDType === "boolean") state.colDType = cfg.colDType;
+    if (typeof cfg.colBuff === "boolean") state.colBuff = cfg.colBuff;
+    if (typeof cfg.colStam === "boolean") state.colStam = cfg.colStam;
+    if (typeof cfg.colStance === "boolean") state.colStance = cfg.colStance;
+    if (typeof cfg.condTalismans === "boolean") state.condTalismans = cfg.condTalismans;
+    if (typeof cfg.greaseId === "number") state.greaseId = cfg.greaseId;
+    if (cfg.buffToggles && typeof cfg.buffToggles === "object") {
+      Object.assign(state.buffToggles, cfg.buffToggles);
+    }
+    if (typeof cfg.effectiveOnly === "boolean") state.effectiveOnly = cfg.effectiveOnly;
+    if (typeof cfg.bestAffinityOnly === "boolean") state.bestAffinityOnly = cfg.bestAffinityOnly;
+    if (typeof cfg.buffableOnly === "boolean") state.buffableOnly = cfg.buffableOnly;
+    if (typeof cfg.liveWatch === "boolean") state.liveWatch = cfg.liveWatch;
+    if (cfg.enemyPreset && cfg.enemyPreset in state.enemyPresets) state.enemyPreset = cfg.enemyPreset;
+    if (cfg.bannerDismissed) state.bannerDismissed = true;
+
+    $("twoHandCb").checked = state.twoHand;
+    $("groupByTypeCb").checked = state.groupByType;
+    $("numericScalingCb").checked = state.numericScaling;
+    $("showDamageSplitCb").checked = state.showDamageSplit;
+    $("colCritCb").checked = state.colCrit;
+    $("colDTypeCb").checked = state.colDType;
+    $("colBuffCb").checked = state.colBuff;
+    $("colStamCb").checked = state.colStam;
+    $("colStanceCb").checked = state.colStance;
+    $("effectiveOnlyCb").checked = state.effectiveOnly;
+    $("bestAffinityOnlyCb").checked = state.bestAffinityOnly;
+    $("buffableOnlyCb").checked = state.buffableOnly;
+    $("liveWatchCb").checked = state.liveWatch;
+    $("enemySelect").value = state.enemyPreset;
+    if (state.bannerDismissed) $("infoBanner").classList.add("hidden");
+    updateExtraColsButtonLabel();
+
+    populateLevelSelect();
+    syncGearDropdownValues();
+    applySavePayload(payload.save, true);
+    updateStatInputsDom();
+    renderTableHeader();
+    bindUiEvents();
+    recalculateAndRender();
+
+    // Live save file watcher (2s)
+    if (!payload.selfTestMode) {
+      setInterval(async () => {
+        if (!state.liveWatch) return;
+        try {
+          const upd = await window.pywebview.api.poll_save();
+          if (upd && upd.changed && applySavePayload(upd.save, true)) {
+            recalculateAndRender();
+          }
+        } catch (_) {}
+      }, 2000);
+    }
+
+    // Expose automated test hooks for --self-test verification
+    window.__ERR_TEST = {
+      computeById(id, stats, regLv, somberLv, twoHand, enemyPreset, buffs = null) {
+        const w = state.byId.get(id);
+        return computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, -1, enemyPreset, buffs);
+      },
+      getGearInfo() {
+        return {
+          armorIds: state.armorIds.slice(),
+          talismanIds: state.talismanIds.slice(),
+          greaseCount: (state.data.greases || []).length,
+          firstGrease: (state.data.greases || [])[0] || null,
+          activeBuffs: state.activeBuffs,
+          char0Armor: state.characters[0] ? state.characters[0].armor : null,
+          char0Talismans: state.characters[0] ? state.characters[0].talismans : null,
+        };
+      },
+      testScalingCurve(wid) {
+        this.openInspectorById(wid);
+        switchDrawerTab("curve");
+        renderScalingCurve();
+        return {
+          polyCount: document.querySelectorAll("#scalingCurveSvg polyline").length,
+          dotCount: document.querySelectorAll("#scalingCurveSvg circle").length,
+          curveStats: state.curveData ? state.curveData.curves.map((c) => c.label) : [],
+        };
+      },
+      getSummary() {
+        const heads = Array.from(document.querySelectorAll("#tableHead th")).map((th) => th.textContent.trim());
+        const visibleRows = document.querySelectorAll("#tableBody tr.w-row").length;
+        const firstRow = state.flatItems.find((x) => x.kind === "row");
+        return {
+          weaponsLoaded: state.data.weapons.length,
+          charCount: state.characters.length,
+          activeSlot: state.activeSlot,
+          savePath: state.savePath,
+          totalItems: state.flatItems.length,
+          computedCount: lastComputedList.length,
+          visibleDomRows: visibleRows,
+          headerTexts: heads,
+          topWeapon: firstRow ? {
+            id: firstRow.res.weapon.id,
+            name: firstRow.res.weapon.name,
+            total: firstRow.res.total,
+            eff: firstRow.res.eff,
+          } : null,
+          jsErrors: window.__JS_ERRORS.slice(),
+        };
+      },
+      setFilterSearch(txt) {
+        $("searchInput").value = txt;
+        state.search = txt;
+        recalculateAndRender();
+        return lastComputedList.length;
+      },
+      toggleOption(optId, val) {
+        const el = $(optId);
+        el.checked = val;
+        el.dispatchEvent(new Event("change"));
+      },
+      setEnemyPreset(name) {
+        $("enemySelect").value = name;
+        $("enemySelect").dispatchEvent(new Event("change"));
+      },
+      selectAffinitySubset(affArray) {
+        state.selectedAffs = new Set(affArray);
+        syncAffinityCheckboxesDom();
+        recalculateAndRender();
+        return lastComputedList.length;
+      },
+      selectWeaponTypes(wtArray) {
+        state.selectedWts = new Set(wtArray);
+        syncWeaponTypeDom();
+        recalculateAndRender();
+        return lastComputedList.length;
+      },
+      openInspectorById(wid) {
+        const item = state.flatItems.find((x) => x.kind === "row" && x.res.weapon.id === wid);
+        const res = item ? item.res : computeWeapon(state.byId.get(wid), state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, -1, state.enemyPreset);
+        renderInspectorDetails(res, true);
+        openDrawer("details");
+        return {
+          affRows: document.querySelectorAll("#affPanelBody tr").length,
+          drawerOpen: !$("inspectorDrawer").classList.contains("hidden"),
+        };
+      },
+      clickSecondAffinity() {
+        const rows = document.querySelectorAll("#affPanelBody tr");
+        if (rows.length < 2) return null;
+        rows[1].click();
+        return state.inspectedRes ? state.inspectedRes.weapon.id : null;
+      },
+      pinTwoAndCompare(widA, widB) {
+        state.compareIds = [];
+        pinWeaponId(widA);
+        pinWeaponId(widB);
+        return document.querySelectorAll("#cmpTableBody tr").length;
+      },
+      startOptimizerTest(wid) {
+        window.__ERR_OPT_RESULT = null;
+        this.openInspectorById(wid);
+        switchDrawerTab("optimizer");
+        runOptimizerNow()
+          .then((entries) => {
+            window.__ERR_OPT_RESULT = {
+              count: entries.length,
+              topAff: entries[0] ? entries[0].aff : null,
+              topEff: entries[0] ? entries[0].eff : 0,
+            };
+          })
+          .catch((err) => {
+            window.__ERR_OPT_RESULT = { error: String(err) };
+          });
+      },
+    };
+
+    window.__ERR_READY = true;
+  }
+
+  window.addEventListener("pywebviewready", () => {
+    initApp().catch((err) => {
+      window.__JS_ERRORS.push(err && err.stack ? err.stack : String(err));
+    });
+  });
+})();

@@ -1,0 +1,12 @@
+build/
+dist/
+signed/
+release_assets/
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+*.exe
+err_ar_settings.json
+.vscode/
+.DS_Store
