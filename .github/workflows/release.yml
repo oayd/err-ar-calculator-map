@@ -66,6 +66,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Prepare release assets
+        id: prep
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path release_assets | Out-Null
@@ -76,6 +77,7 @@ jobs:
           }
           $hash = (Get-FileHash 'release_assets\ERR_AR_Calculator.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ERR_AR_Calculator.exe" | Set-Content -Encoding ascii 'release_assets\SHA256SUMS.txt'
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -86,6 +88,9 @@ jobs:
             release_assets/SHA256SUMS.txt
           body: |
             Standalone Windows executable for **ELDEN RING Reforged (ERR v2.3.9.1)**.
+
+            - **SHA-256 (`ERR_AR_Calculator.exe`):** `${{ steps.prep.outputs.sha256 }}`
+            - **VirusTotal Scan:** [View report](https://www.virustotal.com/gui/file/${{ steps.prep.outputs.sha256 }})
 
             Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator#privacy-policy).
           generate_release_notes: true
