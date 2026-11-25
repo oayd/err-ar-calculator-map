@@ -102,5 +102,5 @@ jobs:
             - **SHA-256 (`ERR_AR_Calculator.exe`):** `${{ steps.prep.outputs.sha256 }}`
             - **VirusTotal Scan:** [View report](https://www.virustotal.com/gui/file/${{ steps.prep.outputs.sha256 }})
 
-            Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator#privacy-policy).
+            Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator-map#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator-map#privacy-policy).
           generate_release_notes: true
