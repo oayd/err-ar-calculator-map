@@ -1535,6 +1535,19 @@ def run_self_test(report_path: Optional[str]):
             assert v15_res["manualToggleOk"] and v15_res["modalOk"] and v15_res["bbWithIcon"] >= 50, f"v1.5 features failed: {v15_res}"
             assert isinstance(memory_reader._is_eac_running(), bool)
             assert len(api._npc_meta) >= 500, f"Expected ERR npcMeta >= 500, got {len(api._npc_meta)}"
+            import struct as _st
+            _r_buf = _st.pack(
+                "<14i28f",
+                88, 88, 59, 88, 132, 132, 88,
+                88, 88, 109, 88, 132, 132, 88,
+                *([0.89] * 7),
+                *([0.0] * 7),
+                *([0.0] * 7),
+                1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0,
+            )
+            _r_parsed = {s["key"]: s for s in memory_reader._parse_resist_block(_r_buf, 16)}
+            assert set(_r_parsed.keys()) == {"bleed", "frost", "rot", "madness"}, f"Unexpected resist keys: {_r_parsed}"
+            assert _r_parsed["bleed"]["cur"] == 50 and _r_parsed["bleed"]["max"] == 109, f"Bad bleed parse: {_r_parsed['bleed']}"
             boss_res = w.evaluate_js("window.__ERR_TEST.testBossHud()")
             assert (
                 boss_res["shownStats"]

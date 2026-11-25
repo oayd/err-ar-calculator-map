@@ -141,6 +141,49 @@ def _find_module_base(pid: int, mod_name: str) -> Optional[int]:
         _kernel32.CloseHandle(snap)
 
 
+_RESIST_SPEC = (
+    (2, "bleed", "Bleed", 1),
+    (4, "frost", "Frost", 2),
+    (1, "rot", "Rot", 4),
+    (5, "sleep", "Sleep", 8),
+    (0, "poison", "Poison", 16),
+    (6, "madness", "Madness", 32),
+)
+
+
+def _parse_resist_block(rraw: bytes, immune_mask: int = 0) -> List[Dict[str, Any]]:
+    """Parse 0xA8 bytes starting at CSChrResistModule+0x10 (+0x10..+0xB7).
+
+    Layout: cur[7] (+0x10), max[7] (+0x2C), timers/state (+0x48..+0x7F),
+    additive mod[7] (+0x80), multiplicative mul[7] (+0x9C).
+    Order: poison(0), rot(1), bleed(2), blight(3), frost(4), sleep(5), madness(6).
+    """
+    if not rraw or len(rraw) < 0xA8:
+        return []
+    vals = struct.unpack_from("<14i", rraw, 0x00)
+    muls_f = struct.unpack_from("<7f", rraw, 0x8C)
+    statuses: List[Dict[str, Any]] = []
+    for idx, key, label, bit in _RESIST_SPEC:
+        cur = vals[idx]
+        mx = vals[7 + idx]
+        mul_v = muls_f[idx]
+        if mx <= 0 or mx >= 9999 or cur < 0:
+            continue
+        buildup = max(0, min(mx, mx - cur))
+        if buildup == 0:
+            if immune_mask & bit:
+                continue
+            if math.isfinite(mul_v) and mul_v <= 0.0:
+                continue
+        statuses.append({
+            "key": key,
+            "label": label,
+            "cur": buildup,
+            "max": mx,
+        })
+    return statuses
+
+
 class EldenRingMemoryReader:
     """Strictly read-only Win32 RPM reader for live offline eldenring.exe state."""
 
@@ -683,41 +726,9 @@ class EldenRingMemoryReader:
 
         statuses: List[Dict[str, Any]] = []
         if resist_mod >= 0x10000:
-            rraw = self._read_bytes(resist_mod + 0x10, 112)
-            if rraw and len(rraw) == 112:
-                vals = struct.unpack_from("<14i", rraw, 0)
-                mods_f = struct.unpack_from("<7f", rraw, 56)
-                muls_f = struct.unpack_from("<7f", rraw, 84)
-                # CSChrResistModule order: poison(0), rot(1), bleed(2), blight(3), frost(4), sleep(5), madness(6)
-                for idx, key, label, bit in (
-                    (2, "bleed", "Bleed", 1),
-                    (4, "frost", "Frost", 2),
-                    (1, "rot", "Rot", 4),
-                    (5, "sleep", "Sleep", 8),
-                    (0, "poison", "Poison", 16),
-                    (6, "madness", "Madness", 32),
-                ):
-                    cur = vals[idx]
-                    mx = vals[7 + idx]
-                    mod_v = mods_f[idx]
-                    mul_v = muls_f[idx]
-                    ram_imm = (
-                        mx <= 0
-                        or mx >= 9999
-                        or cur < 0
-                        or (math.isfinite(mod_v) and mod_v <= 0.0)
-                        or (math.isfinite(mul_v) and mul_v <= 0.0)
-                    )
-                    buildup = 0 if ram_imm else max(0, min(mx, mx - cur))
-                    param_imm = bool(immune_mask & bit) and buildup == 0
-                    if ram_imm or param_imm:
-                        continue
-                    statuses.append({
-                        "key": key,
-                        "label": label,
-                        "cur": buildup,
-                        "max": mx,
-                    })
+            rraw = self._read_bytes(resist_mod + 0x10, 0xA8)
+            if rraw and len(rraw) == 0xA8:
+                statuses = _parse_resist_block(rraw, immune_mask)
 
         name = menu_name or meta_name or fallback_name
         return {
