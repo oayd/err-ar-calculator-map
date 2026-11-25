@@ -1930,6 +1930,7 @@ body.pip-map:hover .map-controls {
 body.pip-map #mapStagePlayerBtn,
 body.pip-map #mapFollowBtn,
 body.pip-map #mapPipBtn,
+body.pip-active #pipBossBtn,
 body.pip-active #pipTwoHandBtn {
   display: none;
 }
@@ -1944,6 +1945,7 @@ body.pip-stats #pipFollowBtn,
 body.pip-stats #pipSearchBtn {
   display: none;
 }
+body.pip-stats #pipBossBtn,
 body.pip-stats #pipTwoHandBtn {
   display: inline-block;
 }
@@ -2099,6 +2101,119 @@ body.pip-active:hover .pip-resize-grip {
   color: #7df7a8;
   border-color: rgba(77, 240, 136, 0.55);
   background: rgba(20, 48, 30, 0.55);
+}
+
+.pip-boss-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pip-boss-box.hidden {
+  display: none;
+}
+.pip-boss-card {
+  background: #1a1511;
+  border: 1px solid rgba(212, 171, 83, 0.35);
+  border-radius: 4px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pip-boss-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.pip-boss-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-gold-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pip-boss-hp-num {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #f3c2b8;
+  flex-shrink: 0;
+}
+.pip-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pip-bar-lbl {
+  width: 40px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.pip-bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  background: #0e0c0a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.pip-bar-fill {
+  height: 100%;
+  transition: width 0.08s linear;
+}
+.pip-bar-fill.hp { background: linear-gradient(90deg, #992424, #e14d43); }
+.pip-bar-fill.stance { background: linear-gradient(90deg, #b8872b, #ffd56b); }
+.pip-bar-fill.stance.broken { background: #ff5b5b; }
+.pip-bar-fill.bleed { background: #d63b49; }
+.pip-bar-fill.frost { background: #66c4ff; }
+.pip-bar-fill.rot { background: #c45450; }
+.pip-bar-fill.poison { background: #74c947; }
+.pip-bar-fill.sleep { background: #b18aff; }
+.pip-bar-fill.madness { background: #ffa834; }
+.pip-bar-val {
+  min-width: 64px;
+  text-align: right;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-main);
+  flex-shrink: 0;
+}
+.pip-bar-val.broken {
+  color: #ff6e6e;
+  font-weight: 700;
+}
+.pip-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 6px;
+  margin-top: 1px;
+}
+.pip-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pip-status-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.pip-status-val {
+  font-family: Consolas, monospace;
+  color: var(--text-main);
+}
+.pip-status-immune {
+  font-size: 9px;
+  color: var(--text-dim);
 }
 
 .pip-stats-grid {

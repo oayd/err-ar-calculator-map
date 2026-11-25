@@ -445,9 +445,11 @@
     ramLive: false,
     ramChar: null,
     ramPos: null,
+    ramBosses: [],
     pipMode: "off",
     pipOpacity: 1.0,
     pipClickThrough: false,
+    pipBossHud: true,
     overlayHidden: false,
     keybinds: {},
     defaultKeybinds: {},
@@ -2001,6 +2003,7 @@
       liveWatch: state.liveWatch,
       bannerDismissed: state.bannerDismissed,
       pipOpacity: state.pipOpacity,
+      pipBossHud: state.pipBossHud,
       keybinds: state.keybinds,
       mapLayer: mapState.layer,
       mapCats: mapState.cats,
@@ -2417,6 +2420,7 @@
       if (errEl) errEl.textContent = errs.join(" · ");
       if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
       if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
+      if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
       if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
     };
     const syncKeybindsToBackend = async () => {
@@ -2460,6 +2464,11 @@
         persistSettings();
         updateMapSearchList();
         renderMapCanvas();
+      });
+    }
+    if ($("setPipBossHudCb")) {
+      $("setPipBossHudCb").addEventListener("change", (e) => {
+        setPipBossHud(e.target.checked, true);
       });
     }
     if ($("setCompletedModeSel")) {
@@ -2788,6 +2797,7 @@
     state.ramLive = false;
     state.ramChar = null;
     state.ramPos = null;
+    state.ramBosses = [];
     mapState.ramPins = null;
     mapState.ramOwned = null;
     mapState.ramFlags = null;
@@ -2803,11 +2813,17 @@
         `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong>`;
       recalculateAndRender();
     }
+    if (state.pipMode === "stats") renderPipStats();
     updateMapPlayerReadout();
     if (state.activeView === "map") {
       updateMapSearchList();
       renderMapCanvas();
     }
+  }
+
+  function applyLiveRamBosses(bosses) {
+    state.ramBosses = Array.isArray(bosses) ? bosses : [];
+    if (state.pipMode === "stats") renderPipBossBox();
   }
 
   function applyLiveRamPins(pins) {
@@ -2871,6 +2887,7 @@
   window.__onLiveRamStatus = applyLiveRamStatus;
   window.__onLiveRamPins = applyLiveRamPins;
   window.__onLiveRamProgress = applyLiveRamProgress;
+  window.__onLiveRamBosses = applyLiveRamBosses;
   window.__onGlobalHotkey = handleGlobalHotkey;
 
   function resolvePlayerToMapLayer(pp) {
@@ -3934,7 +3951,72 @@
     }
   }
 
+  function renderPipBossBox() {
+    const box = $("pipBossBox");
+    if (!box) return;
+    const bossBtn = $("pipBossBtn");
+    if (bossBtn) bossBtn.classList.toggle("active", state.pipBossHud);
+    const show = Boolean(
+      state.ramLive && state.pipBossHud && Array.isArray(state.ramBosses) && state.ramBosses.length > 0
+    );
+    box.classList.toggle("hidden", !show);
+    if (!show) {
+      box.innerHTML = "";
+      return;
+    }
+    box.innerHTML = state.ramBosses.map((b) => {
+      const hp = Math.max(0, Math.round(b.hp || 0));
+      const maxHp = Math.max(1, Math.round(b.maxHp || 1));
+      const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+      const stMax = Number(b.maxStance) || 0;
+      const stCur = Math.max(0, Number(b.stance) || 0);
+      const stPct = stMax > 0 ? Math.max(0, Math.min(100, (stCur / stMax) * 100)) : 0;
+      const stLbl = b.stanceKind === "poise" ? "Poise" : (b.stanceKind === "guard" ? "Guard" : "Stance");
+      const broken = Boolean(b.stanceBroken);
+      const stVal = broken
+        ? "BROKEN!"
+        : `${Math.round(stCur)} / ${Math.round(stMax)}${b.stanceReset > 0 ? ` · ${b.stanceReset.toFixed(1)}s` : ""}`;
+      const stRow = stMax > 0
+        ? `<div class="pip-bar-row">
+            <span class="pip-bar-lbl">${stLbl}</span>
+            <div class="pip-bar-track"><div class="pip-bar-fill stance${broken ? " broken" : ""}" style="width:${broken ? 100 : stPct.toFixed(1)}%"></div></div>
+            <span class="pip-bar-val${broken ? " broken" : ""}">${escHtml(stVal)}</span>
+          </div>`
+        : "";
+      const statuses = Array.isArray(b.statuses) ? b.statuses : [];
+      const stGrid = statuses.length
+        ? `<div class="pip-status-grid">${statuses.map((s) => {
+            if (s.immune || !s.max) {
+              return `<div class="pip-status-item">
+                <div class="pip-status-hdr"><span>${escHtml(s.label)}</span><span class="pip-status-immune">Immune</span></div>
+                <div class="pip-bar-track"><div class="pip-bar-fill ${escHtml(s.key)}" style="width:0%"></div></div>
+              </div>`;
+            }
+            const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
+            return `<div class="pip-status-item">
+              <div class="pip-status-hdr"><span>${escHtml(s.label)}</span><span class="pip-status-val">${Math.round(s.cur)}/${Math.round(s.max)}</span></div>
+              <div class="pip-bar-track"><div class="pip-bar-fill ${escHtml(s.key)}" style="width:${pct.toFixed(1)}%"></div></div>
+            </div>`;
+          }).join("")}</div>`
+        : "";
+      return `<div class="pip-boss-card">
+        <div class="pip-boss-top">
+          <span class="pip-boss-name">${escHtml(b.name || "Boss")}</span>
+          <span class="pip-boss-hp-num">${hp.toLocaleString()} / ${maxHp.toLocaleString()} (${Math.round(hpPct)}%)</span>
+        </div>
+        <div class="pip-bar-row">
+          <span class="pip-bar-lbl">HP</span>
+          <div class="pip-bar-track"><div class="pip-bar-fill hp" style="width:${hpPct.toFixed(1)}%"></div></div>
+          <span class="pip-bar-val">${Math.round(hpPct)}%</span>
+        </div>
+        ${stRow}
+        ${stGrid}
+      </div>`;
+    }).join("");
+  }
+
   function renderPipStats() {
+    renderPipBossBox();
     const ch = state.ramLive && state.ramChar
       ? state.ramChar
       : (state.characters.find((c) => c.slot === state.activeSlot) || null);
@@ -4038,6 +4120,18 @@
     }
     if (persist) persistSettings();
     return clamped;
+  }
+
+  function setPipBossHud(enabled, persist = true) {
+    state.pipBossHud = Boolean(enabled);
+    if ($("pipBossBtn")) $("pipBossBtn").classList.toggle("active", state.pipBossHud);
+    if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_hud) {
+      window.pywebview.api.set_pip_boss_hud(state.pipBossHud);
+    }
+    if (state.pipMode === "stats") renderPipBossBox();
+    if (persist) persistSettings();
+    return state.pipBossHud;
   }
 
   async function setPipMode(mode) {
@@ -4301,6 +4395,9 @@
     $("pipModeStatsBtn").addEventListener("click", () => setPipMode("stats"));
     $("pipExitBtn").addEventListener("click", () => setPipMode("off"));
     $("pipFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
+    if ($("pipBossBtn")) {
+      $("pipBossBtn").addEventListener("click", () => setPipBossHud(!state.pipBossHud, true));
+    }
     $("pipTwoHandBtn").addEventListener("click", () => {
       state.twoHand = !state.twoHand;
       $("twoHandCb").checked = state.twoHand;
@@ -4559,6 +4656,11 @@
     if (cfg.bannerDismissed) state.bannerDismissed = true;
     if (typeof cfg.pipOpacity === "number" && Number.isFinite(cfg.pipOpacity)) {
       applyPipOpacity(Math.round(cfg.pipOpacity * 100), false);
+    }
+    if (typeof cfg.pipBossHud === "boolean") {
+      setPipBossHud(cfg.pipBossHud, false);
+    } else {
+      setPipBossHud(true, false);
     }
     if (typeof cfg.mapLayer === "string" && ["m00", "m01", "m10"].includes(cfg.mapLayer)) {
       mapState.layer = cfg.mapLayer;
@@ -4927,6 +5029,66 @@
           manualToggleOk: g ? (afterMan === !beforeMan) : false,
           modalOk: modalOpen && modalClosed,
           bbWithIcon,
+        };
+      },
+      testBossHud() {
+        const prevMode = state.pipMode;
+        const prevBossHud = state.pipBossHud;
+        const prevRamLive = state.ramLive;
+        const prevBosses = state.ramBosses;
+
+        setPipMode("stats");
+        setPipBossHud(true, false);
+        state.ramLive = true;
+        window.__onLiveRamBosses([
+          {
+            slot: 0,
+            name: "Margit, the Fell Omen",
+            hp: 3120,
+            maxHp: 4174,
+            stance: 42.5,
+            maxStance: 80.0,
+            stanceReset: 3.4,
+            stanceBroken: false,
+            stanceKind: "stance",
+            statuses: [
+              { key: "bleed", label: "Bleed", cur: 210, max: 318, immune: false },
+              { key: "frost", label: "Frost", cur: 95, max: 318, immune: false },
+              { key: "rot", label: "Rot", cur: 0, max: 0, immune: true },
+            ],
+          },
+        ]);
+
+        const box = $("pipBossBox");
+        const shown = Boolean(box && !box.classList.contains("hidden") && box.querySelectorAll(".pip-boss-card").length === 1);
+        const txt = box ? box.textContent : "";
+        const hpTextOk = txt.includes("Margit, the Fell Omen") && txt.includes("3,120") && txt.includes("4,174");
+        const stanceOk = txt.includes("43 / 80") && txt.includes("3.4s");
+        const statusesOk = txt.includes("210/318") && txt.includes("95/318") && txt.includes("Immune");
+
+        setPipBossHud(false, false);
+        const toggleOffHidden = Boolean(box && box.classList.contains("hidden"));
+        $("topSettingsBtn").click();
+        const cbSyncedOff = $("setPipBossHudCb") ? !$("setPipBossHudCb").checked : false;
+        $("settingsCloseBtn").click();
+
+        setPipBossHud(true, false);
+        window.__onLiveRamStatus({ attached: false });
+        const detachCleared = Boolean(state.ramBosses.length === 0 && box && box.classList.contains("hidden"));
+
+        state.ramBosses = prevBosses;
+        state.ramLive = prevRamLive;
+        setPipBossHud(prevBossHud, false);
+        setPipMode(prevMode);
+
+        return {
+          shown,
+          hpTextOk,
+          stanceOk,
+          statusesOk,
+          toggleOffHidden,
+          detachCleared,
+          settingsSynced: cbSyncedOff,
         };
       },
       startMapImagesTest() {

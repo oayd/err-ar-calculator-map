@@ -564,6 +564,7 @@
         </svg>
       </button>
       <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player position at 30 Hz">Follow</button>
+      <button id="pipBossBtn" class="pip-pill active" type="button" title="Show Live Boss HP, Stance &amp; Status Buildup (Offline RAM only, auto-off with EAC)">Boss</button>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
       <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)">Opacity 100%</button>
       <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to full window (Esc)">Expand</button>
@@ -597,6 +598,7 @@
       <span id="pipCharName" class="pip-char-name">Character</span>
       <span id="pipRamBadge" class="pip-ram-badge">SAVE</span>
     </div>
+    <div id="pipBossBox" class="pip-boss-box hidden"></div>
     <div id="pipStatsGrid" class="pip-stats-grid"></div>
     <div class="pip-subhdr">
       <span>Equipped Weapons</span>
@@ -629,6 +631,7 @@
         <div class="settings-prefs-grid">
           <label class="cb-row"><input type="checkbox" id="setAutoLayerCb" checked /><span>Auto-Switch Map Layer (Lands Between / Underground / DLC)</span></label>
           <label class="cb-row"><input type="checkbox" id="setAutoDetectCb" checked /><span>Auto-Detect Collected Items, Graces &amp; Defeated Bosses</span></label>
+          <label class="cb-row"><input type="checkbox" id="setPipBossHudCb" checked /><span>Show Live Boss HP, Stance &amp; Status Buildup in PiP Stats HUD (Offline RAM only, auto-off under EAC)</span></label>
           <label class="settings-inline-row">
             <span>Completed Markers Display:</span>
             <select id="setCompletedModeSel">

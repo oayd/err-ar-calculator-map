@@ -365,6 +365,7 @@ class CalculatorApi:
         self._pip_mode: str = "off"
         self._pip_opacity: float = max(0.15, min(1.0, float(cfg0.get("pipOpacity", 100)) / 100.0 if float(cfg0.get("pipOpacity", 1.0)) > 1.0 else float(cfg0.get("pipOpacity", 1.0))))
         self._pip_click_through: bool = False
+        self._pip_boss_hud: bool = bool(cfg0.get("pipBossHud", True))
         self._overlay_hidden: bool = False
         self._normal_bounds = None
         saved_pb = cfg0.get("pipBounds")
@@ -718,6 +719,14 @@ class CalculatorApi:
                 self._invoke_ui(_apply_op)
         return {"mode": self._pip_mode, "opacity": self._pip_opacity}
 
+    def set_pip_boss_hud(self, enabled: bool) -> Dict[str, Any]:
+        self._pip_boss_hud = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipBossHud"] = self._pip_boss_hud
+            self.save_settings(cfg)
+        return {"pipBossHud": self._pip_boss_hud}
+
     def _win32_nc_hit(self, ht_code: int) -> bool:
         if self._self_test_mode or self._pip_mode == "off":
             return False
@@ -902,6 +911,8 @@ class CalculatorApi:
             last_char_key = None
             last_pins_key = None
             last_prog_key = None
+            last_boss_key = None
+            has_active_boss = False
             last_char_t = 0.0
             last_pins_t = 0.0
             last_prog_t = 0.0
@@ -911,6 +922,8 @@ class CalculatorApi:
                 if self._ram_active:
                     if self._ui_view == "map" and self._map_follow:
                         dt = 0.033
+                    elif self._pip_mode == "stats" and self._pip_boss_hud:
+                        dt = 0.08 if has_active_boss else 0.15
                     elif self._ui_view == "map":
                         dt = 0.10
                     else:
@@ -989,6 +1002,21 @@ class CalculatorApi:
                                         self._window.evaluate_js(
                                             f"window.__onLiveRamProgress && window.__onLiveRamProgress({prog_key});"
                                         )
+                            if self._pip_mode == "stats" and self._pip_boss_hud:
+                                bosses = self._mem.read_active_bosses() or []
+                                has_active_boss = bool(bosses)
+                                boss_key = json.dumps(bosses, sort_keys=True)
+                                if not was_active or boss_key != last_boss_key:
+                                    last_boss_key = boss_key
+                                    self._window.evaluate_js(
+                                        f"window.__onLiveRamBosses && window.__onLiveRamBosses({boss_key});"
+                                    )
+                            elif last_boss_key not in (None, "[]"):
+                                has_active_boss = False
+                                last_boss_key = "[]"
+                                self._window.evaluate_js(
+                                    "window.__onLiveRamBosses && window.__onLiveRamBosses([]);"
+                                )
                             # Save-file fallback for live pin updates if MenuProfileSaveLoad RAM pointer didn't match
                             if (now - last_save_t >= 2.5):
                                 last_save_t = now
@@ -1012,6 +1040,8 @@ class CalculatorApi:
                             last_char_key = None
                             last_pins_key = None
                             last_prog_key = None
+                            last_boss_key = None
+                            has_active_boss = False
                             self._window.evaluate_js(
                                 'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
                             )
@@ -1021,6 +1051,8 @@ class CalculatorApi:
                         last_char_key = None
                         last_pins_key = None
                         last_prog_key = None
+                        last_boss_key = None
+                        has_active_boss = False
                         self._window.evaluate_js(
                             'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
                         )
@@ -1473,6 +1505,17 @@ def run_self_test(report_path: Optional[str]):
             assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"] and pip_res["offscreenArrowOk"], f"PiP modes failed: {pip_res}"
             v15_res = w.evaluate_js("window.__ERR_TEST.testV15Features()")
             assert v15_res["manualToggleOk"] and v15_res["modalOk"] and v15_res["bbWithIcon"] >= 50, f"v1.5 features failed: {v15_res}"
+            assert isinstance(memory_reader._is_eac_running(), bool)
+            boss_res = w.evaluate_js("window.__ERR_TEST.testBossHud()")
+            assert (
+                boss_res["shown"]
+                and boss_res["hpTextOk"]
+                and boss_res["stanceOk"]
+                and boss_res["statusesOk"]
+                and boss_res["toggleOffHidden"]
+                and boss_res["detachCleared"]
+                and boss_res["settingsSynced"]
+            ), f"Boss HUD test failed: {boss_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1506,6 +1549,7 @@ def run_self_test(report_path: Optional[str]):
                 f"MAP_TILES_OK={bool(tile_check and tile_check.get('m00') and tile_check.get('m10'))}",
                 f"MAP_DUMMY_COUNT={map_state['dummyCount']}",
                 f"MAP_CLAYMORE_HITS={clay_hits}",
+                f"BOSS_HUD_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]

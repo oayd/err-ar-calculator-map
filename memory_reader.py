@@ -21,11 +21,21 @@ _STILL_ACTIVE = 259
 
 _AOB_WORLD_CHR_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 0F 48 39 88"
 _AOB_GAME_DATA_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 05 48 8B 40 58 C3 C3"
+_AOB_CS_FE_MAN = (
+    "48 8B 0D ?? ?? ?? ?? 8B DA 48 85 C9 75 ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+    "4C 8B C8 4C 8D 05 ?? ?? ?? ?? BA B4 00 00 00 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
+    "48 8B 0D ?? ?? ?? ?? 8B D3 E8 ?? ?? ?? ?? 48 8B D8"
+)
 _AOB_EVENT_FLAG_CANDS = (
     "48 8B 1D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 48 8D 4D F0 E8 ?? ?? ?? ?? 4C 8B C0",
     "48 8B 3D ?? ?? ?? ?? 48 85 FF 74 ?? B8",
     "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 83 79 28 00",
 )
+_EAC_PROCESS_NAMES = frozenset({
+    "start_protected_game.exe",
+    "easyanticheat_eos.exe",
+    "easyanticheat.exe",
+})
 
 
 class _PROCESSENTRY32W(ctypes.Structure):
@@ -67,7 +77,28 @@ def _compile_aob(pattern: str) -> bytes:
 
 _RX_WCM = re.compile(_compile_aob(_AOB_WORLD_CHR_MAN), re.DOTALL)
 _RX_GDM = re.compile(_compile_aob(_AOB_GAME_DATA_MAN), re.DOTALL)
+_RX_FEM = re.compile(_compile_aob(_AOB_CS_FE_MAN), re.DOTALL)
 _RX_EFM = [re.compile(_compile_aob(p), re.DOTALL) for p in _AOB_EVENT_FLAG_CANDS]
+
+
+def _is_eac_running() -> bool:
+    """Return True if Easy Anti-Cheat or its launcher process is active."""
+    snap = _kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return False
+    try:
+        pe = _PROCESSENTRY32W()
+        pe.dwSize = ctypes.sizeof(pe)
+        if not _kernel32.Process32FirstW(snap, ctypes.byref(pe)):
+            return False
+        while True:
+            if pe.szExeFile.lower() in _EAC_PROCESS_NAMES:
+                return True
+            if not _kernel32.Process32NextW(snap, ctypes.byref(pe)):
+                break
+        return False
+    finally:
+        _kernel32.CloseHandle(snap)
 
 
 def _find_process_pid(exe_name: str) -> Optional[int]:
@@ -120,10 +151,12 @@ class EldenRingMemoryReader:
         self._wcm_addr: int = 0
         self._gdm_addr: int = 0
         self._efm_addr: int = 0
+        self._fem_addr: int = 0
         self._inv_off: Optional[int] = None
         self._storage_ptr_off: Optional[int] = None
         self._mp_cache: Optional[Tuple[int, int, int]] = None
         self._last_try: float = 0.0
+        self._last_eac_check: float = 0.0
 
     def close(self):
         if self._handle:
@@ -137,6 +170,7 @@ class EldenRingMemoryReader:
         self._wcm_addr = 0
         self._gdm_addr = 0
         self._efm_addr = 0
+        self._fem_addr = 0
         self._inv_off = None
         self._storage_ptr_off = None
         self._mp_cache = None
@@ -169,13 +203,37 @@ class EldenRingMemoryReader:
         raw = self._read_bytes(addr, 8)
         return struct.unpack("<Q", raw)[0] if raw else 0
 
-    def _scan_singletons(self) -> Tuple[int, int]:
+    def _ru32(self, addr: int) -> int:
+        raw = self._read_bytes(addr, 4)
+        return struct.unpack("<I", raw)[0] if raw else 0
+
+    def _read_menu_string(self, addr: int) -> str:
+        raw = self._read_bytes(addr, 0x38)
+        if not raw or len(raw) < 0x38:
+            return ""
+        static_ptr = struct.unpack_from("<Q", raw, 0x00)[0]
+        dl_size, dl_cap = struct.unpack_from("<QQ", raw, 0x20)
+        if 0 < dl_size <= 128 and dl_size <= dl_cap <= 1024:
+            if dl_cap < 8:
+                return raw[0x10 : 0x10 + dl_size * 2].decode("utf-16-le", errors="replace").split("\x00")[0].strip()
+            heap_ptr = struct.unpack_from("<Q", raw, 0x10)[0]
+            if heap_ptr >= 0x10000:
+                sbuf = self._read_bytes(heap_ptr, dl_size * 2)
+                if sbuf:
+                    return sbuf.decode("utf-16-le", errors="replace").split("\x00")[0].strip()
+        if static_ptr >= 0x10000:
+            sbuf = self._read_bytes(static_ptr, 160)
+            if sbuf:
+                return sbuf.decode("utf-16-le", errors="replace").split("\x00")[0].strip()
+        return ""
+
+    def _scan_singletons(self) -> Tuple[int, int, int, int]:
         dos = self._read_bytes(self._base, 0x1000)
         if not dos or len(dos) < 0x100 or dos[:2] != b"MZ":
-            return 0, 0
+            return 0, 0, 0, 0
         pe_off = struct.unpack_from("<I", dos, 0x3C)[0]
         if pe_off + 24 >= len(dos) or dos[pe_off : pe_off + 4] != b"PE\x00\x00":
-            return 0, 0
+            return 0, 0, 0, 0
         num_sec = struct.unpack_from("<H", dos, pe_off + 6)[0]
         opt_sz = struct.unpack_from("<H", dos, pe_off + 20)[0]
         sec_off = pe_off + 24 + opt_sz
@@ -192,7 +250,7 @@ class EldenRingMemoryReader:
                 text_va, text_sz = va, vsz
                 break
         if not text_va or not text_sz or text_sz > 0x6000000:
-            return 0, 0
+            return 0, 0, 0, 0
 
         buf = bytearray()
         chunk = 1024 * 1024
@@ -227,17 +285,25 @@ class EldenRingMemoryReader:
             if efm:
                 break
 
-        return resolve_rip(_RX_WCM), resolve_rip(_RX_GDM), efm
+        return resolve_rip(_RX_WCM), resolve_rip(_RX_GDM), efm, resolve_rip(_RX_FEM)
 
     def ensure_attached(self, min_retry_secs: float = 2.0) -> bool:
+        now = time.monotonic()
         if self._is_alive() and (self._wcm_addr or self._gdm_addr):
+            if now - self._last_eac_check >= 2.0:
+                self._last_eac_check = now
+                if _is_eac_running():
+                    self.close()
+                    return False
             return True
         if self._handle:
             self.close()
-        now = time.monotonic()
         if now - self._last_try < min_retry_secs:
             return False
         self._last_try = now
+        self._last_eac_check = now
+        if _is_eac_running():
+            return False
 
         pid = _find_process_pid("eldenring.exe")
         if not pid:
@@ -252,13 +318,14 @@ class EldenRingMemoryReader:
         self._handle = handle
         self._pid = pid
         self._base = base
-        wcm, gdm, efm = self._scan_singletons()
+        wcm, gdm, efm, fem = self._scan_singletons()
         if not wcm and not gdm:
             self.close()
             return False
         self._wcm_addr = wcm
         self._gdm_addr = gdm
         self._efm_addr = efm
+        self._fem_addr = fem
         return True
 
     def _get_player_ins(self) -> int:
@@ -515,3 +582,167 @@ class EldenRingMemoryReader:
                             self._mp_cache = (off, 1, inner)
                             return save_reader.parse_world_map_pins(blob[8:])
         return None
+
+    def _resolve_chr_ins(self, wcm: int, handle: int) -> int:
+        if handle in (0, 0xFFFFFFFFFFFFFFFF):
+            return 0
+        selector = handle & 0xFFFFFFFF
+        if selector == 0xFFFFFFFF or ((selector >> 28) & 0xF) != 1:
+            return 0
+        container = (selector >> 20) & 0xFF
+        index = selector & 0xFFFFF
+        if container < 196:
+            chr_set = self._ru64(wcm + 0x1DED8 + container * 8)
+            if chr_set >= 0x10000:
+                cap = self._ru32(chr_set + 0x10)
+                entries = self._ru64(chr_set + 0x18)
+                if entries >= 0x10000 and index < cap:
+                    cand = self._ru64(entries + index * 0x10)
+                    if cand >= 0x10000 and self._ru64(cand + 0x08) == handle:
+                        return cand
+
+        vec = self._read_bytes(wcm + 0x1F1E0, 0x20)
+        if vec and len(vec) >= 0x18:
+            first, last = struct.unpack_from("<QQ", vec, 0x08)
+            if first >= 0x10000 and last > first:
+                cnt = min((last - first) // 16, 512)
+                blob = self._read_bytes(first, cnt * 16)
+                if blob:
+                    for i in range(cnt):
+                        cand = struct.unpack_from("<Q", blob, i * 16)[0]
+                        if cand >= 0x10000 and self._ru64(cand + 0x08) == handle:
+                            return cand
+        return 0
+
+    def read_active_bosses(self) -> Optional[List[Dict[str, Any]]]:
+        """Return live boss HP, stance/poise, and status buildup from offline RAM."""
+        if not self._wcm_addr or not self._fem_addr or _is_eac_running():
+            return None
+        wcm = self._ru64(self._wcm_addr)
+        fem = self._ru64(self._fem_addr)
+        if wcm < 0x10000 or fem < 0x10000:
+            return None
+
+        boss_bars = self._read_bytes(fem + 0x5BF0, 3 * 0x20)
+        if not boss_bars or len(boss_bars) < 3 * 0x20:
+            return None
+
+        out: List[Dict[str, Any]] = []
+        seen_chr: Set[int] = set()
+        for slot in range(3):
+            display_id, _, boss_handle = struct.unpack_from("<iIQ", boss_bars, slot * 0x20)
+            tag_addr = fem + 0x1B90 + slot * 0x128
+            tag_hdr = self._read_bytes(tag_addr, 0x28)
+            tag_vis = bool(tag_hdr and tag_hdr[0])
+            tag_handle = struct.unpack_from("<Q", tag_hdr, 8)[0] if tag_hdr and len(tag_hdr) >= 16 else 0
+
+            def _valid_h(h: int) -> bool:
+                return h not in (0, 0xFFFFFFFFFFFFFFFF) and (h & 0xFFFFFFFF) != 0xFFFFFFFF
+
+            handle = boss_handle if _valid_h(boss_handle) else (tag_handle if tag_vis and _valid_h(tag_handle) else 0)
+            if not handle or (display_id <= 0 and not tag_vis):
+                continue
+
+            chr_ins = self._resolve_chr_ins(wcm, handle)
+            if chr_ins < 0x10000 or chr_ins in seen_chr:
+                continue
+            seen_chr.add(chr_ins)
+
+            mod_bag = self._ru64(chr_ins + 0x190)
+            if mod_bag < 0x10000:
+                continue
+            mods = self._read_bytes(mod_bag, 0x50)
+            if not mods or len(mods) < 0x50:
+                continue
+            stat_mod, _, _, _, resist_mod, _, _, _, stagger_mod, toughness_mod = struct.unpack_from("<10Q", mods, 0)
+            if stat_mod < 0x10000:
+                continue
+
+            stat_raw = self._read_bytes(stat_mod + 0x138, 0x28)
+            if not stat_raw or len(stat_raw) < 0x28:
+                continue
+            hp, hp_max = struct.unpack_from("<2i", stat_raw, 0x00)
+            stam, stam_max = struct.unpack_from("<2i", stat_raw, 0x1C)
+            if hp <= 0 or hp_max <= 0 or hp_max > 10_000_000:
+                continue
+
+            stance = 0.0
+            max_stance = 0.0
+            stance_reset = 0.0
+            stance_broken = False
+            stance_kind = "none"
+
+            if stagger_mod >= 0x10000:
+                sraw = self._read_bytes(stagger_mod + 0x10, 16)
+                if sraw and len(sraw) == 16:
+                    stagger, stagger_max, _, reset_timer = struct.unpack("<ffIf", sraw)
+                    if math.isfinite(stagger) and math.isfinite(stagger_max) and 0.0 < stagger_max < 100000.0:
+                        stance = round(max(0.0, min(stagger, stagger_max)), 1)
+                        max_stance = round(stagger_max, 1)
+                        stance_reset = round(reset_timer, 1) if (math.isfinite(reset_timer) and 0.0 <= reset_timer <= 60.0) else 0.0
+                        stance_broken = stagger <= 0.0
+                        stance_kind = "stance"
+
+            if stance_kind == "none" and toughness_mod >= 0x10000:
+                traw = self._read_bytes(toughness_mod + 0x10, 16)
+                if traw and len(traw) == 16:
+                    tough, _, tough_max, t_rec = struct.unpack("<ffff", traw)
+                    if math.isfinite(tough) and math.isfinite(tough_max) and 0.0 < tough_max < 100000.0:
+                        stance = round(max(0.0, min(tough, tough_max)), 1)
+                        max_stance = round(tough_max, 1)
+                        stance_reset = round(t_rec, 1) if (math.isfinite(t_rec) and 0.0 <= t_rec <= 60.0) else 0.0
+                        stance_broken = tough <= 0.0
+                        stance_kind = "poise"
+
+            if stance_kind == "none" and stam_max > 0:
+                stance = float(max(0, min(stam, stam_max)))
+                max_stance = float(stam_max)
+                stance_broken = stam <= 0
+                stance_kind = "guard"
+
+            statuses: List[Dict[str, Any]] = []
+            if resist_mod >= 0x10000:
+                rraw = self._read_bytes(resist_mod + 0x10, 56)
+                if rraw and len(rraw) == 56:
+                    vals = struct.unpack("<14i", rraw)
+                    # Order in CSChrResistModule: poison(0), rot(1), bleed(2), blight(3), frost(4), sleep(5), madness(6)
+                    for idx, key, label, always in (
+                        (2, "bleed", "Bleed", True),
+                        (4, "frost", "Frost", True),
+                        (1, "rot", "Rot", True),
+                        (0, "poison", "Poison", False),
+                        (5, "sleep", "Sleep", False),
+                        (6, "madness", "Madness", False),
+                    ):
+                        cur = vals[idx]
+                        mx = vals[7 + idx]
+                        immune = (mx <= 0 or mx >= 99999 or cur < 0)
+                        buildup = 0 if immune else max(0, min(mx, mx - cur))
+                        if always or (not immune and buildup > 0):
+                            statuses.append({
+                                "key": key,
+                                "label": label,
+                                "cur": buildup,
+                                "max": 0 if immune else mx,
+                                "immune": immune,
+                            })
+
+            name = ""
+            if tag_vis or tag_handle == handle:
+                name = self._read_menu_string(tag_addr + 0x28)
+            if not name:
+                name = f"Boss {slot + 1}"
+
+            out.append({
+                "slot": slot,
+                "name": name,
+                "hp": hp,
+                "maxHp": hp_max,
+                "stance": stance,
+                "maxStance": max_stance,
+                "stanceReset": stance_reset,
+                "stanceBroken": stance_broken,
+                "stanceKind": stance_kind,
+                "statuses": statuses,
+            })
+        return out
