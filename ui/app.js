@@ -2303,12 +2303,19 @@
     window.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        $("sidebar").classList.remove("collapsed");
-        $("searchInput").focus();
-        $("searchInput").select();
+        if (state.pipMode === "map") {
+          setPipSearchPopover(true);
+        } else {
+          $("sidebar").classList.remove("collapsed");
+          $("searchInput").focus();
+          $("searchInput").select();
+        }
       } else if (e.key === "Escape") {
+        const sPop = $("pipSearchPopover");
         const opPop = $("pipOpacityPopover");
-        if (opPop && !opPop.classList.contains("hidden")) {
+        if (sPop && !sPop.classList.contains("hidden")) {
+          setPipSearchPopover(false);
+        } else if (opPop && !opPop.classList.contains("hidden")) {
           setPipOpacityPopover(false);
         } else if (state.pipMode !== "off") {
           setPipMode("off");
@@ -3169,8 +3176,18 @@
   function updateMapSearchList() {
     const listEl = $("mapSearchList");
     const metaEl = $("mapSearchMeta");
-    if (!listEl || !mapState.data) return;
+    const pipBtn = $("pipSearchBtn");
+    const pipInp = $("pipSearchInput");
+    const pipClr = $("pipSearchClearBtn");
+    const pipMeta = $("pipSearchMeta");
+    const pipList = $("pipSearchList");
     const q = mapState.search.trim().toLowerCase();
+    if (pipBtn) pipBtn.classList.toggle("active", q.length > 0);
+    if (pipClr) pipClr.classList.toggle("visible", mapState.search.length > 0);
+    if (pipInp && document.activeElement !== pipInp && pipInp.value !== mapState.search) {
+      pipInp.value = mapState.search;
+    }
+    if (!listEl || !mapState.data) return;
     const matches = [];
     for (const m of mapState.data.markers) {
       if (!mapState.cats[m.cat]) continue;
@@ -3179,9 +3196,10 @@
       if (!q && matches.length >= 40) break;
     }
     const total = q ? matches.length : Object.keys(mapState.cats).reduce((a, k) => a + (mapState.cats[k] ? (mapState.data.counts[k] || 0) : 0), 0);
-    metaEl.textContent = q ? `${matches.length} matching markers` : `${total} enabled markers (${mapState.layer})`;
-    const slice = matches.slice(0, 80);
-    listEl.innerHTML = slice.map((m, idx) => {
+    const metaTxt = q ? `${matches.length} matching markers` : `${total} enabled markers (${mapState.layer})`;
+    metaEl.textContent = metaTxt;
+    if (pipMeta) pipMeta.textContent = q ? metaTxt : "Type to filter markers on PiP map";
+    const renderItemsHtml = (arr) => arr.map((m, idx) => {
       const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
       const layerTag = m.layer === "m10" ? "DLC" : (m.layer === "m01" ? "UG" : "LB");
       const ikey = getMarkerIconKey(m);
@@ -3197,6 +3215,9 @@
         </span>
       </button>`;
     }).join("");
+
+    const slice = matches.slice(0, 80);
+    listEl.innerHTML = renderItemsHtml(slice);
     listEl.querySelectorAll(".map-search-item").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const m = slice[Number(btn.dataset.midx)];
@@ -3204,6 +3225,20 @@
         await focusMarkerOnMap(m, 4.5);
       });
     });
+
+    if (pipList) {
+      const pipSlice = q ? matches.slice(0, 50) : [];
+      pipList.innerHTML = renderItemsHtml(pipSlice);
+      pipList.querySelectorAll(".map-search-item").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const m = pipSlice[Number(btn.dataset.midx)];
+          if (!m) return;
+          if (mapState.followPlayer) await setMapFollow(false);
+          await focusMarkerOnMap(m, Math.max(mapState.zoom, 4.5));
+          setPipSearchPopover(false);
+        });
+      });
+    }
   }
 
   async function focusMarkerOnMap(m, targetZoom = 4.5) {
@@ -3300,12 +3335,37 @@
     $("pipGearLine").textContent = parts.join(" · ") || "Equip armor/talismans or buffs in Gear & Buffs";
   }
 
+  function syncPipPopoverOpenClass() {
+    const opOpen = Boolean($("pipOpacityPopover") && !$("pipOpacityPopover").classList.contains("hidden"));
+    const srOpen = Boolean($("pipSearchPopover") && !$("pipSearchPopover").classList.contains("hidden"));
+    document.body.classList.toggle("pip-popover-open", opOpen || srOpen);
+  }
+
   function setPipOpacityPopover(open) {
     const pop = $("pipOpacityPopover");
     if (!pop) return;
     const next = Boolean(open);
+    if (next && $("pipSearchPopover")) $("pipSearchPopover").classList.add("hidden");
     pop.classList.toggle("hidden", !next);
-    document.body.classList.toggle("pip-popover-open", next);
+    syncPipPopoverOpenClass();
+  }
+
+  function setPipSearchPopover(open) {
+    const pop = $("pipSearchPopover");
+    if (!pop) return;
+    const next = Boolean(open) && state.pipMode === "map";
+    if (next && $("pipOpacityPopover")) $("pipOpacityPopover").classList.add("hidden");
+    pop.classList.toggle("hidden", !next);
+    syncPipPopoverOpenClass();
+    if (next) {
+      const inp = $("pipSearchInput");
+      if (inp) {
+        inp.value = mapState.search;
+        updateMapSearchList();
+        inp.focus();
+        inp.select();
+      }
+    }
   }
 
   function applyPipOpacity(pct, persist = true) {
@@ -3331,6 +3391,9 @@
     document.body.classList.toggle("pip-active", next !== "off");
     document.body.classList.toggle("pip-map", next === "map");
     document.body.classList.toggle("pip-stats", next === "stats");
+    if (next !== "map") {
+      setPipSearchPopover(false);
+    }
     if (next === "off") {
       document.body.classList.remove("pip-hover");
       setPipOpacityPopover(false);
@@ -3463,6 +3526,7 @@
     let mapSearchTimer = null;
     $("mapSearchInput").addEventListener("input", (e) => {
       mapState.search = e.target.value;
+      if ($("pipSearchInput")) $("pipSearchInput").value = mapState.search;
       clearTimeout(mapSearchTimer);
       mapSearchTimer = setTimeout(() => {
         updateMapSearchList();
@@ -3471,9 +3535,40 @@
     });
     $("mapSearchClearBtn").addEventListener("click", () => {
       $("mapSearchInput").value = "";
+      if ($("pipSearchInput")) $("pipSearchInput").value = "";
       mapState.search = "";
       updateMapSearchList();
       renderMapCanvas();
+    });
+
+    $("pipSearchBtn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const pop = $("pipSearchPopover");
+      setPipSearchPopover(Boolean(pop && pop.classList.contains("hidden")));
+    });
+    $("pipSearchInput").addEventListener("input", (e) => {
+      mapState.search = e.target.value;
+      if ($("mapSearchInput")) $("mapSearchInput").value = mapState.search;
+      clearTimeout(mapSearchTimer);
+      mapSearchTimer = setTimeout(() => {
+        updateMapSearchList();
+        renderMapCanvas();
+      }, 60);
+    });
+    $("pipSearchClearBtn").addEventListener("click", () => {
+      mapState.search = "";
+      $("pipSearchInput").value = "";
+      if ($("mapSearchInput")) $("mapSearchInput").value = "";
+      updateMapSearchList();
+      renderMapCanvas();
+      $("pipSearchInput").focus();
+    });
+    $("pipSearchPopover").addEventListener("mousedown", (e) => e.stopPropagation());
+    document.addEventListener("mousedown", (e) => {
+      const sp = $("pipSearchPopover");
+      if (sp && !sp.classList.contains("hidden") && !e.target.closest("#pipSearchPopover, #pipSearchBtn")) {
+        setPipSearchPopover(false);
+      }
     });
 
     const centerPlayer = async () => {
@@ -3995,6 +4090,18 @@
         setPipMode("map");
         const mapBody = document.body.classList.contains("pip-active") && document.body.classList.contains("pip-map");
         document.body.classList.add("pip-hover");
+        setPipSearchPopover(true);
+        const searchOpen = !$("pipSearchPopover").classList.contains("hidden") && document.body.classList.contains("pip-popover-open");
+        mapState.search = "Claymore";
+        $("pipSearchInput").value = "Claymore";
+        updateMapSearchList();
+        const searchHits = document.querySelectorAll("#pipSearchList .map-search-item").length;
+        const searchBtnActive = $("pipSearchBtn").classList.contains("active");
+        mapState.search = "";
+        $("pipSearchInput").value = "";
+        updateMapSearchList();
+        setPipSearchPopover(false);
+        const pipSearchOk = searchOpen && searchHits >= 1 && searchBtnActive && $("pipSearchPopover").classList.contains("hidden");
         const prevOp = Math.round(state.pipOpacity * 100);
         const opacityClampedLow = applyPipOpacity(5, false);
         applyPipOpacity(prevOp, false);
@@ -4015,7 +4122,7 @@
           proxZero.iconPx === 14 &&
           pFar === 1.0 && pZero < 0.6
         );
-        return { mapBody, statsBody, statsCells, offClean, hoverClean, opacityClampedLow, proxShrinkOk };
+        return { mapBody, statsBody, statsCells, offClean, hoverClean, opacityClampedLow, proxShrinkOk, pipSearchOk };
       },
       startMapImagesTest() {
         window.__ERR_MAP_IMAGES = null;

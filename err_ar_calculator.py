@@ -1074,6 +1074,7 @@ def run_self_test(report_path: Optional[str]):
             assert w.evaluate_js("document.getElementById('topPipBtn') !== null && document.getElementById('mapPipBtn') !== null"), "PiP toggle buttons should exist"
             assert w.evaluate_js("document.getElementById('pipResizeGrip') !== null && document.querySelectorAll('.pip-resize-edge').length === 8"), "All 8 PiP resize handles should exist"
             assert w.evaluate_js("document.getElementById('pipFollowBtn').textContent.trim() === 'Follow'"), "pipFollowBtn should say Follow"
+            assert w.evaluate_js("document.getElementById('pipSearchBtn') !== null && document.getElementById('pipSearchPopover') !== null && document.getElementById('pipSearchInput') !== null"), "PiP search controls should exist"
             assert w.evaluate_js("document.getElementById('pipOpacityBtn').textContent.includes('Opacity')"), "pipOpacityBtn should include Opacity label"
             assert w.evaluate_js("document.getElementById('pipOpacityPopover') !== null && document.getElementById('pipOpacityRange') !== null && document.getElementById('pipOpacityNum') !== null"), "PiP opacity popover inputs should exist"
             assert w.evaluate_js("document.getElementById('mapExtractBtn') !== null && document.getElementById('mapExtractBanner') !== null"), "Map extractor UI should exist"
@@ -1105,7 +1106,7 @@ def run_self_test(report_path: Optional[str]):
             assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
             assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
             pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
-            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"], f"PiP modes failed: {pip_res}"
+            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"], f"PiP modes failed: {pip_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")

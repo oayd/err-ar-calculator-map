@@ -1612,7 +1612,8 @@ table.subtable tbody td.center {
 .pip-stats-view,
 .pip-resize-edge,
 .pip-resize-grip,
-.pip-opacity-popover {
+.pip-opacity-popover,
+.pip-search-popover {
   display: none;
 }
 
@@ -1693,6 +1694,13 @@ body.pip-active.pip-popover-open .pip-bar {
   white-space: nowrap;
   cursor: pointer;
 }
+.pip-icon-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  min-height: 19px;
+}
 .pip-pill:hover {
   color: var(--text-gold-bright);
   border-color: var(--text-amber);
@@ -1770,6 +1778,79 @@ body.pip-active .pip-opacity-popover.hidden {
   color: var(--text-muted);
 }
 
+body.pip-active .pip-search-popover {
+  position: fixed;
+  top: 36px;
+  left: 8px;
+  right: 8px;
+  max-width: 280px;
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  background: rgba(22, 18, 15, 0.96);
+  border: 1px solid rgba(212, 171, 83, 0.52);
+  border-radius: 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.68);
+  z-index: 85;
+}
+body.pip-active .pip-search-popover.hidden {
+  display: none !important;
+}
+.pip-search-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pip-search-input {
+  width: 100%;
+  background: #14110e;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 4px 22px 4px 7px;
+  font-size: 11.5px;
+  color: var(--text-main);
+  outline: none;
+}
+.pip-search-input:focus {
+  border-color: var(--border-focus);
+}
+.pip-search-clear {
+  display: none;
+  position: absolute;
+  right: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.pip-search-clear.visible {
+  display: block;
+}
+.pip-search-clear:hover {
+  color: var(--text-gold-bright);
+}
+.pip-search-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.pip-search-list {
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  background: #15120f;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.pip-search-list:empty {
+  display: none;
+}
+
 body.pip-map #mapWorkspace {
   display: flex !important;
   height: 100vh;
@@ -1802,7 +1883,8 @@ body.pip-map .map-ctrl-btn {
   font-size: 11px;
 }
 
-body.pip-stats #pipFollowBtn {
+body.pip-stats #pipFollowBtn,
+body.pip-stats #pipSearchBtn {
   display: none;
 }
 body.pip-stats #pipTwoHandBtn {

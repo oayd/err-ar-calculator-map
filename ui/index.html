@@ -522,6 +522,11 @@
       <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
     </div>
     <div class="pip-group">
+      <button id="pipSearchBtn" class="pip-pill pip-icon-pill" type="button" title="Search map markers (Ctrl+F)" aria-label="Search map markers">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+      </button>
       <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player position at 30 Hz">Follow</button>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
       <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)">Opacity 100%</button>
@@ -539,6 +544,15 @@
       <input id="pipOpacityNum" type="number" min="15" max="100" step="1" value="100" />
       <span class="pip-op-pct">%</span>
     </div>
+  </div>
+
+  <div id="pipSearchPopover" class="pip-search-popover hidden" role="dialog" aria-label="Search Map in PiP">
+    <div class="pip-search-row">
+      <input id="pipSearchInput" class="pip-search-input" type="text" placeholder="Search weapon, grace, boss..." autocomplete="off" />
+      <button id="pipSearchClearBtn" class="pip-search-clear" type="button" title="Clear search">&times;</button>
+    </div>
+    <div id="pipSearchMeta" class="pip-search-meta">Type to search all layers</div>
+    <div id="pipSearchList" class="pip-search-list"></div>
   </div>
 
   <div id="pipStatsView" class="pip-stats-view">
