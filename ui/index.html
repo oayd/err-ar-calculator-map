@@ -741,8 +741,38 @@
               </div>
             </div>
           </div>
+          <div class="er-lbl-sec">
+            <div class="er-sec-hdr-row">
+              <span class="er-sec-hdr">Map Marker Labels</span>
+              <div class="er-lbl-acts">
+                <button id="setLabelCatsAllBtn" type="button" class="er-mini-act">All</button>
+                <span class="er-mini-sep">&middot;</span>
+                <button id="setLabelCatsDefBtn" type="button" class="er-mini-act">Default</button>
+                <span class="er-mini-sep">&middot;</span>
+                <button id="setLabelCatsNoneBtn" type="button" class="er-mini-act">None</button>
+              </div>
+            </div>
+            <div class="er-lbl-top-grid">
+              <div class="er-opt-row on" data-tog="mapShowLabels">
+                <span class="er-opt-lbl">Show Marker Names<sup class="er-q" data-title="Show Marker Names" data-tip="Master switch for all map name labels across both the full map and PiP minimap (hovering icons still shows names).">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapPipNearbyLabelsOnly">
+                <span class="er-opt-lbl">PiP Nearby Labels Only<sup class="er-q" data-title="PiP Nearby Labels Only" data-tip="In PiP minimap mode (when not searching), only displays marker names close to your player and skips overlapping labels.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row er-opt-static er-lbl-span2">
+                <span class="er-opt-lbl">PiP Nearby Label Radius<sup class="er-q" data-title="PiP Nearby Label Radius" data-tip="Screen distance around your player (or minimap center) in PiP mode where nearby marker names fade in (30–220px, Default: 95px).">?</sup></span>
+                <span class="er-slider-ctrl">
+                  <input id="setPipLabelRadRng" type="range" min="30" max="220" step="5" value="95" class="er-slider er-slider-wide" />
+                  <span class="er-num-wrap"><input id="setPipLabelRadNum" type="number" min="30" max="220" step="1" value="95" class="er-num" /><span class="er-pct">px</span></span>
+                </span>
+              </div>
+            </div>
+            <div id="setLabelCatsGrid" class="er-cat-grid"></div>
+          </div>
           <div class="er-tog-ftr">
-            <span id="setTogResetNote" class="er-reset-note">Restored default settings (Sweep 30%, Text 75%).</span>
+            <span id="setTogResetNote" class="er-reset-note">Restored default Toggleables settings.</span>
             <button id="setTogResetBtn" type="button" class="er-reset-btn">Reset to Default</button>
           </div>
         </div>

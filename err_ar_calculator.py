@@ -1640,6 +1640,8 @@ def run_self_test(report_path: Optional[str]):
             assert len(_sp_parsed) == 1 and _sp_parsed[0]["id"] == 5000, f"Finite buff filter failed: {_sp_parsed}"
             pb_res = w.evaluate_js("window.__ERR_TEST.testPlayerBuffs()")
             assert pb_res and all(pb_res.values()), f"Player buffs/Toggleables test failed: {pb_res}"
+            ml_res = w.evaluate_js("window.__ERR_TEST.testMapLabels()")
+            assert ml_res and all(ml_res.values()), f"Map labels test failed: {ml_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1677,6 +1679,7 @@ def run_self_test(report_path: Optional[str]):
                 f"BOSS_HUD_OK=True",
                 f"BUFF_ICONS_COUNT={len(b_pack.get('icons', {}))}",
                 f"PLAYER_BUFFS_OK=True",
+                f"MAP_LABELS_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]

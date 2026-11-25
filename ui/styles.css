@@ -3137,6 +3137,109 @@ body.pip-map .pip-map-buff-box .buff-tile {
   color: #fff3cf;
 }
 
+/* Map Marker Labels Settings Section (v1.8.1) */
+.er-lbl-sec {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(115, 92, 52, 0.25);
+}
+.er-sec-hdr-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, rgba(212, 171, 83, 0.72), rgba(212, 171, 83, 0.06)) 1;
+}
+.er-sec-hdr-row .er-sec-hdr {
+  border-bottom: 0;
+  border-image: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+.er-lbl-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.er-mini-act {
+  font-family: Georgia, "Palatino Linotype", serif;
+  font-size: 10.5px;
+  color: #bfa574;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0 3px;
+}
+.er-mini-act:hover {
+  color: #ffe39b;
+  text-decoration: underline;
+}
+.er-mini-sep {
+  color: #6b593a;
+  font-size: 10px;
+}
+.er-lbl-top-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 14px;
+  margin-bottom: 7px;
+}
+@media (max-width: 620px) {
+  .er-lbl-top-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.er-lbl-span2 {
+  grid-column: 1 / -1;
+}
+.er-slider-wide {
+  width: 96px;
+}
+.er-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  transition: opacity 0.14s ease;
+}
+@media (max-width: 620px) {
+  .er-cat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.er-cat-grid.muted {
+  opacity: 0.45;
+}
+.er-cat-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid rgba(115, 92, 52, 0.28);
+  border-radius: 3px;
+  background: rgba(20, 16, 11, 0.72);
+  font-size: 11px;
+  color: #cfc1a5;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.12s ease;
+}
+.er-cat-cell:hover {
+  border-color: rgba(212, 171, 83, 0.55);
+  background: linear-gradient(90deg, rgba(212, 171, 83, 0.16), rgba(20, 16, 11, 0.8));
+  color: #fff3d6;
+}
+.er-cat-cell.on {
+  border-color: rgba(212, 171, 83, 0.52);
+  color: #f3e6ca;
+}
+.er-cat-cell.on .er-opt-state {
+  color: #f4d684;
+  text-shadow: 0 0 5px rgba(244, 214, 132, 0.35);
+}
+
 /* Floating Elden Ring Help / Buff Tooltip */
 .er-tip {
   position: fixed;

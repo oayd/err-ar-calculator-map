@@ -503,6 +503,44 @@
     "whetblade",
   ];
 
+  const MAP_LABEL_CAT_ORDER = [
+    ["grace", "Sites of Grace"],
+    ["boss", "Bosses"],
+    ["merchant", "Merchants"],
+    ["weapon", "Weapons"],
+    ["talisman", "Talismans"],
+    ["armor", "Armor"],
+    ["poi", "Landmarks"],
+    ["bell_bearing", "Bell Bearings"],
+    ["golden_seed", "Golden Seeds"],
+    ["sacred_tear", "Sacred Tears"],
+    ["scadutree", "Scadutree Frags"],
+    ["revered_ash", "Revered Ashes"],
+    ["crystal_tear", "Crystal Tears"],
+    ["memory_stone", "Memory Stones"],
+    ["whetblade", "Whetblades"],
+  ];
+
+  function defaultMapLabelCats() {
+    return {
+      grace: true,
+      boss: true,
+      merchant: true,
+      weapon: false,
+      talisman: false,
+      armor: false,
+      poi: false,
+      bell_bearing: false,
+      golden_seed: false,
+      sacred_tear: false,
+      scadutree: false,
+      revered_ash: false,
+      crystal_tear: false,
+      memory_stone: false,
+      whetblade: false,
+    };
+  }
+
   const KEYBIND_ACTIONS = [
     { key: "togglePipMap", label: "Toggle PiP Minimap / Expand" },
     { key: "togglePipStats", label: "Toggle PiP Stats HUD / Expand" },
@@ -545,6 +583,11 @@
     showPlayer: true,
     showPins: true,
     showOffscreenArrow: true,
+    showLabels: true,
+    pipNearbyLabelsOnly: true,
+    pipNearbyLabelRadius: 95,
+    labelCats: defaultMapLabelCats(),
+    lastLabelsDrawnCount: 0,
     followPlayer: false,
     autoSwitchLayer: true,
     autoDetect: true,
@@ -2034,6 +2077,10 @@
       mapShowPlayer: mapState.showPlayer,
       mapShowPins: mapState.showPins,
       mapShowOffscreenArrow: mapState.showOffscreenArrow,
+      mapShowLabels: mapState.showLabels,
+      mapPipNearbyLabelsOnly: mapState.pipNearbyLabelsOnly,
+      mapPipNearbyLabelRadius: mapState.pipNearbyLabelRadius,
+      mapLabelCats: mapState.labelCats,
       mapFollow: mapState.followPlayer,
       mapAutoSwitchLayer: mapState.autoSwitchLayer,
       mapAutoDetect: mapState.autoDetect,
@@ -2420,6 +2467,30 @@
       mapShowPlayer: () => mapState.showPlayer,
       mapShowPins: () => mapState.showPins,
       mapShowOffscreenArrow: () => mapState.showOffscreenArrow,
+      mapShowLabels: () => mapState.showLabels,
+      mapPipNearbyLabelsOnly: () => mapState.pipNearbyLabelsOnly,
+    };
+
+    const renderLabelCatsGrid = () => {
+      const grid = $("setLabelCatsGrid");
+      if (!grid) return;
+      grid.classList.toggle("muted", !mapState.showLabels);
+      grid.innerHTML = MAP_LABEL_CAT_ORDER.map(([k, lbl]) => {
+        const on = Boolean(mapState.labelCats[k]);
+        return `<div class="er-cat-cell${on ? " on" : ""}" data-lbl-cat="${k}">
+          <span>${escHtml(lbl)}</span>
+          <span class="er-opt-state">${on ? "\u25C6 ON" : "\u25C7 OFF"}</span>
+        </div>`;
+      }).join("");
+      grid.querySelectorAll(".er-cat-cell[data-lbl-cat]").forEach((cell) => {
+        cell.addEventListener("click", () => {
+          const cat = cell.dataset.lblCat;
+          mapState.labelCats[cat] = !mapState.labelCats[cat];
+          renderLabelCatsGrid();
+          renderMapCanvas();
+          persistSettings();
+        });
+      });
     };
 
     const refreshTogUiNow = () => {
@@ -2439,10 +2510,15 @@
       if ($("setBuffTextNum") && document.activeElement !== $("setBuffTextNum")) {
         $("setBuffTextNum").value = String(state.buffTextOpacity);
       }
+      if ($("setPipLabelRadRng")) $("setPipLabelRadRng").value = String(mapState.pipNearbyLabelRadius);
+      if ($("setPipLabelRadNum") && document.activeElement !== $("setPipLabelRadNum")) {
+        $("setPipLabelRadNum").value = String(mapState.pipNearbyLabelRadius);
+      }
       document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
         b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
       });
       if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+      renderLabelCatsGrid();
     };
     window.__syncTogUi = refreshTogUiNow;
 
@@ -2575,6 +2651,14 @@
         mapState.showOffscreenArrow = v;
         persistSettings();
         renderMapCanvas();
+      } else if (key === "mapShowLabels") {
+        mapState.showLabels = v;
+        persistSettings();
+        renderMapCanvas();
+      } else if (key === "mapPipNearbyLabelsOnly") {
+        mapState.pipNearbyLabelsOnly = v;
+        persistSettings();
+        renderMapCanvas();
       }
       refreshTogUiNow();
     };
@@ -2614,6 +2698,32 @@
         applyBuffTextOpacity(raw === "" ? 75 : raw, true, false);
       });
     }
+    if ($("setPipLabelRadRng")) {
+      $("setPipLabelRadRng").addEventListener("input", (e) => applyPipLabelRadius(e.target.value, true, false));
+    }
+    if ($("setPipLabelRadNum")) {
+      $("setPipLabelRadNum").addEventListener("input", (e) => applyPipLabelRadius(e.target.value, true, true));
+      $("setPipLabelRadNum").addEventListener("blur", () => {
+        const raw = $("setPipLabelRadNum").value;
+        applyPipLabelRadius(raw === "" ? 95 : raw, true, false);
+      });
+    }
+    const setAllLabelCats = (on) => {
+      for (const [k] of MAP_LABEL_CAT_ORDER) mapState.labelCats[k] = Boolean(on);
+      renderLabelCatsGrid();
+      renderMapCanvas();
+      persistSettings();
+    };
+    if ($("setLabelCatsAllBtn")) $("setLabelCatsAllBtn").addEventListener("click", () => setAllLabelCats(true));
+    if ($("setLabelCatsNoneBtn")) $("setLabelCatsNoneBtn").addEventListener("click", () => setAllLabelCats(false));
+    if ($("setLabelCatsDefBtn")) {
+      $("setLabelCatsDefBtn").addEventListener("click", () => {
+        mapState.labelCats = defaultMapLabelCats();
+        renderLabelCatsGrid();
+        renderMapCanvas();
+        persistSettings();
+      });
+    }
     if ($("setTogResetBtn")) {
       $("setTogResetBtn").addEventListener("click", () => {
         setPipBuffHud(true, false);
@@ -2640,6 +2750,10 @@
         mapState.showPins = true;
         if ($("mapCatPins")) $("mapCatPins").checked = true;
         mapState.showOffscreenArrow = true;
+        mapState.showLabels = true;
+        mapState.pipNearbyLabelsOnly = true;
+        applyPipLabelRadius(95, false, false);
+        mapState.labelCats = defaultMapLabelCats();
         renderPipBuffBoxes();
         renderPipBossBoxes();
         updateMapSearchList();
@@ -3798,26 +3912,66 @@
       }
     }
 
-    // Labels when zoomed in cleanly on Graces / Bosses / Landmarks
-    if (mapState.zoom >= 3.2 || (isSearching && vis.length <= 40)) {
+    // Labels when zoomed in or searching (with optional PiP nearby decluttering & per-category toggles)
+    mapState.lastLabelsDrawnCount = 0;
+    if (mapState.showLabels && (mapState.zoom >= 3.2 || (isSearching && vis.length <= 40))) {
       ctx.font = "600 11px Segoe UI, sans-serif";
       ctx.textBaseline = "middle";
-      let labelsDrawn = 0;
       const lblOff = iconPx * 0.52 + 4;
+      const usePipNearby = state.pipMode === "map" && mapState.pipNearbyLabelsOnly && !isSearching;
+      const anchorX = hasPlayerOnLayer ? playerX : w * 0.5;
+      const anchorY = hasPlayerOnLayer ? playerY : h * 0.5;
+      const radiusPx = mapState.pipNearbyLabelRadius || 95;
+      const cands = [];
       for (const m of vis) {
-        if (labelsDrawn >= 60) break;
-        if (m.cat !== "grace" && m.cat !== "boss" && m.cat !== "merchant" && !mapState.search) continue;
+        if (!isSearching && !mapState.labelCats[m.cat]) continue;
         const sx = ox + m.u * scale;
         const sy = oy + m.v * scale;
-        if (sx < 10 || sx > w - 40 || sy < 10 || sy > h - 10) continue;
-        labelsDrawn++;
+        if (usePipNearby) {
+          if (sx < 6 || sx > w - 6 || sy < 24 || sy > h - 8) continue;
+          const dist = Math.hypot(sx - anchorX, sy - anchorY);
+          if (dist > radiusPx) continue;
+          cands.push({ m, sx, sy, dist });
+        } else {
+          if (sx < 10 || sx > w - 40 || sy < 10 || sy > h - 10) continue;
+          cands.push({ m, sx, sy, dist: 0 });
+        }
+      }
+      if (usePipNearby) cands.sort((a, b) => a.dist - b.dist);
+
+      let labelsDrawn = 0;
+      const maxLabels = usePipNearby ? 24 : 60;
+      const placedBoxes = [];
+      const boxesOverlap = (a, b) => !(a.x + a.w + 2 < b.x || b.x + b.w + 2 < a.x || a.y + a.h + 2 < b.y || b.y + b.h + 2 < a.y);
+
+      for (const { m, sx, sy, dist } of cands) {
+        if (labelsDrawn >= maxLabels) break;
         const txt = m.name;
         const tw = ctx.measureText(txt).width;
+        const boxW = tw + 8;
+        const boxH = 16;
+        let lx = sx + lblOff;
+        const ly = sy - 8;
+        if (usePipNearby) {
+          if (lx + boxW > w - 4) lx = Math.max(4, sx - lblOff - boxW);
+          const box = { x: lx, y: ly, w: boxW, h: boxH };
+          if (placedBoxes.some((b) => boxesOverlap(box, b))) continue;
+          placedBoxes.push(box);
+        }
+        let alpha = 1.0;
+        if (usePipNearby && dist > radiusPx * 0.68) {
+          alpha = Math.max(0.28, 1 - (dist - radiusPx * 0.68) / Math.max(1, radiusPx * 0.32));
+        }
+        ctx.save();
+        ctx.globalAlpha = alpha;
         ctx.fillStyle = "rgba(15, 13, 11, 0.80)";
-        ctx.fillRect(sx + lblOff, sy - 8, tw + 8, 16);
+        ctx.fillRect(lx, ly, boxW, boxH);
         ctx.fillStyle = "#ece4d8";
-        ctx.fillText(txt, sx + lblOff + 4, sy);
+        ctx.fillText(txt, lx + 4, sy);
+        ctx.restore();
+        labelsDrawn++;
       }
+      mapState.lastLabelsDrawnCount = labelsDrawn;
     }
 
     // Highlight hovered and selected pin on top
@@ -4411,6 +4565,18 @@
     if ($("setBuffTextNum") && (!fromNum || Number(val) !== pct)) $("setBuffTextNum").value = String(pct);
     if (persist) persistSettings();
     return pct;
+  }
+
+  function applyPipLabelRadius(val, persist = true, fromNum = false) {
+    if (fromNum && String(val).trim() === "") return mapState.pipNearbyLabelRadius;
+    const n = Math.round(Number(val));
+    const px = Number.isFinite(n) ? Math.max(30, Math.min(220, n)) : 95;
+    mapState.pipNearbyLabelRadius = px;
+    if ($("setPipLabelRadRng")) $("setPipLabelRadRng").value = String(px);
+    if ($("setPipLabelRadNum") && (!fromNum || Number(val) !== px)) $("setPipLabelRadNum").value = String(px);
+    renderMapCanvas();
+    if (persist) persistSettings();
+    return px;
   }
 
   function setPipBuffHud(enabled, persist = true) {
@@ -5237,6 +5403,14 @@
     state.enemyShowStatuses = typeof cfg.enemyShowStatuses === "boolean" ? cfg.enemyShowStatuses : true;
     state.enemyShowStance = typeof cfg.enemyShowStance === "boolean" ? cfg.enemyShowStance : true;
     mapState.showOffscreenArrow = typeof cfg.mapShowOffscreenArrow === "boolean" ? cfg.mapShowOffscreenArrow : true;
+    mapState.showLabels = typeof cfg.mapShowLabels === "boolean" ? cfg.mapShowLabels : true;
+    mapState.pipNearbyLabelsOnly = typeof cfg.mapPipNearbyLabelsOnly === "boolean" ? cfg.mapPipNearbyLabelsOnly : true;
+    applyPipLabelRadius(typeof cfg.mapPipNearbyLabelRadius === "number" ? cfg.mapPipNearbyLabelRadius : 95, false, false);
+    if (cfg.mapLabelCats && typeof cfg.mapLabelCats === "object") {
+      for (const [k] of MAP_LABEL_CAT_ORDER) {
+        if (typeof cfg.mapLabelCats[k] === "boolean") mapState.labelCats[k] = cfg.mapLabelCats[k];
+      }
+    }
     renderPipRamBadges();
     if (typeof cfg.mapLayer === "string" && ["m00", "m01", "m10"].includes(cfg.mapLayer)) {
       mapState.layer = cfg.mapLayer;
@@ -5824,10 +5998,106 @@
           sweepDirectionOk,
           countTextOk,
           tooltipOk,
-          settingsRowsOk: togRowsCount === 14 && supQuestionsCount >= 14,
+          settingsRowsOk: togRowsCount === 16 && supQuestionsCount >= 17,
           clampOk: clampHighOk && clampLowOk,
           toggledOffOk,
           resetDefaultsOk,
+        };
+      },
+      testMapLabels() {
+        const prevMode = state.pipMode;
+        const prevView = state.activeView;
+        const prevLayer = mapState.layer;
+        const prevZoom = mapState.zoom;
+        const prevPanX = mapState.panX;
+        const prevPanY = mapState.panY;
+        const prevSearch = mapState.search;
+        const prevShowLabels = mapState.showLabels;
+        const prevNearbyOnly = mapState.pipNearbyLabelsOnly;
+        const prevRadius = mapState.pipNearbyLabelRadius;
+        const prevLabelCats = Object.assign({}, mapState.labelCats);
+
+        $("topSettingsBtn").click();
+        const catCells = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell");
+        const catCellsCountOk = catCells.length === 15;
+        const defaultOnCountOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 3 &&
+          Boolean(mapState.labelCats.grace && mapState.labelCats.boss && mapState.labelCats.merchant && !mapState.labelCats.weapon);
+
+        const weaponCell = document.querySelector("#setLabelCatsGrid .er-cat-cell[data-lbl-cat='weapon']");
+        if (weaponCell) weaponCell.click();
+        const singleToggleOk = Boolean(mapState.labelCats.weapon);
+
+        $("setLabelCatsAllBtn").click();
+        const allBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 15;
+        $("setLabelCatsNoneBtn").click();
+        const noneBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 0;
+        $("setLabelCatsDefBtn").click();
+        const defBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 3 &&
+          Boolean(mapState.labelCats.grace && mapState.labelCats.boss && mapState.labelCats.merchant);
+
+        applyPipLabelRadius(10, false, false);
+        const radLowOk = mapState.pipNearbyLabelRadius === 30;
+        applyPipLabelRadius(500, false, false);
+        const radHighOk = mapState.pipNearbyLabelRadius === 220;
+        applyPipLabelRadius(95, false, false);
+
+        state.activeView = "map";
+        setPipMode("map");
+        mapState.layer = "m00";
+        mapState.search = "";
+        const anchor = (mapState.data && mapState.data.markers || []).find((m) => m.layer === "m00" && m.cat === "grace");
+        if (anchor) centerMapOnUV(anchor.u, anchor.v, 4.5);
+        else mapState.zoom = 4.5;
+
+        const showNamesRow = document.querySelector("#settingsToggleables .er-opt-row[data-tog='mapShowLabels']");
+        if (showNamesRow && mapState.showLabels) showNamesRow.click();
+        renderMapCanvas();
+        const hiddenWhenOffOk = !mapState.showLabels &&
+          mapState.lastLabelsDrawnCount === 0 &&
+          $("setLabelCatsGrid").classList.contains("muted");
+        if (showNamesRow && !mapState.showLabels) showNamesRow.click();
+
+        mapState.pipNearbyLabelsOnly = true;
+        renderMapCanvas();
+        const nearbyCount = mapState.lastLabelsDrawnCount;
+
+        mapState.pipNearbyLabelsOnly = false;
+        renderMapCanvas();
+        const allLabelsCount = mapState.lastLabelsDrawnCount;
+        const nearbyFilterOk = allLabelsCount >= 1 && nearbyCount <= allLabelsCount;
+
+        $("setTogResetBtn").click();
+        const resetLabelsOk = mapState.showLabels === true &&
+          mapState.pipNearbyLabelsOnly === true &&
+          mapState.pipNearbyLabelRadius === 95 &&
+          Boolean(mapState.labelCats.grace && mapState.labelCats.boss && mapState.labelCats.merchant && !mapState.labelCats.weapon);
+        $("settingsCloseBtn").click();
+
+        mapState.layer = prevLayer;
+        mapState.zoom = prevZoom;
+        mapState.panX = prevPanX;
+        mapState.panY = prevPanY;
+        mapState.search = prevSearch;
+        mapState.showLabels = prevShowLabels;
+        mapState.pipNearbyLabelsOnly = prevNearbyOnly;
+        applyPipLabelRadius(prevRadius, false, false);
+        mapState.labelCats = prevLabelCats;
+        setPipMode(prevMode);
+        state.activeView = prevView;
+        syncSettingsToggleablesUi();
+        renderMapCanvas();
+
+        return {
+          catCellsCountOk,
+          defaultOnCountOk,
+          singleToggleOk,
+          allBtnOk,
+          noneBtnOk,
+          defBtnOk,
+          radClampOk: radLowOk && radHighOk,
+          hiddenWhenOffOk,
+          nearbyFilterOk,
+          resetLabelsOk,
         };
       },
       startMapImagesTest() {
