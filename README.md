@@ -1,4 +1,4 @@
-# Elden Ring Weapon Calculator (ERR v2.3.9.1)
+# Elden Ring Weapon Calculator & Map (ERR v2.3.9.1)
 
 A fast, standalone Windows desktop Attack Rating (AR), effective damage, status buildup, and build optimization calculator built specifically for **ELDEN RING Reforged (ERR v2.3.9.1)**.
 
