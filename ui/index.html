@@ -547,6 +547,7 @@
         <div id="mapPinCoords" class="map-pin-coords"></div>
         <div id="mapPinActions" class="map-pin-actions"></div>
       </div>
+      <div id="pipMapBuffBox" class="pip-map-buff-box hidden"></div>
       <div id="pipMapBossBox" class="pip-map-boss-box hidden"></div>
     </section>
   </div>
@@ -605,6 +606,7 @@
       <span id="pipCharName" class="pip-char-name">Character</span>
       <span id="pipRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
     </div>
+    <div id="pipStatsBuffBox" class="pip-buff-row hidden"></div>
     <div id="pipBossBox" class="pip-boss-box hidden"></div>
     <div id="pipStatsGrid" class="pip-stats-grid"></div>
     <div class="pip-subhdr">
@@ -634,28 +636,115 @@
         <div class="settings-sec-title">Global Hotkeys (work while Elden Ring is focused)</div>
         <div id="keybindsList" class="keybinds-list"></div>
         <div id="keybindErrorNote" class="keybind-err-note"></div>
-        <div class="settings-sec-title" style="margin-top:12px;">Map &amp; Overlay Preferences</div>
-        <div class="settings-prefs-grid">
-          <label class="cb-row"><input type="checkbox" id="setAutoLayerCb" checked /><span>Auto-Switch Map Layer (Lands Between / Underground / DLC)</span></label>
-          <label class="cb-row"><input type="checkbox" id="setAutoDetectCb" checked /><span>Auto-Detect Collected Items, Graces &amp; Defeated Bosses</span></label>
-          <label class="cb-row"><input type="checkbox" id="setPipBossHudCb" checked /><span>Show Boss / Locked-On Enemy Bar in PiP Stats HUD (30 Hz Offline RAM)</span></label>
-          <label class="cb-row"><input type="checkbox" id="setPipMapBossHudCb" checked /><span>Show Compact Boss / Locked-On Enemy Bar in PiP Map (30 Hz Offline RAM)</span></label>
-          <div class="settings-inline-row">
-            <span>Boss / Target HUD Design:</span>
-            <div id="setDesignGroup" class="pip-design-grp">
-              <button type="button" class="pip-d-btn active" data-design="1">1</button>
-              <button type="button" class="pip-d-btn" data-design="2">2</button>
-              <button type="button" class="pip-d-btn" data-design="3">3</button>
+        <div class="settings-sec-title" style="margin-top:10px;">Toggleables</div>
+        <div id="settingsToggleables" class="er-tog-shell">
+          <div class="er-tog-grid">
+            <div class="er-tog-col">
+              <div>
+                <div class="er-sec-hdr">Player Buff Timers</div>
+                <div class="er-opt-row on" data-tog="pipBuffHud">
+                  <span class="er-opt-lbl">PiP Stats Buff Bar<sup class="er-q" data-title="PiP Stats Buff Bar" data-tip="Shows your active timed buffs and debuffs inside the compact Stats overlay.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="pipMapBuffHud">
+                  <span class="er-opt-lbl">PiP Map Buff Bar<sup class="er-q" data-title="PiP Map Buff Bar" data-tip="Shows your active timed buff and debuff icons in the corner minimap overlay.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="buffExpFlash">
+                  <span class="er-opt-lbl">Expiring Flash Alert (&le; 10s)<sup class="er-q" data-title="Expiring Flash Alert" data-tip="Gently pulses a soft crimson border when a buff has 10 seconds or less before wearing off.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row er-opt-static">
+                  <span class="er-opt-lbl">Radial Sweep Opacity<sup class="er-q" data-title="Radial Sweep Opacity" data-tip="Controls how dark the cooldown shadow is as it sweeps clockwise off the icon (0–100%, Default: 30%).">?</sup></span>
+                  <span class="er-slider-ctrl">
+                    <input id="setBuffSweepRng" type="range" min="0" max="100" step="1" value="30" class="er-slider" />
+                    <span class="er-num-wrap"><input id="setBuffSweepNum" type="number" min="0" max="100" step="1" value="30" class="er-num" /><span class="er-pct">%</span></span>
+                  </span>
+                </div>
+                <div class="er-opt-row er-opt-static">
+                  <span class="er-opt-lbl">Timer Text Opacity<sup class="er-q" data-title="Timer Text Opacity" data-tip="Adjusts transparency of the white countdown numbers over each buff icon (0–100%, Default: 75%).">?</sup></span>
+                  <span class="er-slider-ctrl">
+                    <input id="setBuffTextRng" type="range" min="0" max="100" step="1" value="75" class="er-slider" />
+                    <span class="er-num-wrap"><input id="setBuffTextNum" type="number" min="0" max="100" step="1" value="75" class="er-num" /><span class="er-pct">%</span></span>
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <div class="er-sec-hdr">Enemy / Boss HUD</div>
+                <div class="er-opt-row on" data-tog="pipBossHud">
+                  <span class="er-opt-lbl">PiP Stats Enemy Bar<sup class="er-q" data-title="PiP Stats Enemy Bar" data-tip="Shows active bosses or your locked-on enemy's HP, stance, and status buildup in the Stats overlay.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="pipMapBossHud">
+                  <span class="er-opt-lbl">PiP Map Enemy Bar<sup class="er-q" data-title="PiP Map Enemy Bar" data-tip="Shows a compact enemy HP, stance, and status bar anchored at the bottom of the minimap overlay.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="enemyShowStatuses">
+                  <span class="er-opt-lbl">Enemy Status Bars<sup class="er-q" data-title="Enemy Status Bars" data-tip="Shows Bleed, Frost, Rot, Sleep, Poison, and Madness buildup on enemies that can take them.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="enemyShowStance">
+                  <span class="er-opt-lbl">Enemy Stance / Poise Bar<sup class="er-q" data-title="Enemy Stance / Poise Bar" data-tip="Displays how close the boss or enemy is to a stance break or riposte.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row er-opt-static">
+                  <span class="er-opt-lbl">Enemy HUD Design<sup class="er-q" data-title="Enemy HUD Design" data-tip="Choose the visual layout (1–3) for enemy status buildup meters.">?</sup></span>
+                  <div id="setDesignGroup" class="pip-design-grp">
+                    <button type="button" class="pip-d-btn active" data-design="1">1</button>
+                    <button type="button" class="pip-d-btn" data-design="2">2</button>
+                    <button type="button" class="pip-d-btn" data-design="3">3</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="er-tog-col">
+              <div>
+                <div class="er-sec-hdr">Live Map &amp; Tracking</div>
+                <div class="er-opt-row on" data-tog="liveWatch">
+                  <span class="er-opt-lbl">Live Game Sync<sup class="er-q" data-title="Live Game Sync" data-tip="Automatically reads your save file and offline game memory for real-time stats, position, buffs, and enemy bars.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapFollow">
+                  <span class="er-opt-lbl">Follow Live Player<sup class="er-q" data-title="Follow Live Player" data-tip="Keeps the map camera centered on your character as you move across the world.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapAutoSwitchLayer">
+                  <span class="er-opt-lbl">Auto-Switch Map Layer<sup class="er-q" data-title="Auto-Switch Map Layer" data-tip="Automatically flips between Overworld, Underground, and Shadow Realm maps when you travel between them.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapAutoDetect">
+                  <span class="er-opt-lbl">Auto-Detect Completed<sup class="er-q" data-title="Auto-Detect Completed" data-tip="Automatically marks Sites of Grace you discovered, bosses you defeated, and loot you already own.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapShowPlayer">
+                  <span class="er-opt-lbl">Player Marker &amp; Ring<sup class="er-q" data-title="Player Marker &amp; Ring" data-tip="Draws your character's live directional arrow and subtle green ring on the interactive map.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapShowPins">
+                  <span class="er-opt-lbl">Native Blue Beacons &amp; Pins<sup class="er-q" data-title="Native Blue Beacons &amp; Pins" data-tip="Syncs your in-game blue light pillars (1–5) and map stamps onto the live map.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row on" data-tog="mapShowOffscreenArrow">
+                  <span class="er-opt-lbl">Off-Screen Target Arrow<sup class="er-q" data-title="Off-Screen Target Arrow" data-tip="Shows a directional edge arrow and distance in the corner minimap pointing toward your searched item or grace.">?</sup></span>
+                  <span class="er-opt-state">&#9670; ON</span>
+                </div>
+                <div class="er-opt-row er-opt-static">
+                  <span class="er-opt-lbl">Completed Markers<sup class="er-q" data-title="Completed Markers" data-tip="Controls how collected items, touched Graces, and defeated bosses render on the map.">?</sup></span>
+                  <select id="setCompletedModeSel" class="er-select">
+                    <option value="dim">Dim + Checkmark</option>
+                    <option value="show">Show Normally</option>
+                    <option value="hide">Hide Completed</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
-          <label class="settings-inline-row">
-            <span>Completed Markers Display:</span>
-            <select id="setCompletedModeSel">
-              <option value="dim">Dim + Checkmark</option>
-              <option value="show">Show Normally</option>
-              <option value="hide">Hide Completed</option>
-            </select>
-          </label>
+          <div class="er-tog-ftr">
+            <span id="setTogResetNote" class="er-reset-note">Restored default settings (Sweep 30%, Text 75%).</span>
+            <button id="setTogResetBtn" type="button" class="er-reset-btn">Reset to Default</button>
+          </div>
         </div>
       </div>
       <div class="settings-ftr">
@@ -663,6 +752,16 @@
         <button id="settingsDoneBtn" class="top-btn gold-outline" type="button">Done</button>
       </div>
     </div>
+  </div>
+
+  <!-- Floating Elden Ring Tooltip (Settings Help & Player Buff/Debuff Hover Details) -->
+  <div id="erHoverTip" class="er-tip" role="tooltip">
+    <div class="er-tip-hdr">
+      <div id="erTipTitle" class="er-tip-title"></div>
+      <span id="erTipTag" class="er-tip-tag hidden"></span>
+    </div>
+    <div id="erTipBody"></div>
+    <div id="erTipTime" class="er-tip-time hidden"></div>
   </div>
 
   <!-- INJECT_JS -->

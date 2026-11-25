@@ -184,6 +184,40 @@ def _parse_resist_block(rraw: bytes, immune_mask: int = 0) -> List[Dict[str, Any
     return statuses
 
 
+def _parse_player_sp_effects(nodes: List[Tuple[int, int, float, float, int]]) -> List[Dict[str, Any]]:
+    """Filter active player SpecialEffect nodes to finite-duration buffs/debuffs only."""
+    by_pair: Dict[Tuple[int, int], Tuple[float, float]] = {}
+    for param_id, icon_id, rem, dur, flags in nodes:
+        if (flags & 0x800C0003) != 0:
+            continue
+        if param_id <= 0 or icon_id <= 0:
+            continue
+        if not math.isfinite(dur) or dur <= 0.5 or dur >= 3600.0:
+            continue
+        if not math.isfinite(rem) or rem <= 0.05 or rem > dur + 1.0:
+            continue
+        k = (int(icon_id), int(param_id))
+        prev = by_pair.get(k)
+        if prev is None or rem > prev[0]:
+            by_pair[k] = (float(rem), float(dur))
+
+    seen_visual: Set[Tuple[int, int, int]] = set()
+    out: List[Dict[str, Any]] = []
+    for (icon_id, param_id), (rem, dur) in by_pair.items():
+        vis_key = (icon_id, int(round(rem * 10)), int(round(dur * 10)))
+        if vis_key in seen_visual:
+            continue
+        seen_visual.add(vis_key)
+        out.append({
+            "id": param_id,
+            "iconId": icon_id,
+            "rem": round(rem, 2),
+            "dur": round(dur, 2),
+        })
+    out.sort(key=lambda item: (item["rem"], item["id"]))
+    return out
+
+
 class EldenRingMemoryReader:
     """Strictly read-only Win32 RPM reader for live offline eldenring.exe state."""
 
@@ -813,3 +847,51 @@ class EldenRingMemoryReader:
                         if entry:
                             return [entry]
         return out
+
+    def read_player_buffs(self) -> Optional[List[Dict[str, Any]]]:
+        """Return strictly finite active player SpecialEffect timers from offline RAM."""
+        if not self._wcm_addr or _is_eac_running():
+            return None
+        pin = self._get_player_ins()
+        if pin < 0x10000:
+            return None
+        sp_mgr = self._ru64(pin + 0x178)
+        if sp_mgr < 0x10000:
+            return []
+        node = self._ru64(sp_mgr + 0x08)
+        if node < 0x10000:
+            return []
+
+        nodes: List[Tuple[int, int, float, float, int]] = []
+        seen: Set[int] = set()
+        for _ in range(160):
+            if node < 0x10000 or node in seen:
+                break
+            seen.add(node)
+            raw = self._read_bytes(node, 0x68)
+            if not raw or len(raw) < 0x64:
+                break
+            pdata = struct.unpack_from("<Q", raw, 0x00)[0]
+            param_id = struct.unpack_from("<i", raw, 0x08)[0]
+            nxt = struct.unpack_from("<Q", raw, 0x30)[0]
+            rem = struct.unpack_from("<f", raw, 0x40)[0]
+            dur = struct.unpack_from("<f", raw, 0x48)[0]
+            flags = struct.unpack_from("<I", raw, 0x60)[0]
+
+            if (
+                (flags & 0x800C0003) == 0
+                and param_id > 0
+                and pdata >= 0x10000
+                and math.isfinite(dur)
+                and 0.5 < dur < 3600.0
+                and math.isfinite(rem)
+                and 0.05 < rem <= dur + 1.0
+            ):
+                raw_ic = self._read_bytes(pdata, 4)
+                if raw_ic and len(raw_ic) == 4:
+                    icon_id = struct.unpack("<i", raw_ic)[0]
+                    if icon_id > 0:
+                        nodes.append((param_id, icon_id, rem, dur, flags))
+            node = nxt
+
+        return _parse_player_sp_effects(nodes)

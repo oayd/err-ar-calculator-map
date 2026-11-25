@@ -9,6 +9,7 @@ A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.9.1)** co
 - **Auto Progress Tracking & In-Game Pins**: Automatically marks collected items, defeated bosses, and discovered Graces from your save or live offline game, and displays your in-game blue beacons and green map stamps.
 - **Always-On-Top In-Game Overlay (PiP)**: Borderless corner minimap (with an off-screen arrow pointing to your searched target) or compact live stats & equipped AR HUD, controlled via customizable global hotkeys.
 - **Live Boss & Enemy HUD (30 Hz)**: Optional Elden Ring–style enemy bar in the overlay showing live HP, Stance/Poise (including stance-broken state), and status buildup (Bleed, Frost, Rot, Sleep, Poison, Madness) for active bosses or your locked-on target, with 3 switchable layouts. Read-only offline RAM only; automatically disabled when EAC is active.
+- **Live Player Buff & Debuff Timers**: Shows strictly finite active buffs and debuffs in both the Stats and Map overlays with reversed full-to-empty clockwise radial sweep timers, crisp offline status icons, crimson `▼` debuff indicators, ≤10s expiring pulse alerts, and hover tooltips — customizable under **Settings → Toggleables**.
 
 ## Download
 Download the latest standalone `ERR_AR_Calculator.exe` from the [GitHub Releases](../../releases) page. No Python installation or external files are required (requires Windows 10/11 with Microsoft Edge WebView2, which is built into modern Windows).
@@ -24,6 +25,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name ERR_AR_Calculator 
   --icon "err_icon.ico" `
   --add-data "err_weapon_data.json.gz;." `
   --add-data "err_map_data.json.gz;." `
+  --add-data "err_buff_icons.json.gz;." `
   --add-data "err_icon.ico;." `
   --add-data "ui;ui" `
   --collect-all clr_loader --collect-all pythonnet --collect-all texture2ddecoder `

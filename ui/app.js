@@ -446,12 +446,24 @@
     ramChar: null,
     ramPos: null,
     ramBosses: [],
+    buffIcons: null,
+    ramBuffs: [],
+    ramBuffsStamp: 0,
+    buffRafId: 0,
+    buffDomKeys: { stats: "", map: "" },
     pipMode: "off",
     pipOpacity: 1.0,
     pipClickThrough: false,
     pipBossHud: true,
     pipMapBossHud: true,
     pipBossDesign: "1",
+    pipBuffHud: true,
+    pipMapBuffHud: true,
+    buffExpFlash: true,
+    buffSweepOpacity: 30,
+    buffTextOpacity: 75,
+    enemyShowStatuses: true,
+    enemyShowStance: true,
     overlayHidden: false,
     keybinds: {},
     defaultKeybinds: {},
@@ -532,6 +544,7 @@
     },
     showPlayer: true,
     showPins: true,
+    showOffscreenArrow: true,
     followPlayer: false,
     autoSwitchLayer: true,
     autoDetect: true,
@@ -2008,11 +2021,19 @@
       pipBossHud: state.pipBossHud,
       pipMapBossHud: state.pipMapBossHud,
       pipBossDesign: state.pipBossDesign,
+      pipBuffHud: state.pipBuffHud,
+      pipMapBuffHud: state.pipMapBuffHud,
+      buffExpFlash: state.buffExpFlash,
+      buffSweepOpacity: state.buffSweepOpacity,
+      buffTextOpacity: state.buffTextOpacity,
+      enemyShowStatuses: state.enemyShowStatuses,
+      enemyShowStance: state.enemyShowStance,
       keybinds: state.keybinds,
       mapLayer: mapState.layer,
       mapCats: mapState.cats,
       mapShowPlayer: mapState.showPlayer,
       mapShowPins: mapState.showPins,
+      mapShowOffscreenArrow: mapState.showOffscreenArrow,
       mapFollow: mapState.followPlayer,
       mapAutoSwitchLayer: mapState.autoSwitchLayer,
       mapAutoDetect: mapState.autoDetect,
@@ -2050,6 +2071,7 @@
 
     $("liveWatchCb").addEventListener("change", (e) => {
       state.liveWatch = e.target.checked;
+      syncSettingsToggleablesUi();
       persistSettings();
       if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_watch) {
         window.pywebview.api.set_live_watch(state.liveWatch);
@@ -2382,12 +2404,57 @@
       }
     });
 
-    // Settings & Keybinds Modal
+    // Settings & Keybinds Modal + Elden Ring Toggleables
+    const TOG_VALUE_GETTERS = {
+      pipBuffHud: () => state.pipBuffHud,
+      pipMapBuffHud: () => state.pipMapBuffHud,
+      buffExpFlash: () => state.buffExpFlash,
+      pipBossHud: () => state.pipBossHud,
+      pipMapBossHud: () => state.pipMapBossHud,
+      enemyShowStatuses: () => state.enemyShowStatuses,
+      enemyShowStance: () => state.enemyShowStance,
+      liveWatch: () => state.liveWatch,
+      mapFollow: () => mapState.followPlayer,
+      mapAutoSwitchLayer: () => mapState.autoSwitchLayer,
+      mapAutoDetect: () => mapState.autoDetect,
+      mapShowPlayer: () => mapState.showPlayer,
+      mapShowPins: () => mapState.showPins,
+      mapShowOffscreenArrow: () => mapState.showOffscreenArrow,
+    };
+
+    const refreshTogUiNow = () => {
+      document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").forEach((row) => {
+        const k = row.dataset.tog;
+        const fn = TOG_VALUE_GETTERS[k];
+        const on = fn ? Boolean(fn()) : true;
+        row.classList.toggle("on", on);
+        const stEl = row.querySelector(".er-opt-state");
+        if (stEl) stEl.textContent = on ? "\u25C6 ON" : "\u25C7 OFF";
+      });
+      if ($("setBuffSweepRng")) $("setBuffSweepRng").value = String(state.buffSweepOpacity);
+      if ($("setBuffSweepNum") && document.activeElement !== $("setBuffSweepNum")) {
+        $("setBuffSweepNum").value = String(state.buffSweepOpacity);
+      }
+      if ($("setBuffTextRng")) $("setBuffTextRng").value = String(state.buffTextOpacity);
+      if ($("setBuffTextNum") && document.activeElement !== $("setBuffTextNum")) {
+        $("setBuffTextNum").value = String(state.buffTextOpacity);
+      }
+      document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
+      });
+      if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+    };
+    window.__syncTogUi = refreshTogUiNow;
+
     const openSettingsModal = (open) => {
       const mod = $("settingsModal");
       if (!mod) return;
-      if (!open) state.recordingKeybindAction = null;
-      else renderKeybindsUi();
+      if (!open) {
+        state.recordingKeybindAction = null;
+        hideErHoverTip();
+      } else {
+        renderKeybindsUi();
+      }
       mod.classList.toggle("hidden", !open);
     };
     const renderKeybindsUi = () => {
@@ -2422,14 +2489,7 @@
       const errs = Object.values(state.hotkeyErrors || {}).filter(Boolean);
       const errEl = $("keybindErrorNote");
       if (errEl) errEl.textContent = errs.join(" · ");
-      if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
-      if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
-      if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
-      if ($("setPipMapBossHudCb")) $("setPipMapBossHudCb").checked = state.pipMapBossHud;
-      document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
-        b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
-      });
-      if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+      refreshTogUiNow();
     };
     const syncKeybindsToBackend = async () => {
       if (window.pywebview && window.pywebview.api && window.pywebview.api.set_keybinds) {
@@ -2458,32 +2518,143 @@
         renderKeybindsUi();
       });
     }
-    if ($("setAutoLayerCb")) {
-      $("setAutoLayerCb").addEventListener("change", (e) => {
-        mapState.autoSwitchLayer = e.target.checked;
-        if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = mapState.autoSwitchLayer;
+
+    const applyTogAction = (key, nextVal) => {
+      const v = Boolean(nextVal);
+      if (key === "pipBuffHud") {
+        setPipBuffHud(v, true);
+      } else if (key === "pipMapBuffHud") {
+        setPipMapBuffHud(v, true);
+      } else if (key === "buffExpFlash") {
+        state.buffExpFlash = v;
+        renderPipBuffBoxes();
         persistSettings();
-      });
-    }
-    if ($("setAutoDetectCb")) {
-      $("setAutoDetectCb").addEventListener("change", (e) => {
-        mapState.autoDetect = e.target.checked;
-        if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = mapState.autoDetect;
+      } else if (key === "pipBossHud") {
+        setPipBossHud(v, true);
+      } else if (key === "pipMapBossHud") {
+        setPipMapBossHud(v, true);
+      } else if (key === "enemyShowStatuses") {
+        state.enemyShowStatuses = v;
+        renderPipBossBoxes();
+        persistSettings();
+      } else if (key === "enemyShowStance") {
+        state.enemyShowStance = v;
+        renderPipBossBoxes();
+        persistSettings();
+      } else if (key === "liveWatch") {
+        state.liveWatch = v;
+        if ($("liveWatchCb")) $("liveWatchCb").checked = v;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_watch) {
+          window.pywebview.api.set_live_watch(v);
+        }
+        persistSettings();
+      } else if (key === "mapFollow") {
+        setMapFollow(v);
+        persistSettings();
+      } else if (key === "mapAutoSwitchLayer") {
+        mapState.autoSwitchLayer = v;
+        if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = v;
+        persistSettings();
+      } else if (key === "mapAutoDetect") {
+        mapState.autoDetect = v;
+        if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = v;
         persistSettings();
         updateMapSearchList();
         renderMapCanvas();
+      } else if (key === "mapShowPlayer") {
+        mapState.showPlayer = v;
+        if ($("mapCatPlayer")) $("mapCatPlayer").checked = v;
+        persistSettings();
+        renderMapCanvas();
+      } else if (key === "mapShowPins") {
+        mapState.showPins = v;
+        if ($("mapCatPins")) $("mapCatPins").checked = v;
+        persistSettings();
+        renderMapCanvas();
+      } else if (key === "mapShowOffscreenArrow") {
+        mapState.showOffscreenArrow = v;
+        persistSettings();
+        renderMapCanvas();
+      }
+      refreshTogUiNow();
+    };
+
+    document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const key = row.dataset.tog;
+        const getter = TOG_VALUE_GETTERS[key];
+        const cur = getter ? Boolean(getter()) : true;
+        applyTogAction(key, !cur);
+      });
+    });
+
+    document.querySelectorAll("#settingsToggleables .er-q").forEach((q) => {
+      q.addEventListener("click", (e) => e.stopPropagation());
+      q.addEventListener("mouseenter", () => showErHelpTip(q));
+      q.addEventListener("mouseleave", hideErHoverTip);
+    });
+
+    if ($("setBuffSweepRng")) {
+      $("setBuffSweepRng").addEventListener("input", (e) => applyBuffSweepOpacity(e.target.value, true, false));
+    }
+    if ($("setBuffSweepNum")) {
+      $("setBuffSweepNum").addEventListener("input", (e) => applyBuffSweepOpacity(e.target.value, true, true));
+      $("setBuffSweepNum").addEventListener("blur", () => {
+        const raw = $("setBuffSweepNum").value;
+        applyBuffSweepOpacity(raw === "" ? 30 : raw, true, false);
       });
     }
-    if ($("setPipBossHudCb")) {
-      $("setPipBossHudCb").addEventListener("change", (e) => {
-        setPipBossHud(e.target.checked, true);
+    if ($("setBuffTextRng")) {
+      $("setBuffTextRng").addEventListener("input", (e) => applyBuffTextOpacity(e.target.value, true, false));
+    }
+    if ($("setBuffTextNum")) {
+      $("setBuffTextNum").addEventListener("input", (e) => applyBuffTextOpacity(e.target.value, true, true));
+      $("setBuffTextNum").addEventListener("blur", () => {
+        const raw = $("setBuffTextNum").value;
+        applyBuffTextOpacity(raw === "" ? 75 : raw, true, false);
       });
     }
-    if ($("setPipMapBossHudCb")) {
-      $("setPipMapBossHudCb").addEventListener("change", (e) => {
-        setPipMapBossHud(e.target.checked, true);
+    if ($("setTogResetBtn")) {
+      $("setTogResetBtn").addEventListener("click", () => {
+        setPipBuffHud(true, false);
+        setPipMapBuffHud(true, false);
+        state.buffExpFlash = true;
+        applyBuffSweepOpacity(30, false, false);
+        applyBuffTextOpacity(75, false, false);
+        setPipBossHud(true, false);
+        setPipMapBossHud(true, false);
+        state.enemyShowStatuses = true;
+        state.enemyShowStance = true;
+        state.liveWatch = true;
+        if ($("liveWatchCb")) $("liveWatchCb").checked = true;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_watch) {
+          window.pywebview.api.set_live_watch(true);
+        }
+        setMapFollow(true);
+        mapState.autoSwitchLayer = true;
+        if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = true;
+        mapState.autoDetect = true;
+        if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = true;
+        mapState.showPlayer = true;
+        if ($("mapCatPlayer")) $("mapCatPlayer").checked = true;
+        mapState.showPins = true;
+        if ($("mapCatPins")) $("mapCatPins").checked = true;
+        mapState.showOffscreenArrow = true;
+        renderPipBuffBoxes();
+        renderPipBossBoxes();
+        updateMapSearchList();
+        renderMapCanvas();
+        refreshTogUiNow();
+        persistSettings();
+        const note = $("setTogResetNote");
+        if (note) {
+          note.classList.add("show");
+          clearTimeout(window.__erResetNoteTimer);
+          window.__erResetNoteTimer = setTimeout(() => note.classList.remove("show"), 1800);
+        }
       });
     }
+
     document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
       b.addEventListener("click", () => setPipBossDesign(b.dataset.design, true));
     });
@@ -2820,6 +2991,9 @@
     state.ramChar = null;
     state.ramPos = null;
     state.ramBosses = [];
+    state.ramBuffs = [];
+    state.ramBuffsStamp = 0;
+    hideErHoverTip();
     mapState.ramPins = null;
     mapState.ramOwned = null;
     mapState.ramFlags = null;
@@ -2839,6 +3013,7 @@
     else {
       renderPipRamBadges();
       renderPipBossBoxes();
+      renderPipBuffBoxes();
     }
     updateMapPlayerReadout();
     if (state.activeView === "map") {
@@ -2850,6 +3025,12 @@
   function applyLiveRamBosses(bosses) {
     state.ramBosses = Array.isArray(bosses) ? bosses : [];
     renderPipBossBoxes();
+  }
+
+  function applyLiveRamBuffs(buffs) {
+    state.ramBuffs = Array.isArray(buffs) ? buffs : [];
+    state.ramBuffsStamp = performance.now();
+    renderPipBuffBoxes();
   }
 
   function applyLiveRamPins(pins) {
@@ -2914,6 +3095,7 @@
   window.__onLiveRamPins = applyLiveRamPins;
   window.__onLiveRamProgress = applyLiveRamProgress;
   window.__onLiveRamBosses = applyLiveRamBosses;
+  window.__onLiveRamBuffs = applyLiveRamBuffs;
   window.__onGlobalHotkey = handleGlobalHotkey;
 
   function resolvePlayerToMapLayer(pp) {
@@ -3684,7 +3866,7 @@
 
     // Nearest off-screen target arrow + distance in PiP Map Mode (single nearest match only)
     mapState.offscreenTarget = null;
-    if (state.pipMode === "map" && isSearching && vis.length > 0) {
+    if (mapState.showOffscreenArrow && state.pipMode === "map" && isSearching && vis.length > 0) {
       const cal = (mapState.data && mapState.data.layers && mapState.data.layers[mapState.layer]) || { span: 10496.0 };
       const span = cal.span || 10496.0;
       const refU = hasPlayerOnLayer ? lp.u : (w * 0.5 - ox) / scale;
@@ -3962,6 +4144,7 @@
     if (btn) btn.classList.toggle("following", mapState.followPlayer);
     const pbtn = $("pipFollowBtn");
     if (pbtn) pbtn.classList.toggle("following", mapState.followPlayer);
+    syncSettingsToggleablesUi();
     updateMapPlayerReadout();
     notifyStreamMode();
     if (mapState.followPlayer) {
@@ -4059,7 +4242,7 @@
       const stLbl = b.stanceKind === "poise" ? "POISE" : (b.stanceKind === "guard" ? "GUARD" : "STANCE");
       const broken = Boolean(b.stanceBroken);
       const stResetTxt = b.stanceReset > 0 ? `${b.stanceReset.toFixed(1)}s` : "";
-      const stRow = stMax > 0
+      const stRow = (state.enemyShowStance && stMax > 0)
         ? `<div class="er-cap-row">
             <span class="er-cap st left"></span>
             ${broken
@@ -4069,7 +4252,7 @@
             <span class="er-cap st right"></span>
           </div>`
         : "";
-      const stHtml = renderStatusesForDesign(design, b.statuses);
+      const stHtml = state.enemyShowStatuses ? renderStatusesForDesign(design, b.statuses) : "";
       return `<div class="pip-boss-card${compact ? " compact" : ""}">
         <div class="er-boss-name">${escHtml(b.name || "Boss")}</div>
         <div class="er-bars-col">
@@ -4112,8 +4295,244 @@
     }
   }
 
+  let _hoveredBuffState = null;
+
+  function syncSettingsToggleablesUi() {
+    if (typeof window.__syncTogUi === "function") window.__syncTogUi();
+  }
+
+  function placeErHoverTip(anchor) {
+    const tip = $("erHoverTip");
+    if (!tip || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    tip.classList.add("show");
+    const tw = tip.offsetWidth || 220;
+    const th = tip.offsetHeight || 60;
+    const left = Math.min(window.innerWidth - tw - 8, Math.max(8, rect.left - 8));
+    let top = rect.top - th - 6;
+    if (top < 6) top = Math.min(window.innerHeight - th - 6, rect.bottom + 6);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  }
+
+  function showErHelpTip(qEl) {
+    const tip = $("erHoverTip");
+    if (!tip || !qEl) return;
+    _hoveredBuffState = null;
+    tip.classList.remove("debuff");
+    const tag = $("erTipTag");
+    const tm = $("erTipTime");
+    if (tag) tag.classList.add("hidden");
+    if (tm) tm.classList.add("hidden");
+    if ($("erTipTitle")) $("erTipTitle").textContent = qEl.dataset.title || "";
+    if ($("erTipBody")) $("erTipBody").textContent = qEl.dataset.tip || "";
+    placeErHoverTip(qEl);
+  }
+
+  function resolveBuffMeta(b) {
+    const pack = state.buffIcons || {};
+    const icons = pack.icons || {};
+    const iconMap = pack.iconMap || {};
+    const spMeta = pack.spMeta || {};
+    const icEntry = iconMap[String(b.iconId)] || null;
+    const spEntry = spMeta[String(b.id)] || null;
+    const iconKey = icEntry ? icEntry[0] : "fex_54";
+    const title = (spEntry && spEntry[0]) || (icEntry && icEntry[1]) || `Effect #${b.id}`;
+    const desc = (spEntry && spEntry[1]) || (icEntry && icEntry[2]) || "Temporary active status effect.";
+    const debuff = Boolean((spEntry && spEntry[2]) || (icEntry && icEntry[3]));
+    const b64 = icons[iconKey] || icons.fex_54 || "";
+    const src = b64 ? `data:image/png;base64,${b64}` : "";
+    return { iconKey, title, desc, debuff, src };
+  }
+
+  function formatBuffSec(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    if (s >= 100) return `${Math.ceil(s / 60)}m`;
+    return String(s);
+  }
+
+  function getInterpolatedBuffRem(b) {
+    const dt = state.ramBuffsStamp > 0 ? Math.max(0, (performance.now() - state.ramBuffsStamp) / 1000) : 0;
+    return Math.max(0, Number(b.rem || 0) - dt);
+  }
+
+  function showErBuffTip(tileEl, buffObj) {
+    const tip = $("erHoverTip");
+    if (!tip || !tileEl || !buffObj) return;
+    const meta = resolveBuffMeta(buffObj);
+    _hoveredBuffState = buffObj;
+    tip.classList.toggle("debuff", meta.debuff);
+    if ($("erTipTitle")) $("erTipTitle").textContent = meta.title;
+    const tag = $("erTipTag");
+    if (tag) {
+      tag.textContent = meta.debuff ? "\u25BC DEBUFF" : "BUFF";
+      tag.classList.remove("hidden");
+    }
+    if ($("erTipBody")) $("erTipBody").textContent = meta.desc;
+    const tm = $("erTipTime");
+    if (tm) {
+      const rem = getInterpolatedBuffRem(buffObj);
+      const dur = Math.max(0.1, Number(buffObj.dur || 1));
+      tm.textContent = `${rem.toFixed(1)}s / ${Math.round(dur)}s`;
+      tm.classList.remove("hidden");
+    }
+    placeErHoverTip(tileEl);
+  }
+
+  function hideErHoverTip() {
+    _hoveredBuffState = null;
+    const tip = $("erHoverTip");
+    if (tip) tip.classList.remove("show");
+  }
+
+  function clampOpacityPct(val, fallback) {
+    const n = Math.round(Number(val));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.min(100, n));
+  }
+
+  function applyBuffSweepOpacity(val, persist = true, fromNum = false) {
+    if (fromNum && String(val).trim() === "") return state.buffSweepOpacity;
+    const pct = clampOpacityPct(val, 30);
+    state.buffSweepOpacity = pct;
+    document.documentElement.style.setProperty("--buff-swp-a", (pct / 100).toFixed(2));
+    if ($("setBuffSweepRng")) $("setBuffSweepRng").value = String(pct);
+    if ($("setBuffSweepNum") && (!fromNum || Number(val) !== pct)) $("setBuffSweepNum").value = String(pct);
+    if (persist) persistSettings();
+    return pct;
+  }
+
+  function applyBuffTextOpacity(val, persist = true, fromNum = false) {
+    if (fromNum && String(val).trim() === "") return state.buffTextOpacity;
+    const pct = clampOpacityPct(val, 75);
+    state.buffTextOpacity = pct;
+    document.documentElement.style.setProperty("--buff-txt-a", (pct / 100).toFixed(2));
+    if ($("setBuffTextRng")) $("setBuffTextRng").value = String(pct);
+    if ($("setBuffTextNum") && (!fromNum || Number(val) !== pct)) $("setBuffTextNum").value = String(pct);
+    if (persist) persistSettings();
+    return pct;
+  }
+
+  function setPipBuffHud(enabled, persist = true) {
+    state.pipBuffHud = Boolean(enabled);
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_buff_hud) {
+      window.pywebview.api.set_pip_buff_hud(state.pipBuffHud);
+    }
+    syncSettingsToggleablesUi();
+    renderPipBuffBoxes();
+    if (persist) persistSettings();
+    return state.pipBuffHud;
+  }
+
+  function setPipMapBuffHud(enabled, persist = true) {
+    state.pipMapBuffHud = Boolean(enabled);
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_map_buff_hud) {
+      window.pywebview.api.set_pip_map_buff_hud(state.pipMapBuffHud);
+    }
+    syncSettingsToggleablesUi();
+    renderPipBuffBoxes();
+    if (persist) persistSettings();
+    return state.pipMapBuffHud;
+  }
+
+  function applyTileVisualState(tile, b, debuff) {
+    const dur = Math.max(0.1, Number(b.dur || 1));
+    const rem = getInterpolatedBuffRem(b);
+    const elapsedFrac = 1 - Math.max(0, Math.min(1, rem / dur));
+    tile.style.setProperty("--deg", `${(elapsedFrac * 360).toFixed(1)}deg`);
+    tile.classList.toggle("expiring", Boolean(state.buffExpFlash && !debuff && rem <= 10));
+    const cnt = tile.querySelector(".buff-count");
+    if (cnt) cnt.textContent = formatBuffSec(rem);
+  }
+
+  function renderBuffContainer(el, whichKey, list, szPx) {
+    if (!el) return false;
+    const show = Boolean(list && list.length > 0);
+    el.classList.toggle("hidden", !show);
+    if (!show) {
+      if (state.buffDomKeys[whichKey]) {
+        state.buffDomKeys[whichKey] = "";
+        el.innerHTML = "";
+      }
+      return false;
+    }
+    const sig = list.map((b) => `${b.id}:${b.iconId}`).join("|");
+    if (sig !== state.buffDomKeys[whichKey]) {
+      state.buffDomKeys[whichKey] = sig;
+      el.innerHTML = list.map((b, idx) => {
+        const meta = resolveBuffMeta(b);
+        return `<div class="buff-tile${meta.debuff ? " debuff" : ""}" data-bidx="${idx}" style="--sz:${szPx}px;">
+          ${meta.src ? `<img src="${meta.src}" alt="" />` : ""}
+          <div class="buff-sweep"></div>
+          <div class="buff-ring"></div>
+          <div class="buff-count">${formatBuffSec(b.rem)}</div>
+          ${meta.debuff ? '<div class="buff-debuff-tag">&#9660;</div>' : ""}
+        </div>`;
+      }).join("");
+      el.querySelectorAll(".buff-tile").forEach((tile) => {
+        tile.addEventListener("mouseenter", () => {
+          const i = Number(tile.dataset.bidx);
+          if (state.ramBuffs[i]) showErBuffTip(tile, state.ramBuffs[i]);
+        });
+        tile.addEventListener("mouseleave", hideErHoverTip);
+      });
+    }
+    el.querySelectorAll(".buff-tile").forEach((tile) => {
+      const i = Number(tile.dataset.bidx);
+      const b = list[i];
+      if (!b) return;
+      const meta = resolveBuffMeta(b);
+      applyTileVisualState(tile, b, meta.debuff);
+    });
+    return true;
+  }
+
+  function tickPlayerBuffs() {
+    state.buffRafId = 0;
+    const hasData = Boolean(state.ramLive && Array.isArray(state.ramBuffs) && state.ramBuffs.length > 0);
+    const activeBox = state.pipMode === "stats" && state.pipBuffHud
+      ? $("pipStatsBuffBox")
+      : (state.pipMode === "map" && state.pipMapBuffHud ? $("pipMapBuffBox") : null);
+    if (!hasData || !activeBox || activeBox.classList.contains("hidden")) return;
+
+    activeBox.querySelectorAll(".buff-tile").forEach((tile) => {
+      const i = Number(tile.dataset.bidx);
+      const b = state.ramBuffs[i];
+      if (!b) return;
+      const meta = resolveBuffMeta(b);
+      applyTileVisualState(tile, b, meta.debuff);
+    });
+    if (_hoveredBuffState && $("erHoverTip") && $("erHoverTip").classList.contains("show")) {
+      const tm = $("erTipTime");
+      if (tm) {
+        const rem = getInterpolatedBuffRem(_hoveredBuffState);
+        const dur = Math.max(0.1, Number(_hoveredBuffState.dur || 1));
+        tm.textContent = `${rem.toFixed(1)}s / ${Math.round(dur)}s`;
+      }
+    }
+    state.buffRafId = requestAnimationFrame(tickPlayerBuffs);
+  }
+
+  function renderPipBuffBoxes() {
+    const hasData = Boolean(state.ramLive && Array.isArray(state.ramBuffs) && state.ramBuffs.length > 0);
+    const showStats = hasData && state.pipBuffHud && state.pipMode === "stats";
+    const showMap = hasData && state.pipMapBuffHud && state.pipMode === "map";
+    const anyStats = renderBuffContainer($("pipStatsBuffBox"), "stats", showStats ? state.ramBuffs : null, 34);
+    const anyMap = renderBuffContainer($("pipMapBuffBox"), "map", showMap ? state.ramBuffs : null, 30);
+    if ((anyStats || anyMap) && !state.buffRafId) {
+      state.buffRafId = requestAnimationFrame(tickPlayerBuffs);
+    } else if (!anyStats && !anyMap && state.buffRafId) {
+      cancelAnimationFrame(state.buffRafId);
+      state.buffRafId = 0;
+    }
+    if (!anyStats && !anyMap && _hoveredBuffState) {
+      hideErHoverTip();
+    }
+  }
+
   function renderPipStats() {
     renderPipRamBadges();
+    renderPipBuffBoxes();
     renderPipBossBoxes();
     const ch = state.ramLive && state.ramChar
       ? state.ramChar
@@ -4221,10 +4640,10 @@
 
   function setPipBossHud(enabled, persist = true) {
     state.pipBossHud = Boolean(enabled);
-    if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_hud) {
       window.pywebview.api.set_pip_boss_hud(state.pipBossHud);
     }
+    syncSettingsToggleablesUi();
     renderPipBossBoxes();
     if (persist) persistSettings();
     return state.pipBossHud;
@@ -4232,10 +4651,10 @@
 
   function setPipMapBossHud(enabled, persist = true) {
     state.pipMapBossHud = Boolean(enabled);
-    if ($("setPipMapBossHudCb")) $("setPipMapBossHudCb").checked = state.pipMapBossHud;
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_map_boss_hud) {
       window.pywebview.api.set_pip_map_boss_hud(state.pipMapBossHud);
     }
+    syncSettingsToggleablesUi();
     renderPipBossBoxes();
     if (persist) persistSettings();
     return state.pipMapBossHud;
@@ -4244,9 +4663,7 @@
   function setPipBossDesign(design, persist = true) {
     const d = ["1", "2", "3"].includes(String(design)) ? String(design) : "1";
     state.pipBossDesign = d;
-    document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
-      b.classList.toggle("active", b.dataset.design === d);
-    });
+    syncSettingsToggleablesUi();
     const spin = $("pipDesignSpin");
     if (spin) {
       spin.dataset.design = d;
@@ -4288,6 +4705,8 @@
     if ($("pipModeSwapBtn")) $("pipModeSwapBtn").textContent = next === "stats" ? "Stats" : "Map";
     renderPipRamBadges();
     renderPipBossBoxes();
+    renderPipBuffBoxes();
+    hideErHoverTip();
     if (next === "stats") renderPipStats();
 
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
@@ -4385,14 +4804,14 @@
     if ($("mapAutoLayerCb")) {
       $("mapAutoLayerCb").addEventListener("change", (e) => {
         mapState.autoSwitchLayer = e.target.checked;
-        if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
+        syncSettingsToggleablesUi();
         persistSettings();
       });
     }
     if ($("mapAutoDetectCb")) {
       $("mapAutoDetectCb").addEventListener("change", (e) => {
         mapState.autoDetect = e.target.checked;
-        if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
+        syncSettingsToggleablesUi();
         persistSettings();
         updateMapSearchList();
         renderMapCanvas();
@@ -4410,6 +4829,7 @@
     if ($("mapCatPins")) {
       $("mapCatPins").addEventListener("change", (e) => {
         mapState.showPins = e.target.checked;
+        syncSettingsToggleablesUi();
         persistSettings();
         renderMapCanvas();
       });
@@ -4438,6 +4858,7 @@
     });
     $("mapCatPlayer").addEventListener("change", (e) => {
       mapState.showPlayer = e.target.checked;
+      syncSettingsToggleablesUi();
       persistSettings();
       renderMapCanvas();
     });
@@ -4771,6 +5192,7 @@
     const payload = await window.pywebview.api.get_initial_payload();
     state.data = payload.data;
     state.enemyPresets = payload.enemyPresets || { "Raw AR (No Defense)": null };
+    state.buffIcons = payload.buffIcons || { icons: {}, iconMap: {}, spMeta: {} };
     buildSearchTags(state.data);
     buildAffinitySidebar();
     buildWeaponTypeTree();
@@ -4807,6 +5229,14 @@
     setPipBossHud(typeof cfg.pipBossHud === "boolean" ? cfg.pipBossHud : true, false);
     setPipMapBossHud(typeof cfg.pipMapBossHud === "boolean" ? cfg.pipMapBossHud : true, false);
     setPipBossDesign(typeof cfg.pipBossDesign === "string" ? cfg.pipBossDesign : "1", false);
+    setPipBuffHud(typeof cfg.pipBuffHud === "boolean" ? cfg.pipBuffHud : true, false);
+    setPipMapBuffHud(typeof cfg.pipMapBuffHud === "boolean" ? cfg.pipMapBuffHud : true, false);
+    state.buffExpFlash = typeof cfg.buffExpFlash === "boolean" ? cfg.buffExpFlash : true;
+    applyBuffSweepOpacity(typeof cfg.buffSweepOpacity === "number" ? cfg.buffSweepOpacity : 30, false, false);
+    applyBuffTextOpacity(typeof cfg.buffTextOpacity === "number" ? cfg.buffTextOpacity : 75, false, false);
+    state.enemyShowStatuses = typeof cfg.enemyShowStatuses === "boolean" ? cfg.enemyShowStatuses : true;
+    state.enemyShowStance = typeof cfg.enemyShowStance === "boolean" ? cfg.enemyShowStance : true;
+    mapState.showOffscreenArrow = typeof cfg.mapShowOffscreenArrow === "boolean" ? cfg.mapShowOffscreenArrow : true;
     renderPipRamBadges();
     if (typeof cfg.mapLayer === "string" && ["m00", "m01", "m10"].includes(cfg.mapLayer)) {
       mapState.layer = cfg.mapLayer;
@@ -5253,9 +5683,11 @@
           mapBox && mapBox.classList.contains("hidden") && statsBox && statsBox.classList.contains("hidden")
         );
         $("topSettingsBtn").click();
+        const rStats = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipBossHud']");
+        const rMap = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipMapBossHud']");
         const cbSyncedOff = Boolean(
-          $("setPipBossHudCb") && !$("setPipBossHudCb").checked &&
-          $("setPipMapBossHudCb") && !$("setPipMapBossHudCb").checked
+          rStats && !rStats.classList.contains("on") && rStats.textContent.includes("OFF") &&
+          rMap && !rMap.classList.contains("on") && rMap.textContent.includes("OFF")
         );
         $("settingsCloseBtn").click();
 
@@ -5284,6 +5716,118 @@
           toggleOffHidden,
           detachCleared,
           settingsSynced: cbSyncedOff,
+        };
+      },
+      testPlayerBuffs() {
+        const prevMode = state.pipMode;
+        const prevRamLive = state.ramLive;
+        const prevBuffs = state.ramBuffs.slice();
+        const prevBuffHud = state.pipBuffHud;
+        const prevMapBuffHud = state.pipMapBuffHud;
+        const prevExpFlash = state.buffExpFlash;
+        const prevSweep = state.buffSweepOpacity;
+        const prevText = state.buffTextOpacity;
+
+        const iconsCount = Object.keys((state.buffIcons && state.buffIcons.icons) || {}).length;
+        const iconsLoadedOk = iconsCount >= 100;
+
+        setPipBuffHud(true, false);
+        setPipMapBuffHud(true, false);
+        state.buffExpFlash = true;
+        applyBuffSweepOpacity(30, false, false);
+        applyBuffTextOpacity(75, false, false);
+        state.ramLive = true;
+        setPipMode("stats");
+
+        const sampleBuffs = [
+          { id: 1730, iconId: 20406, rem: 8.5, dur: 30.0 },
+          { id: 6860, iconId: 20460, rem: 19.0, dur: 45.0 },
+        ];
+        window.__onLiveRamBuffs(sampleBuffs);
+
+        const sBox = $("pipStatsBuffBox");
+        const sTiles = sBox ? sBox.querySelectorAll(".buff-tile") : [];
+        const shownStatsOk = Boolean(sBox && !sBox.classList.contains("hidden") && sTiles.length === 2);
+        const expFlashOk = Boolean(
+          sTiles[0] && sTiles[0].classList.contains("expiring") &&
+          sTiles[1] && !sTiles[1].classList.contains("expiring")
+        );
+        const debuffBadgeOk = Boolean(
+          sTiles[1] && sTiles[1].classList.contains("debuff") &&
+          sTiles[1].querySelector(".buff-debuff-tag") &&
+          !sTiles[0].classList.contains("debuff")
+        );
+        const deg0 = sTiles[0] ? parseFloat(sTiles[0].style.getPropertyValue("--deg")) : 0;
+        const sweepDirectionOk = Number.isFinite(deg0) && deg0 > 200;
+        const countTextOk = Boolean(
+          sTiles[0] && sTiles[0].querySelector(".buff-count").textContent.trim() === "9" &&
+          sTiles[1] && sTiles[1].querySelector(".buff-count").textContent.trim() === "19"
+        );
+
+        let tooltipOk = false;
+        if (sTiles[1]) {
+          sTiles[1].dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+          const tip = $("erHoverTip");
+          tooltipOk = Boolean(
+            tip && tip.classList.contains("show") && tip.classList.contains("debuff") &&
+            $("erTipTag") && $("erTipTag").textContent.includes("DEBUFF") &&
+            $("erTipTime") && !$("erTipTime").classList.contains("hidden")
+          );
+          sTiles[1].dispatchEvent(new MouseEvent("mouseleave", { bubbles: false }));
+          if (tip && tip.classList.contains("show")) tooltipOk = false;
+        }
+
+        setPipMode("map");
+        const mBox = $("pipMapBuffBox");
+        const shownMapOk = Boolean(mBox && !mBox.classList.contains("hidden") && mBox.querySelectorAll(".buff-tile").length === 2);
+
+        $("topSettingsBtn").click();
+        const togRowsCount = document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").length;
+        const supQuestionsCount = document.querySelectorAll("#settingsToggleables sup.er-q").length;
+        applyBuffSweepOpacity(150, false, false);
+        const clampHighOk = state.buffSweepOpacity === 100;
+        applyBuffTextOpacity(-10, false, false);
+        const clampLowOk = state.buffTextOpacity === 0;
+        applyTogActionStateCheck: {
+          const firstRow = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipBuffHud']");
+          if (firstRow) firstRow.click();
+        }
+        const toggledOffOk = !state.pipBuffHud && Boolean(sBox && sBox.classList.contains("hidden"));
+        $("setTogResetBtn").click();
+        const resetDefaultsOk = (
+          state.buffSweepOpacity === 30 &&
+          state.buffTextOpacity === 75 &&
+          state.pipBuffHud === true &&
+          state.pipMapBuffHud === true &&
+          document.documentElement.style.getPropertyValue("--buff-swp-a") === "0.30" &&
+          document.documentElement.style.getPropertyValue("--buff-txt-a") === "0.75"
+        );
+        $("settingsCloseBtn").click();
+
+        state.ramBuffs = prevBuffs;
+        state.ramLive = prevRamLive;
+        setPipBuffHud(prevBuffHud, false);
+        setPipMapBuffHud(prevMapBuffHud, false);
+        state.buffExpFlash = prevExpFlash;
+        applyBuffSweepOpacity(prevSweep, false, false);
+        applyBuffTextOpacity(prevText, false, false);
+        setPipMode(prevMode);
+        renderPipBuffBoxes();
+        syncSettingsToggleablesUi();
+
+        return {
+          iconsLoadedOk,
+          shownStatsOk,
+          shownMapOk,
+          expFlashOk,
+          debuffBadgeOk,
+          sweepDirectionOk,
+          countTextOk,
+          tooltipOk,
+          settingsRowsOk: togRowsCount === 14 && supQuestionsCount >= 14,
+          clampOk: clampHighOk && clampLowOk,
+          toggledOffOk,
+          resetDefaultsOk,
         };
       },
       startMapImagesTest() {

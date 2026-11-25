@@ -68,6 +68,14 @@ def map_icons_path() -> Optional[str]:
     return None
 
 
+def buff_icons_path() -> Optional[str]:
+    for base in (app_base_dir(), getattr(sys, "_MEIPASS", app_base_dir())):
+        candidate = os.path.join(base, "err_buff_icons.json.gz")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def map_image_path(layer: str) -> Optional[str]:
     if layer not in ("m00", "m01", "m10"):
         return None
@@ -353,6 +361,7 @@ class CalculatorApi:
         self._watcher_thread: Optional[threading.Thread] = None
         self._map_data: Optional[Dict[str, Any]] = None
         self._map_icons: Optional[Dict[str, str]] = None
+        self._buff_icons: Optional[Dict[str, Any]] = None
         self._flag_bst: Dict[int, int] = {}
         self._wanted_flags: Set[int] = set()
         self._npc_meta: Dict[int, tuple] = {}
@@ -368,6 +377,8 @@ class CalculatorApi:
         self._pip_click_through: bool = False
         self._pip_boss_hud: bool = bool(cfg0.get("pipBossHud", True))
         self._pip_map_boss_hud: bool = bool(cfg0.get("pipMapBossHud", True))
+        self._pip_buff_hud: bool = bool(cfg0.get("pipBuffHud", True))
+        self._pip_map_buff_hud: bool = bool(cfg0.get("pipMapBuffHud", True))
         d0 = str(cfg0.get("pipBossDesign", "1"))
         self._pip_boss_design: str = d0 if d0 in ("1", "2", "3") else "1"
         self._overlay_hidden: bool = False
@@ -454,6 +465,20 @@ class CalculatorApi:
         except Exception:
             return {}
 
+    def get_buff_icons(self) -> Dict[str, Any]:
+        if self._buff_icons is not None:
+            return self._buff_icons
+        p = buff_icons_path()
+        if p:
+            try:
+                with gzip.open(p, "rt", encoding="utf-8") as fh:
+                    self._buff_icons = json.load(fh)
+                    return self._buff_icons
+            except Exception:
+                pass
+        self._buff_icons = {"icons": {}, "iconMap": {}, "spMeta": {}}
+        return self._buff_icons
+
     def get_initial_payload(self) -> Dict[str, Any]:
         save_path = save_reader.find_default_save()
         cfg = self._load_settings()
@@ -469,6 +494,7 @@ class CalculatorApi:
             "settings": cfg,
             "defaultKeybinds": dict(DEFAULT_KEYBINDS),
             "hotkeyErrors": dict(self._hotkey_errors),
+            "buffIcons": self.get_buff_icons(),
             "selfTestMode": self._self_test_mode,
         }
 
@@ -744,6 +770,22 @@ class CalculatorApi:
             self.save_settings(cfg)
         return {"pipMapBossHud": self._pip_map_boss_hud}
 
+    def set_pip_buff_hud(self, enabled: bool) -> Dict[str, Any]:
+        self._pip_buff_hud = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipBuffHud"] = self._pip_buff_hud
+            self.save_settings(cfg)
+        return {"pipBuffHud": self._pip_buff_hud}
+
+    def set_pip_map_buff_hud(self, enabled: bool) -> Dict[str, Any]:
+        self._pip_map_buff_hud = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipMapBuffHud"] = self._pip_map_buff_hud
+            self.save_settings(cfg)
+        return {"pipMapBuffHud": self._pip_map_buff_hud}
+
     def set_pip_boss_design(self, design: str) -> Dict[str, Any]:
         d = str(design or "1")
         self._pip_boss_design = d if d in ("1", "2", "3") else "1"
@@ -938,10 +980,12 @@ class CalculatorApi:
             last_pins_key = None
             last_prog_key = None
             last_boss_key = None
+            last_buffs_key = None
             has_active_boss = False
             last_char_t = 0.0
             last_pins_t = 0.0
             last_prog_t = 0.0
+            last_buffs_t = 0.0
             last_save_t = 0.0
             miss_streak = 0
             while True:
@@ -949,9 +993,15 @@ class CalculatorApi:
                     (self._pip_mode == "stats" and self._pip_boss_hud)
                     or (self._pip_mode == "map" and self._pip_map_boss_hud)
                 )
+                want_buffs = (
+                    (self._pip_mode == "stats" and self._pip_buff_hud)
+                    or (self._pip_mode == "map" and self._pip_map_buff_hud)
+                )
                 if self._ram_active:
                     if (self._ui_view == "map" and self._map_follow) or want_boss:
                         dt = 0.033
+                    elif want_buffs:
+                        dt = 0.066
                     elif self._ui_view == "map":
                         dt = 0.10
                     else:
@@ -1045,6 +1095,20 @@ class CalculatorApi:
                                 self._window.evaluate_js(
                                     "window.__onLiveRamBosses && window.__onLiveRamBosses([]);"
                                 )
+                            if want_buffs and (not was_active or now - last_buffs_t >= 0.065):
+                                last_buffs_t = now
+                                buffs = self._mem.read_player_buffs() or []
+                                buffs_key = json.dumps(buffs, sort_keys=True)
+                                if not was_active or buffs_key != last_buffs_key:
+                                    last_buffs_key = buffs_key
+                                    self._window.evaluate_js(
+                                        f"window.__onLiveRamBuffs && window.__onLiveRamBuffs({buffs_key});"
+                                    )
+                            elif (not want_buffs) and last_buffs_key not in (None, "[]"):
+                                last_buffs_key = "[]"
+                                self._window.evaluate_js(
+                                    "window.__onLiveRamBuffs && window.__onLiveRamBuffs([]);"
+                                )
                             # Save-file fallback for live pin updates if MenuProfileSaveLoad RAM pointer didn't match
                             if (now - last_save_t >= 2.5):
                                 last_save_t = now
@@ -1069,6 +1133,7 @@ class CalculatorApi:
                             last_pins_key = None
                             last_prog_key = None
                             last_boss_key = None
+                            last_buffs_key = None
                             has_active_boss = False
                             self._window.evaluate_js(
                                 'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
@@ -1080,6 +1145,7 @@ class CalculatorApi:
                         last_pins_key = None
                         last_prog_key = None
                         last_boss_key = None
+                        last_buffs_key = None
                         has_active_boss = False
                         self._window.evaluate_js(
                             'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
@@ -1561,6 +1627,19 @@ def run_self_test(report_path: Optional[str]):
                 and boss_res["detachCleared"]
                 and boss_res["settingsSynced"]
             ), f"Boss HUD test failed: {boss_res}"
+            b_pack = api.get_buff_icons()
+            assert buff_icons_path() is not None and len(b_pack.get("icons", {})) >= 100 and len(b_pack.get("iconMap", {})) >= 100, f"Buff icons bundle invalid: {len(b_pack.get('icons', {}))}"
+            _sp_parsed = memory_reader._parse_player_sp_effects([
+                (5000, 20406, 25.0, 30.0, 0),
+                (5001, 20406, -1.0, -1.0, 0),
+                (5002, 20406, 4000.0, 4000.0, 0),
+                (5003, 20406, 10.0, 30.0, 0x00000001),
+                (5004, -1, 10.0, 30.0, 0),
+                (5005, 20406, 0.02, 30.0, 0),
+            ])
+            assert len(_sp_parsed) == 1 and _sp_parsed[0]["id"] == 5000, f"Finite buff filter failed: {_sp_parsed}"
+            pb_res = w.evaluate_js("window.__ERR_TEST.testPlayerBuffs()")
+            assert pb_res and all(pb_res.values()), f"Player buffs/Toggleables test failed: {pb_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1596,6 +1675,8 @@ def run_self_test(report_path: Optional[str]):
                 f"MAP_CLAYMORE_HITS={clay_hits}",
                 f"NPC_META_COUNT={len(api._npc_meta)}",
                 f"BOSS_HUD_OK=True",
+                f"BUFF_ICONS_COUNT={len(b_pack.get('icons', {}))}",
+                f"PLAYER_BUFFS_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]
