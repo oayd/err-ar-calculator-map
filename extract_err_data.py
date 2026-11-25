@@ -163,7 +163,7 @@ def parse_args():
     parser.add_argument("--err-mod", default=os.environ.get("ERR_MOD_DIR", ""), help="Path to ERR mod directory")
     parser.add_argument("--regulation", default=os.environ.get("ERR_REGULATION_PATH", ""), help="Optional path to regulation.bin")
     parser.add_argument("--out", default=DEFAULT_OUT_PATH, help="Output .json.gz path")
-    parser.add_argument("--mod-label", default="ERR v2.3.9.1", help="Mod label stored in payload metadata")
+    parser.add_argument("--mod-label", default="ERR v2.3.10.1", help="Mod label stored in payload metadata")
     args = parser.parse_args()
     if not args.game or not args.smithbox or not args.err_mod:
         parser.error("Provide --game, --smithbox, and --err-mod (or set ER_GAME_DIR, SMITHBOX_DIR, ERR_MOD_DIR).")

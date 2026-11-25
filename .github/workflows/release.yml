@@ -98,7 +98,7 @@ jobs:
             release_assets/ERR_AR_Calculator.exe
             release_assets/SHA256SUMS.txt
           body: |
-            Standalone Windows executable for **ELDEN RING Reforged (ERR v2.3.9.1)**.
+            Standalone Windows executable for **ELDEN RING Reforged (ERR v2.3.10.1)**.
 
             - **SHA-256 (`ERR_AR_Calculator.exe`):** `${{ steps.prep.outputs.sha256 }}`
             - **VirusTotal Scan:** [View report](https://www.virustotal.com/gui/file/${{ steps.prep.outputs.sha256 }})

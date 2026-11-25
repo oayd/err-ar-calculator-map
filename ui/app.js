@@ -2008,7 +2008,7 @@
     $("saveAcceptedIcon").classList.add("active");
     const saveName = state.savePath ? state.savePath.split(/[/\\]/).pop() : "save";
     $("infoBannerText").innerHTML =
-      `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
+      `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
     if (ch.playerPos && mapState.loaded) maybeAutoSwitchPlayerLayer(ch.playerPos);
     if (state.activeView === "map") {
       updateMapSearchList();
@@ -2955,7 +2955,7 @@
     $("saveAcceptedIcon").classList.add("active");
     $("saveStatusPill").classList.add("ram-live");
     $("infoBannerText").innerHTML =
-      `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>LIVE RAM</strong>`;
+      `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>LIVE RAM</strong>`;
     recalculateAndRender();
     renderPipRamBadges();
     pulseSavePill();
@@ -3120,7 +3120,7 @@
       $("charMetaText").textContent = "Manual stats";
       $("saveAcceptedIcon").classList.remove("active");
       $("infoBannerText").innerHTML =
-        `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong>`;
+        `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong>`;
       recalculateAndRender();
     }
     if (state.pipMode === "stats") renderPipStats();

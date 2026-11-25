@@ -5,7 +5,7 @@ Combines:
   1. All ~146 official status effect icons fetched once from Fextralife
      (auto-cropped transparent margins and pixel-centered on an even/odd
      parity-matched 40x40 / 41x41 RGBA canvas with ZERO resampling blur).
-  2. ERR v2.3.9.1 `SpEffectParam` + Smithbox Community Row Names + FMG metadata
+  2. ERR v2.3.10.1 `SpEffectParam` + Smithbox Community Row Names + FMG metadata
      for every timed player buff & debuff `iconId` and notable `paramId`.
 
 The runtime desktop app loads `err_buff_icons.json.gz` 100% offline with zero
@@ -373,7 +373,7 @@ def _pick_fex_num_for_icon(icon_id: int, crn_names: List[str], hints: List[str],
     return 54
 
 
-def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str) -> Dict[str, Any]:
+def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str, regulation_path: str = "") -> Dict[str, Any]:
     print("Fetching Fextralife Status_Effects list...")
     fex_rows = scrape_fextralife_status_icons()
     print(f"Found {len(fex_rows)} Fextralife status icons; downloading & centering cleanly...")
@@ -397,7 +397,8 @@ def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str) -> Dict[str
 
     print("Loading ERR regulation.bin SpEffectParam & FMGs...")
     ed.init_soulsformats(game_dir, smithbox_dir)
-    reg = ed.SoulsFormats.SFUtil.DecryptERRegulation(os.path.join(err_mod_dir, "regulation.bin"))
+    reg_file = os.path.abspath(regulation_path) if regulation_path else os.path.join(err_mod_dir, "regulation.bin")
+    reg = ed.SoulsFormats.SFUtil.DecryptERRegulation(reg_file)
     sp_param = ed.load_param(reg, defs_dir, "speffectparam.param", "SpEffect.xml")
     goods_param = ed.load_param(reg, defs_dir, "equipparamgoods.param", "EquipParamGoods.xml")
     magic_param = ed.load_param(reg, defs_dir, "magic.param", "MagicParam.xml")
@@ -521,8 +522,8 @@ def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str) -> Dict[str
         icon_map[str(ic)] = [fex_key, title, desc, debuff]
 
     return {
-        "version": "1.8.0",
-        "source": "Fextralife Elden Ring Status_Effects + ERR v2.3.9.1 SpEffectParam",
+        "version": "1.8.2",
+        "source": "Fextralife Elden Ring Status_Effects + ERR v2.3.10.1 SpEffectParam",
         "icons": icons,
         "iconMap": icon_map,
         "spMeta": sp_meta,
@@ -533,11 +534,12 @@ def main():
     parser = argparse.ArgumentParser(description="Build offline err_buff_icons.json.gz")
     parser.add_argument("--game", default=r"E:\Program Files (x86)\Steam\steamapps\common\ELDEN RING\Game")
     parser.add_argument("--smithbox", default=r"C:\Users\kenne\Desktop\Smithbox_2_1_2_2016_02_16_a")
-    parser.add_argument("--err-mod", default=r"C:\Elden Ring Modded\Convergence\2\EldenRingReforgedv2.3.9.1\ERRv2.3.9.1\mod")
+    parser.add_argument("--err-mod", default=r"C:\Elden Ring Modded\Convergence\2\EldenRingReforgedv2.3.9.1\ERR_v2.3.10.1\mod")
+    parser.add_argument("--regulation", default="", help="Optional override path to regulation.bin")
     parser.add_argument("--out", default=DEFAULT_OUT_PATH)
     args = parser.parse_args()
 
-    payload = build_bundle(args.game, args.smithbox, args.err_mod)
+    payload = build_bundle(args.game, args.smithbox, args.err_mod, args.regulation)
     out_path = os.path.abspath(args.out)
     with gzip.open(out_path, "wt", encoding="utf-8") as fh:
         json.dump(payload, fh, separators=(",", ":"))

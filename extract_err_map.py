@@ -1,5 +1,5 @@
 """
-Extracts all ERR v2.3.9.1 map markers (Graces, Weapons, Talismans, Armor, Bosses,
+Extracts all ERR v2.3.10.1 map markers (Graces, Weapons, Talismans, Armor, Bosses,
 Merchants, Landmarks) and optionally stitches the 4096x4096 real in-game map tiles
 into map_cache/.
 
@@ -747,7 +747,7 @@ def extract_game_icons(vfs=None, needed_good_icons=None):
 
 def main():
     global GAME, SB, ERR_MOD, REG_PATH, DEFS_DIR, CRN_DIR, MAPSTUDIO_DIR, WEAPON_DATA_PATH, OUT_PATH, ICONS_OUT_PATH, MAP_CACHE_DIR
-    parser = argparse.ArgumentParser(description="Extract ERR v2.3.9.1 map markers and optional game map tiles/icons.")
+    parser = argparse.ArgumentParser(description="Extract ERR v2.3.10.1 map markers and optional game map tiles/icons.")
     parser.add_argument("--game", required=True, help="Path to ELDEN RING/Game directory")
     parser.add_argument("--smithbox", required=True, help="Path to Smithbox directory (for SoulsFormats & PARAM defs)")
     parser.add_argument("--err-mod", required=True, help="Path to Elden Ring Reforged mod/ directory")
@@ -1685,7 +1685,7 @@ def main():
 
     payload = {
         "version": 3,
-        "mod": "ELDEN RING Reforged v2.3.9.1",
+        "mod": "ELDEN RING Reforged v2.3.10.1",
         "tileGrid": 8,
         "layers": CALIBRATIONS,
         "mapLayers": map_layers,

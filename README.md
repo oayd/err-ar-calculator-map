@@ -1,6 +1,6 @@
-# Elden Ring Weapon Calculator & Map (ERR v2.3.9.1)
+# Elden Ring Weapon Calculator & Map (ERR v2.3.10.1)
 
-A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.9.1)** combining an exact weapon AR & build calculator, an interactive live map, and an always-on-top in-game overlay.
+A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** combining an exact weapon AR & build calculator, an interactive live map, and an always-on-top in-game overlay.
 
 ## Features
 - **Exact ERR Weapon & Build Calculator**: Calculates AR, spell scaling, status buildup, and effective damage across all ERR weapons and custom affinities — including armor bonuses, talismans, greases, Physick tears, and buffs.

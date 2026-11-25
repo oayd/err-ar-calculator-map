@@ -1343,7 +1343,7 @@ def run_self_test(report_path: Optional[str]):
     api = CalculatorApi(self_test_mode=True)
     html_doc = build_inlined_html()
     win = webview.create_window(
-        "ERR v2.3.9.1 Self-Test",
+        "ERR v2.3.10.1 Self-Test",
         html=html_doc,
         js_api=api,
         width=1440,
@@ -1365,7 +1365,7 @@ def run_self_test(report_path: Optional[str]):
                 raise RuntimeError("Timed out waiting for __ERR_READY in WebView2")
 
             summary = w.evaluate_js("window.__ERR_TEST.getSummary()")
-            assert summary["weaponsLoaded"] == 6454, f"Expected 6454 weapons, got {summary}"
+            assert summary["weaponsLoaded"] == 6478, f"Expected 6478 weapons, got {summary}"
             has_save = summary["charCount"] > 0
             assert summary["totalItems"] > 5000, f"Expected all-affinity rows > 5000, got {summary}"
             assert summary["visibleDomRows"] > 5, f"Expected rendered virtual rows > 5, got {summary}"
@@ -1719,7 +1719,7 @@ def main():
     api = CalculatorApi(self_test_mode=False)
     html_doc = build_inlined_html()
     win = webview.create_window(
-        "Elden Ring Weapon Calculator — ERR v2.3.9.1",
+        "Elden Ring Weapon Calculator — ERR v2.3.10.1",
         html=html_doc,
         js_api=api,
         width=1500,
