@@ -3652,10 +3652,10 @@
       ctx.save();
       ctx.translate(playerX, playerY);
       ctx.beginPath();
-      ctx.arc(0, 0, 16 * pScale, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(77, 240, 136, 0.22)";
+      ctx.arc(0, 0, 12 * pScale, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(77, 240, 136, 0.11)";
       ctx.fill();
-      ctx.strokeStyle = "#4df088";
+      ctx.strokeStyle = "rgba(77, 240, 136, 0.50)";
       ctx.lineWidth = Math.max(1.2, 2 * pScale);
       ctx.stroke();
 
@@ -3977,8 +3977,8 @@
     }
   }
 
-  const RAM_CHECK_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
-  const RAM_CROSS_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  const RAM_CHECK_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+  const RAM_CROSS_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
   const STATUS_SVGS = {
     bleed: '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5C12 2.5 5.5 10 5.5 14.8A6.5 6.5 0 0 0 18.5 14.8C18.5 10 12 2.5 12 2.5Z"/></svg>',
     frost: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 2v20M4.5 7l15 10M19.5 7l-15 10"/></svg>',
@@ -3992,7 +3992,10 @@
     if (!el) return;
     el.classList.toggle("on", Boolean(isLive));
     el.classList.toggle("off", !isLive);
-    el.innerHTML = `${isLive ? RAM_CHECK_SVG : RAM_CROSS_SVG}<span>RAM</span>`;
+    el.innerHTML = isLive ? RAM_CHECK_SVG : RAM_CROSS_SVG;
+    el.title = isLive
+      ? "RAM Connected (30 Hz Read-Only Offline RAM)"
+      : "RAM Disconnected (Offline eldenring.exe not attached or EAC active)";
   }
 
   function renderPipRamBadges() {
@@ -4202,7 +4205,9 @@
     const clamped = Number.isFinite(num) ? Math.max(15, Math.min(100, num)) : 100;
     state.pipOpacity = clamped / 100;
     const btn = $("pipOpacityBtn");
-    if (btn) btn.textContent = `Opacity ${clamped}%`;
+    const opVal = $("pipOpacityVal");
+    if (opVal) opVal.textContent = `${clamped}%`;
+    else if (btn) btn.textContent = `Opacity ${clamped}%`;
     const rng = $("pipOpacityRange");
     if (rng) rng.value = String(clamped);
     const numInp = $("pipOpacityNum");
@@ -4239,15 +4244,26 @@
   function setPipBossDesign(design, persist = true) {
     const d = ["1", "2", "3"].includes(String(design)) ? String(design) : "1";
     state.pipBossDesign = d;
-    document.querySelectorAll("#pipDesignGroup .pip-d-btn, #setDesignGroup .pip-d-btn").forEach((b) => {
+    document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
       b.classList.toggle("active", b.dataset.design === d);
     });
+    const spin = $("pipDesignSpin");
+    if (spin) {
+      spin.dataset.design = d;
+      spin.title = `Enemy HUD Design ${d}/3 (click ▲/▼ to cycle)`;
+    }
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_design) {
       window.pywebview.api.set_pip_boss_design(d);
     }
     renderPipBossBoxes();
     if (persist) persistSettings();
     return d;
+  }
+
+  function stepPipBossDesign(delta, persist = true) {
+    const cur = Number(state.pipBossDesign) || 1;
+    const next = String((((cur - 1 + delta) % 3) + 3) % 3 + 1);
+    return setPipBossDesign(next, persist);
   }
 
   async function setPipMode(mode) {
@@ -4269,6 +4285,7 @@
     }
     $("pipModeMapBtn").classList.toggle("active", next === "map");
     $("pipModeStatsBtn").classList.toggle("active", next === "stats");
+    if ($("pipModeSwapBtn")) $("pipModeSwapBtn").textContent = next === "stats" ? "Stats" : "Map";
     renderPipRamBadges();
     renderPipBossBoxes();
     if (next === "stats") renderPipStats();
@@ -4511,6 +4528,9 @@
     $("topPipBtn").addEventListener("click", () => setPipMode(state.activeView === "map" ? "map" : "stats"));
     $("pipModeMapBtn").addEventListener("click", () => setPipMode("map"));
     $("pipModeStatsBtn").addEventListener("click", () => setPipMode("stats"));
+    if ($("pipModeSwapBtn")) {
+      $("pipModeSwapBtn").addEventListener("click", () => setPipMode(state.pipMode === "map" ? "stats" : "map"));
+    }
     $("pipExitBtn").addEventListener("click", () => setPipMode("off"));
     $("pipFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
     if ($("pipBossBtn")) {
@@ -4519,9 +4539,12 @@
         else setPipBossHud(!state.pipBossHud, true);
       });
     }
-    document.querySelectorAll("#pipDesignGroup .pip-d-btn").forEach((b) => {
-      b.addEventListener("click", () => setPipBossDesign(b.dataset.design, true));
-    });
+    if ($("pipDesignPrevBtn")) {
+      $("pipDesignPrevBtn").addEventListener("click", () => stepPipBossDesign(-1, true));
+    }
+    if ($("pipDesignNextBtn")) {
+      $("pipDesignNextBtn").addEventListener("click", () => stepPipBossDesign(1, true));
+    }
     $("pipTwoHandBtn").addEventListener("click", () => {
       state.twoHand = !state.twoHand;
       $("twoHandCb").checked = state.twoHand;
@@ -5197,19 +5220,35 @@
         const statusesOk = txt.includes("210/318") && txt.includes("95/318") && txt.includes("145/318");
 
         const d1Ok = Boolean(statsBox && statsBox.querySelector(".er-grid-1"));
-        setPipBossDesign("2", false);
-        const d2Ok = Boolean(statsBox && statsBox.querySelector(".er-row-2"));
+        $("pipDesignPrevBtn").click();
+        const wrapBackOk = state.pipBossDesign === "3" && Boolean(statsBox && statsBox.querySelector(".er-stack-3"));
+        $("pipDesignNextBtn").click();
+        const wrapFwdOk = state.pipBossDesign === "1" && Boolean(statsBox && statsBox.querySelector(".er-grid-1"));
+        $("pipDesignNextBtn").click();
+        const d2Ok = state.pipBossDesign === "2" && Boolean(statsBox && statsBox.querySelector(".er-row-2"));
         setPipBossDesign("3", false);
         const d3Ok = Boolean(statsBox && statsBox.querySelector(".er-stack-3"));
-        const designsOk = d1Ok && d2Ok && d3Ok;
+        const designsOk = d1Ok && wrapBackOk && wrapFwdOk && d2Ok && d3Ok;
 
         setPipMode("map");
         const mapBox = $("pipMapBossBox");
         const shownMap = Boolean(mapBox && !mapBox.classList.contains("hidden") && mapBox.querySelectorAll(".pip-boss-card").length === 1);
-        const ramOnOk = Boolean($("pipMapRamBadge") && $("pipMapRamBadge").classList.contains("on") && $("pipMapRamBadge").textContent.includes("RAM"));
+        const mapBadge = $("pipMapRamBadge");
+        const statsBadge = $("pipRamBadge");
+        const ramOnOk = Boolean(
+          mapBadge && mapBadge.classList.contains("on") && mapBadge.querySelector("svg") &&
+          !mapBadge.textContent.includes("RAM") && !mapBadge.textContent.includes("LIVE") &&
+          statsBadge && statsBadge.classList.contains("on") && !statsBadge.textContent.includes("RAM")
+        );
+        const bossBtn = $("pipBossBtn");
+        const enemyBtnOnOk = Boolean(
+          bossBtn && bossBtn.textContent.includes("Enemy") &&
+          bossBtn.classList.contains("pip-enemy-btn") && bossBtn.classList.contains("active")
+        );
 
         setPipMapBossHud(false, false);
         setPipBossHud(false, false);
+        const enemyBtnOffOk = Boolean(bossBtn && !bossBtn.classList.contains("active"));
         const toggleOffHidden = Boolean(
           mapBox && mapBox.classList.contains("hidden") && statsBox && statsBox.classList.contains("hidden")
         );
@@ -5223,7 +5262,7 @@
         setPipBossHud(true, false);
         setPipMapBossHud(true, false);
         window.__onLiveRamStatus({ attached: false });
-        const ramOffOk = Boolean($("pipMapRamBadge") && $("pipMapRamBadge").classList.contains("off"));
+        const ramOffOk = Boolean(mapBadge && mapBadge.classList.contains("off") && mapBadge.querySelector("svg") && !mapBadge.textContent.includes("RAM"));
         const detachCleared = Boolean(state.ramBosses.length === 0 && mapBox && mapBox.classList.contains("hidden"));
 
         state.ramBosses = prevBosses;
@@ -5241,7 +5280,7 @@
           stanceOk,
           statusesOk,
           designsOk,
-          ramBadgesOk: ramOnOk && ramOffOk,
+          ramBadgesOk: ramOnOk && ramOffOk && enemyBtnOnOk && enemyBtnOffOk,
           toggleOffHidden,
           detachCleared,
           settingsSynced: cbSyncedOff,

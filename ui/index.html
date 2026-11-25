@@ -555,27 +555,26 @@
   <div id="pipBar" class="pip-bar">
     <div class="pip-group">
       <span class="pip-drag-grip" title="Drag bar to move overlay">&#8942;&#8942;</span>
-      <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch overlay to Live Minimap">Map</button>
-      <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
-      <div id="pipDesignGroup" class="pip-design-grp" title="Boss / Target HUD Design (1: Tall In-Bar, 2: ER Medallions, 3: Full Stacked)">
-        <span class="pip-design-lbl">DESIGN:</span>
-        <button type="button" class="pip-d-btn active" data-design="1">1</button>
-        <button type="button" class="pip-d-btn" data-design="2">2</button>
-        <button type="button" class="pip-d-btn" data-design="3">3</button>
-      </div>
+      <button id="pipModeMapBtn" class="pip-pill pip-mode-pair" type="button" title="Switch overlay to Live Minimap">Map</button>
+      <button id="pipModeStatsBtn" class="pip-pill pip-mode-pair" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
+      <button id="pipModeSwapBtn" class="pip-pill active pip-mode-swap" type="button" title="Switch between Map and Stats">Map</button>
     </div>
     <div class="pip-group">
-      <button id="pipSearchBtn" class="pip-pill pip-icon-pill" type="button" title="Search map markers (Ctrl+F)" aria-label="Search map markers">
+      <button id="pipSearchBtn" class="pip-pill pip-icon-pill pip-icon-sq" type="button" title="Search map markers (Ctrl+F)" aria-label="Search map markers">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
         </svg>
       </button>
-      <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player position at 30 Hz">Follow</button>
-      <button id="pipBossBtn" class="pip-pill active" type="button" title="Toggle Live Boss / Locked Enemy Bar (30 Hz Offline RAM, auto-off under EAC)">Boss</button>
+      <button id="pipFollowBtn" class="pip-pill pip-icon-sq" type="button" title="Follow live player position at 30 Hz"><span class="pip-lbl">Follow</span><span class="pip-ico" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="3.8"/><path d="M8 1.5v2.2M8 12.3v2.2M1.5 8h2.2M12.3 8h2.2"/></svg></span></button>
+      <button id="pipBossBtn" class="pip-pill pip-enemy-btn pip-icon-sq active" type="button" title="Toggle Live Enemy Bar (Green = ON, Yellow = OFF; 30 Hz Offline RAM, auto-off under EAC)"><span class="pip-lbl">Enemy</span><span class="pip-ico" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg></span></button>
+      <div id="pipDesignSpin" class="pip-design-spin" data-design="1" title="Enemy HUD Design 1/3 (click ▲/▼ to cycle)">
+        <button id="pipDesignPrevBtn" type="button" aria-label="Previous HUD design">&#9650;</button>
+        <button id="pipDesignNextBtn" type="button" aria-label="Next HUD design">&#9660;</button>
+      </div>
       <span id="pipMapRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
-      <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)">Opacity 100%</button>
-      <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to full window (Esc)">Expand</button>
+      <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)"><span class="pip-op-lbl">Opacity </span><span id="pipOpacityVal">100%</span></button>
+      <button id="pipExitBtn" class="pip-pill gold pip-icon-sq" type="button" title="Return to full window (Esc)"><span class="pip-expand-lbl">Expand</span><span class="pip-expand-ico" aria-hidden="true">&#10530;</span></button>
     </div>
   </div>
 
@@ -604,7 +603,7 @@
   <div id="pipStatsView" class="pip-stats-view">
     <div class="pip-stats-hdr">
       <span id="pipCharName" class="pip-char-name">Character</span>
-      <span id="pipRamBadge" class="pip-ram-badge">SAVE</span>
+      <span id="pipRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
     </div>
     <div id="pipBossBox" class="pip-boss-box hidden"></div>
     <div id="pipStatsGrid" class="pip-stats-grid"></div>
