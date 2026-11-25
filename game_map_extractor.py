@@ -47,6 +47,8 @@ TARGET_MAP_PATHS = (
     "/menu/71_maptile.tpfbdt",
     "/menu/hi/01_common.sblytbnd.dcx",
     "/menu/hi/01_common.tpf.dcx",
+    "/menu/hi/00_solo.tpfbhd",
+    "/menu/hi/00_solo.tpfbdt",
 )
 
 
@@ -572,7 +574,7 @@ def extract_maps_and_icons(
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
     icons: Dict[str, str] = {}
-    category_map = (
+    category_map = [
         ("grace", "MENU_MAP_01_Bonfire.png", None),
         ("boss", "MENU_MAP_memo_20.png", (1.25, 0.42, 0.45)),
         ("weapon", "MENU_Tab_Weapon.png", (1.15, 0.95, 0.85)),
@@ -582,7 +584,10 @@ def extract_maps_and_icons(
         ("player", "MENU_MAP_Player_02.png", None),
         ("player_arrow", "MENU_MAP_Player_01.png", None),
         ("poi", "MENU_MAP_05.png", None),
-    )
+        ("beacon", "MENU_MAP_Marker.png", None),
+    ]
+    for idx in range(10):
+        category_map.append((f"memo_{idx}", f"MENU_MAP_memo_{20 + idx}.png", None))
     for key, sp_name, tint in category_map:
         url = sprite_to_data_url(sp_name, max_dim=56, tint=tint)
         if url:
@@ -604,6 +609,66 @@ def extract_maps_and_icons(
 
     for sbmp in sheets.values():
         sbmp.close()
+
+    report(90, "Extracting collectible & bell bearing icons from 00_solo...")
+    want_good_icons = {383, 384, 400, 553, 3020, 3021, 3022, 3023, 3090, 3142, 3143, 3144, 3146, 3816, 3817} | set(range(400, 446))
+    for cand_base in (out_base_dir, os.path.dirname(os.path.abspath(__file__))):
+        mp_json = os.path.join(cand_base, "err_map_data.json.gz")
+        if os.path.isfile(mp_json):
+            try:
+                with gzip.open(mp_json, "rt", encoding="utf-8") as fh:
+                    mj = json.load(fh)
+                for mk in mj.get("markers", []):
+                    gi = mk.get("goodIcon")
+                    if isinstance(gi, int) and gi > 0:
+                        want_good_icons.add(gi)
+            except Exception:
+                pass
+
+    with open(bdt_path, "rb") as bdt:
+        solo_bhd_raw = _read_bdt_entry(bdt, entries["/menu/hi/00_solo.tpfbhd"])
+        solo_bdt_base = entries["/menu/hi/00_solo.tpfbdt"]["offset"]
+        for name, d_off, c_sz, _u_sz in _parse_bnd4_entries(solo_bhd_raw):
+            m = re.search(r"MENU_Knowledge_(\d+)", name, re.I)
+            if not m:
+                continue
+            iid = int(m.group(1))
+            if iid not in want_good_icons or f"good_{iid}" in icons:
+                continue
+            bdt.seek(solo_bdt_base + d_off)
+            blob = bdt.read(c_sz)
+            if blob[:4] == b"DCX\x00":
+                blob = _dcx_decompress(blob, oodle_fn)
+            tpf_texs = _parse_tpf(blob)
+            if not tpf_texs:
+                continue
+            im = _decode_dds_rgba(next(iter(tpf_texs.values())))
+            if im is None:
+                continue
+            scale = min(1.0, 48.0 / max(im.width, im.height))
+            dw, dh = max(1, int(round(im.width * scale))), max(1, int(round(im.height * scale)))
+            if (dw, dh) != im.size:
+                resized = im.resize((dw, dh), Image.Resampling.LANCZOS)
+                im.close()
+                im = resized
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            im.close()
+            icons[f"good_{iid}"] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    for cat_key, default_id in (
+        ("bell_bearing", 3142),
+        ("golden_seed", 383),
+        ("sacred_tear", 384),
+        ("scadutree", 3816),
+        ("revered_ash", 3817),
+        ("crystal_tear", 400),
+        ("memory_stone", 553),
+        ("whetblade", 3020),
+    ):
+        gkey = f"good_{default_id}"
+        if gkey in icons and cat_key not in icons:
+            icons[cat_key] = icons[gkey]
 
     with gzip.open(icons_out_path, "wt", encoding="utf-8", compresslevel=6) as fh:
         json.dump(icons, fh, separators=(",", ":"))

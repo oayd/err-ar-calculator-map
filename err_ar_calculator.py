@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import webview
 
@@ -126,6 +126,185 @@ def build_inlined_html() -> str:
     return html
 
 
+DEFAULT_KEYBINDS: Dict[str, str] = {
+    "togglePipMap": "Ctrl+Shift+M",
+    "togglePipStats": "Ctrl+Shift+S",
+    "togglePipClickThrough": "Ctrl+Shift+G",
+    "toggleFollow": "Ctrl+Shift+F",
+    "focusPipSearch": "Ctrl+Shift+K",
+    "toggleOverlayHide": "Ctrl+Shift+H",
+}
+
+_VK_SPECIAL: Dict[str, int] = {
+    "SPACE": 0x20,
+    "TAB": 0x09,
+    "ENTER": 0x0D,
+    "BACKSPACE": 0x08,
+    "INSERT": 0x2D,
+    "DELETE": 0x2E,
+    "HOME": 0x24,
+    "END": 0x23,
+    "PAGEUP": 0x21,
+    "PAGEDOWN": 0x22,
+    "UP": 0x26,
+    "DOWN": 0x28,
+    "LEFT": 0x25,
+    "RIGHT": 0x27,
+    "PAUSE": 0x13,
+    "CAPSLOCK": 0x14,
+    "`": 0xC0,
+    "~": 0xC0,
+    "BACKQUOTE": 0xC0,
+    "-": 0xBD,
+    "MINUS": 0xBD,
+    "=": 0xBB,
+    "EQUAL": 0xBB,
+    "[": 0xDB,
+    "]": 0xDD,
+    "\\": 0xDC,
+    ";": 0xBA,
+    "'": 0xDE,
+    ",": 0xBC,
+    ".": 0xBE,
+    "/": 0xBF,
+}
+
+
+def parse_hotkey_combo(combo: str) -> Optional[tuple]:
+    if not combo or not isinstance(combo, str):
+        return None
+    parts = [p.strip() for p in combo.split("+") if p.strip()]
+    if not parts:
+        return None
+    mods = 0x4000  # MOD_NOREPEAT
+    vk = 0
+    for tok in parts[:-1]:
+        tl = tok.lower()
+        if tl in ("ctrl", "control"):
+            mods |= 0x0002
+        elif tl == "shift":
+            mods |= 0x0004
+        elif tl == "alt":
+            mods |= 0x0001
+        elif tl in ("win", "meta", "super"):
+            mods |= 0x0008
+        else:
+            return None
+    key = parts[-1].upper()
+    if len(key) == 1 and ("A" <= key <= "Z" or "0" <= key <= "9"):
+        vk = ord(key)
+    elif key.startswith("F") and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
+        vk = 0x70 + int(key[1:]) - 1
+    elif key.startswith("NUM") and len(key) == 4 and key[3].isdigit():
+        vk = 0x60 + int(key[3])
+    elif key in _VK_SPECIAL:
+        vk = _VK_SPECIAL[key]
+    elif parts[-1] in _VK_SPECIAL:
+        vk = _VK_SPECIAL[parts[-1]]
+    if not vk:
+        return None
+    return mods, vk
+
+
+class GlobalHotkeyManager:
+    """Dedicated hidden-window Win32 RegisterHotKey dispatcher (zero hooks)."""
+
+    def __init__(self, on_trigger):
+        self._on_trigger = on_trigger
+        self._lock = threading.Lock()
+        self._tid: int = 0
+        self._thread: Optional[threading.Thread] = None
+        self._ready = threading.Event()
+        self._rebind_done = threading.Event()
+        self._desired_binds: Dict[str, str] = {}
+        self._id_to_action: Dict[int, str] = {}
+        self._last_errors: Dict[str, str] = {}
+        self._stop = False
+
+    def start(self, initial_binds: Dict[str, str]) -> Dict[str, str]:
+        if self._thread is None:
+            self._desired_binds = dict(initial_binds)
+            self._thread = threading.Thread(target=self._run, daemon=True, name="GlobalHotkeys")
+            self._thread.start()
+            self._ready.wait(timeout=2.0)
+        return self.update_binds(initial_binds)
+
+    def stop(self):
+        self._stop = True
+        if self._tid:
+            try:
+                ctypes.windll.user32.PostThreadMessageW(self._tid, 0x0012, 0, 0)  # WM_QUIT
+            except Exception:
+                pass
+
+    def update_binds(self, binds: Dict[str, str]) -> Dict[str, str]:
+        with self._lock:
+            self._desired_binds = {k: str(v or "") for k, v in binds.items()}
+            self._rebind_done.clear()
+            if self._tid:
+                ctypes.windll.user32.PostThreadMessageW(self._tid, 0x8001, 0, 0)
+        self._rebind_done.wait(timeout=1.5)
+        return dict(self._last_errors)
+
+    def _run(self):
+        import ctypes.wintypes as wt
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        user32.CreateWindowExW.restype = wt.HWND
+        user32.RegisterHotKey.argtypes = [wt.HWND, ctypes.c_int, wt.UINT, wt.UINT]
+        user32.UnregisterHotKey.argtypes = [wt.HWND, ctypes.c_int]
+        self._tid = int(kernel32.GetCurrentThreadId())
+        hwnd_msg = ctypes.c_void_p(-3)  # HWND_MESSAGE
+        hwnd = user32.CreateWindowExW(0, "STATIC", "ERRHotkeySink", 0, 0, 0, 0, 0, hwnd_msg, None, None, None)
+
+        def apply_binds():
+            for hid in list(self._id_to_action.keys()):
+                user32.UnregisterHotKey(hwnd, hid)
+            self._id_to_action.clear()
+            errs: Dict[str, str] = {}
+            hid = 100
+            for action, combo in self._desired_binds.items():
+                combo_s = (combo or "").strip()
+                if not combo_s:
+                    continue
+                parsed = parse_hotkey_combo(combo_s)
+                if not parsed:
+                    errs[action] = f"Invalid hotkey: {combo_s}"
+                    continue
+                mods, vk = parsed
+                if user32.RegisterHotKey(hwnd, hid, mods, vk):
+                    self._id_to_action[hid] = action
+                else:
+                    errs[action] = f"{combo_s} is in use by another app"
+                hid += 1
+            self._last_errors = errs
+            self._rebind_done.set()
+
+        msg = wt.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+        self._ready.set()
+        apply_binds()
+
+        while not self._stop:
+            ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if ret <= 0:
+                break
+            if msg.message == 0x8001:
+                apply_binds()
+            elif msg.message == 0x0312:  # WM_HOTKEY
+                action = self._id_to_action.get(int(msg.wParam))
+                if action:
+                    try:
+                        self._on_trigger(action)
+                    except Exception:
+                        pass
+        for hid in list(self._id_to_action.keys()):
+            user32.UnregisterHotKey(hwnd, hid)
+        if hwnd:
+            user32.DestroyWindow(hwnd)
+
+
 def _save_summary_key(parsed: Dict[str, Any]) -> str:
     chars = [
         {
@@ -136,6 +315,9 @@ def _save_summary_key(parsed: Dict[str, Any]) -> str:
             "equipped": c.get("equipped", []),
             "armor": c.get("armor", []),
             "talismans": c.get("talismans", []),
+            "mapPins": c.get("mapPins", []),
+            "flagCount": len(c.get("setFlags", [])),
+            "ownedCounts": {k: len(v) for k, v in (c.get("owned") or {}).items()},
         }
         for c in parsed.get("characters", [])
     ]
@@ -165,22 +347,31 @@ class CalculatorApi:
         self._save_stat_offsets: Dict[str, int] = {}
         self._save_summary_key: Optional[str] = None
         self._save_pos_key: Optional[str] = None
-        self._live_watch: bool = bool(self._load_settings().get("liveWatch", True))
+        cfg0 = self._load_settings()
+        self._live_watch: bool = bool(cfg0.get("liveWatch", True))
         self._watcher_stop = threading.Event()
         self._watcher_thread: Optional[threading.Thread] = None
         self._map_data: Optional[Dict[str, Any]] = None
         self._map_icons: Optional[Dict[str, str]] = None
+        self._flag_bst: Dict[int, int] = {}
+        self._wanted_flags: Set[int] = set()
+        self._load_flag_meta()
         self._mem = memory_reader.EldenRingMemoryReader()
         self._known_armor_ids = {int(k) for k in (self._data.get("armors") or {}).keys() if int(k) > 10300}
         self._known_talisman_ids = {int(k) for k in (self._data.get("talismans") or {}).keys()}
         self._ui_view: str = "calc"
-        self._map_follow: bool = False
+        self._map_follow: bool = bool(cfg0.get("mapFollow", False))
         self._ram_active: bool = False
         self._pip_mode: str = "off"
-        self._pip_opacity: float = 1.0
+        self._pip_opacity: float = max(0.15, min(1.0, float(cfg0.get("pipOpacity", 100)) / 100.0 if float(cfg0.get("pipOpacity", 1.0)) > 1.0 else float(cfg0.get("pipOpacity", 1.0))))
+        self._pip_click_through: bool = False
+        self._overlay_hidden: bool = False
         self._normal_bounds = None
-        self._pip_bounds: Dict[str, Any] = {}
+        saved_pb = cfg0.get("pipBounds")
+        self._pip_bounds: Dict[str, Any] = dict(saved_pb) if isinstance(saved_pb, dict) else {}
         self._resize_drag = None
+        self._hotkeys = GlobalHotkeyManager(self._on_global_hotkey)
+        self._hotkey_errors: Dict[str, str] = {}
         self._extract_lock = threading.Lock()
         self._extract_state: Dict[str, Any] = {
             "running": False,
@@ -191,12 +382,45 @@ class CalculatorApi:
             "error": "",
         }
 
+    def _load_flag_meta(self):
+        p = map_data_path()
+        if not p:
+            return
+        try:
+            with gzip.open(p, "rt", encoding="utf-8") as fh:
+                md = json.load(fh)
+            self._map_data = md
+            self._flag_bst = {int(k): int(v) for k, v in (md.get("flagBst") or {}).items()}
+            wanted: Set[int] = set()
+            for mk in md.get("markers", []):
+                ef = mk.get("eventFlag")
+                if isinstance(ef, int) and ef > 0:
+                    wanted.add(ef)
+                for f in mk.get("eventFlags", []) or []:
+                    if isinstance(f, int) and f > 0:
+                        wanted.add(f)
+            self._wanted_flags = wanted
+        except Exception:
+            pass
+
+    def _on_global_hotkey(self, action: str):
+        if self._window and not self._self_test_mode:
+            try:
+                self._window.evaluate_js(f"window.__onGlobalHotkey && window.__onGlobalHotkey({json.dumps(action)});")
+            except Exception:
+                pass
+
     def _read_save(self, path: Optional[str]) -> Dict[str, Any]:
         if not path or not os.path.exists(path):
             return {"characters": [], "error": "No ER save found (manual stats)"}
         try:
             with self._save_lock:
-                parsed = save_reader.read_save_characters(path, self._known_weapon_ids)
+                parsed = save_reader.read_save_characters(
+                    path,
+                    self._known_weapon_ids,
+                    flag_bst=self._flag_bst,
+                    wanted_flags=self._wanted_flags,
+                )
                 if parsed.get("characters"):
                     self._save_path = path
                     self._save_mtime = parsed["mtime"]
@@ -222,13 +446,34 @@ class CalculatorApi:
 
     def get_initial_payload(self) -> Dict[str, Any]:
         save_path = save_reader.find_default_save()
+        cfg = self._load_settings()
+        binds = dict(DEFAULT_KEYBINDS)
+        if isinstance(cfg.get("keybinds"), dict):
+            binds.update({k: str(v or "") for k, v in cfg["keybinds"].items()})
+        if not self._self_test_mode:
+            self._hotkey_errors = self._hotkeys.start(binds)
         return {
             "data": clean_data_for_ui(self._data),
             "enemyPresets": dict(ar_engine.ENEMY_PRESETS),
             "save": self._read_save(save_path),
-            "settings": self._load_settings(),
+            "settings": cfg,
+            "defaultKeybinds": dict(DEFAULT_KEYBINDS),
+            "hotkeyErrors": dict(self._hotkey_errors),
             "selfTestMode": self._self_test_mode,
         }
+
+    def set_keybinds(self, binds: Dict[str, str]) -> Dict[str, Any]:
+        clean = dict(DEFAULT_KEYBINDS)
+        if isinstance(binds, dict):
+            for k in DEFAULT_KEYBINDS:
+                if k in binds:
+                    clean[k] = str(binds[k] or "").strip()
+        if not self._self_test_mode:
+            self._hotkey_errors = self._hotkeys.update_binds(clean)
+            cfg = self._load_settings()
+            cfg["keybinds"] = clean
+            self.save_settings(cfg)
+        return {"keybinds": clean, "errors": dict(self._hotkey_errors)}
 
     def reload_save(self, select_latest: bool = True) -> Dict[str, Any]:
         path = self._save_path if (not select_latest and self._save_path) else save_reader.find_default_save()
@@ -258,7 +503,12 @@ class CalculatorApi:
         if not self._save_path or not os.path.exists(self._save_path):
             cand = save_reader.find_default_save()
             if cand and os.path.exists(cand):
-                parsed = save_reader.read_save_characters(cand, self._known_weapon_ids)
+                parsed = save_reader.read_save_characters(
+                    cand,
+                    self._known_weapon_ids,
+                    flag_bst=self._flag_bst,
+                    wanted_flags=self._wanted_flags,
+                )
                 if parsed.get("characters"):
                     self._save_path = cand
                     self._save_mtime = parsed["mtime"]
@@ -276,7 +526,12 @@ class CalculatorApi:
             fp2 = save_reader.read_save_fingerprint(self._save_path, self._save_stat_offsets)
             if fp2 != fp1:
                 return {"changed": False}
-            parsed = save_reader.read_save_characters(self._save_path, self._known_weapon_ids)
+            parsed = save_reader.read_save_characters(
+                self._save_path,
+                self._known_weapon_ids,
+                flag_bst=self._flag_bst,
+                wanted_flags=self._wanted_flags,
+            )
             if not parsed.get("characters"):
                 return {"changed": False}
             new_key = _save_summary_key(parsed)
@@ -368,6 +623,10 @@ class CalculatorApi:
                     self._pip_bounds[prev] = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
 
                 if target == "off":
+                    self._pip_click_through = False
+                    self._overlay_hidden = False
+                    self._apply_click_through_hwnd(bv, False)
+                    bv.Visible = True
                     bv.TopMost = False
                     bv.Opacity = 1.0
                     bv.FormBorderStyle = SWinForms.FormBorderStyle.Sizable
@@ -375,6 +634,7 @@ class CalculatorApi:
                     if self._normal_bounds:
                         bv.SetBounds(*self._normal_bounds)
                 else:
+                    bv.Visible = not self._overlay_hidden
                     bv.FormBorderStyle = getattr(SWinForms.FormBorderStyle, "None")
                     bv.MinimumSize = SD.Size(220, 180)
                     bv.TopMost = True
@@ -393,9 +653,59 @@ class CalculatorApi:
                             sw = 1920
                         px, py, pw, ph = (max(16, sw - def_w - 24), 24, def_w, def_h)
                     bv.SetBounds(int(px), int(py), int(pw), int(ph))
+                    self._apply_click_through_hwnd(bv, self._pip_click_through)
 
             self._invoke_ui(_apply)
-        return {"mode": self._pip_mode, "opacity": self._pip_opacity}
+        return {"mode": self._pip_mode, "opacity": self._pip_opacity, "clickThrough": self._pip_click_through, "hidden": self._overlay_hidden}
+
+    @staticmethod
+    def _apply_click_through_hwnd(bv, enabled: bool):
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = ctypes.c_void_p(int(bv.Handle.ToInt64()))
+            GWL_EXSTYLE = -20
+            WS_EX_TRANSPARENT = 0x00000020
+            WS_EX_LAYERED = 0x00080000
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                get_long = user32.GetWindowLongPtrW
+                set_long = user32.SetWindowLongPtrW
+                get_long.restype = ctypes.c_ssize_t
+                set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+            else:
+                get_long = user32.GetWindowLongW
+                set_long = user32.SetWindowLongW
+            get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            style = get_long(hwnd, GWL_EXSTYLE)
+            if enabled:
+                style = style | WS_EX_TRANSPARENT | WS_EX_LAYERED
+            else:
+                style = style & (~WS_EX_TRANSPARENT)
+            set_long(hwnd, GWL_EXSTYLE, style)
+            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0020)
+        except Exception:
+            pass
+
+    def set_pip_click_through(self, enabled: bool) -> Dict[str, Any]:
+        want = bool(enabled) if self._pip_mode != "off" else False
+        self._pip_click_through = want
+        if not self._self_test_mode:
+            bv = self._get_winforms_form()
+            if bv is not None:
+                self._invoke_ui(lambda: self._apply_click_through_hwnd(bv, want))
+        return {"clickThrough": self._pip_click_through}
+
+    def set_overlay_hidden(self, hidden: bool) -> Dict[str, Any]:
+        want = bool(hidden) if self._pip_mode != "off" else False
+        self._overlay_hidden = want
+        if not self._self_test_mode:
+            bv = self._get_winforms_form()
+            if bv is not None:
+                def _vis():
+                    bv.Visible = not want
+                    if not want:
+                        bv.TopMost = True
+                self._invoke_ui(_vis)
+        return {"hidden": self._overlay_hidden}
 
     def set_pip_opacity(self, opacity: float) -> Dict[str, Any]:
         self._pip_opacity = max(0.15, min(1.0, float(opacity)))
@@ -590,7 +900,11 @@ class CalculatorApi:
         def _loop():
             last_pos_key = None
             last_char_key = None
+            last_pins_key = None
+            last_prog_key = None
             last_char_t = 0.0
+            last_pins_t = 0.0
+            last_prog_t = 0.0
             last_save_t = 0.0
             miss_streak = 0
             while True:
@@ -653,12 +967,51 @@ class CalculatorApi:
                                     self._window.evaluate_js(
                                         f"window.__onLiveRamPos && window.__onLiveRamPos({json.dumps(pos)});"
                                     )
+                            if (self._ui_view == "map" or self._pip_mode == "map") and (not was_active or now - last_pins_t >= 0.45):
+                                last_pins_t = now
+                                pins = self._mem.read_world_map_pins()
+                                if pins is not None:
+                                    pins_key = json.dumps(pins, sort_keys=True)
+                                    if not was_active or pins_key != last_pins_key:
+                                        last_pins_key = pins_key
+                                        self._window.evaluate_js(
+                                            f"window.__onLiveRamPins && window.__onLiveRamPins({pins_key});"
+                                        )
+                            if not was_active or (now - last_prog_t >= 1.5):
+                                last_prog_t = now
+                                inv = self._mem.read_inventory()
+                                fl = self._mem.read_event_flags(self._flag_bst, self._wanted_flags)
+                                if inv is not None or fl is not None:
+                                    prog_payload = {"owned": inv, "setFlags": fl}
+                                    prog_key = json.dumps(prog_payload, sort_keys=True)
+                                    if not was_active or prog_key != last_prog_key:
+                                        last_prog_key = prog_key
+                                        self._window.evaluate_js(
+                                            f"window.__onLiveRamProgress && window.__onLiveRamProgress({prog_key});"
+                                        )
+                            # Save-file fallback for live pin updates if MenuProfileSaveLoad RAM pointer didn't match
+                            if (now - last_save_t >= 2.5):
+                                last_save_t = now
+                                try:
+                                    upd = self.poll_save()
+                                    if upd and upd.get("changed") and upd.get("kind") == "full":
+                                        chars = upd["save"].get("characters") or []
+                                        lslot = upd["save"].get("lastSlot")
+                                        mc = next((c for c in chars if c["slot"] == lslot), chars[0] if chars else None)
+                                        if mc and self._mem._mp_cache is None:
+                                            self._window.evaluate_js(
+                                                f"window.__onLiveRamPins && window.__onLiveRamPins({json.dumps(mc.get('mapPins', []))});"
+                                            )
+                                except Exception:
+                                    pass
                             continue
                         miss_streak += 1
                         if self._ram_active and miss_streak >= 6:
                             self._ram_active = False
                             last_pos_key = None
                             last_char_key = None
+                            last_pins_key = None
+                            last_prog_key = None
                             self._window.evaluate_js(
                                 'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
                             )
@@ -666,6 +1019,8 @@ class CalculatorApi:
                         self._ram_active = False
                         last_pos_key = None
                         last_char_key = None
+                        last_pins_key = None
+                        last_prog_key = None
                         self._window.evaluate_js(
                             'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
                         )
@@ -810,8 +1165,12 @@ class CalculatorApi:
         if self._self_test_mode:
             return False
         try:
+            merged = dict(cfg)
+            if self._pip_bounds:
+                merged["pipBounds"] = dict(self._pip_bounds)
+            merged.setdefault("keybinds", dict(DEFAULT_KEYBINDS))
             with open(settings_file_path(), "w", encoding="utf-8") as fh:
-                json.dump(cfg, fh, indent=2)
+                json.dump(merged, fh, indent=2)
             return True
         except Exception:
             return False
@@ -1042,7 +1401,11 @@ def run_self_test(report_path: Optional[str]):
                     break
                 time.sleep(0.05)
             assert map_state and map_state.get("loaded"), f"Map failed to load: {map_state}"
-            for req_cat in ("grace", "weapon", "talisman", "armor", "boss", "merchant", "poi"):
+            for req_cat in (
+                "grace", "weapon", "talisman", "armor", "boss", "merchant", "poi",
+                "bell_bearing", "golden_seed", "sacred_tear", "scadutree",
+                "revered_ash", "crystal_tear", "memory_stone", "whetblade",
+            ):
                 assert map_state["counts"].get(req_cat, 0) > 0, f"Empty map category {req_cat}: {map_state['counts']}"
             if has_local_maps:
                 w.evaluate_js("window.__ERR_TEST.startMapImagesTest()")
@@ -1105,8 +1468,11 @@ def run_self_test(report_path: Optional[str]):
             assert ram_test["followOn"] and not ram_test["followOff"], f"Follow toggle failed: {ram_test}"
             assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
             assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
+            assert ram_test["autoSwitchedToDlc"] and ram_test["pinsCount"] == 1, f"Auto-switch/pins hook failed: {ram_test}"
             pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
-            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"], f"PiP modes failed: {pip_res}"
+            assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"] and pip_res["offscreenArrowOk"], f"PiP modes failed: {pip_res}"
+            v15_res = w.evaluate_js("window.__ERR_TEST.testV15Features()")
+            assert v15_res["manualToggleOk"] and v15_res["modalOk"] and v15_res["bbWithIcon"] >= 50, f"v1.5 features failed: {v15_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1134,7 +1500,7 @@ def run_self_test(report_path: Optional[str]):
                 f"OPTIMIZER_TOP={opt_res['topAff']}|{opt_res['topEff']:.1f}|count={opt_res['count']}",
                 f"COMPARE_TRAY_COUNT={cmp_n}",
                 f"MAP_TOTAL_MARKERS={map_state['totalCount']}",
-                f"MAP_CATS_OK=7",
+                f"MAP_CATS_OK=15",
                 f"MAP_IMAGES={','.join(k for k, v in img_check.items() if v)}",
                 f"MAP_ICONS_LOADED={map_state['iconsLoaded']}",
                 f"MAP_TILES_OK={bool(tile_check and tile_check.get('m00') and tile_check.get('m10'))}",
@@ -1193,6 +1559,7 @@ def main():
         webview.start(lambda w: api._start_watcher(), win, gui="edgechromium", icon=resource_icon_path(), private_mode=True)
     finally:
         api._watcher_stop.set()
+        api._hotkeys.stop()
         api._mem.close()
 
 

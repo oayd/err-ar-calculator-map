@@ -6,7 +6,9 @@ import math
 import re
 import struct
 import time
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import save_reader
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -19,6 +21,11 @@ _STILL_ACTIVE = 259
 
 _AOB_WORLD_CHR_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 0F 48 39 88"
 _AOB_GAME_DATA_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 05 48 8B 40 58 C3 C3"
+_AOB_EVENT_FLAG_CANDS = (
+    "48 8B 1D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 48 8D 4D F0 E8 ?? ?? ?? ?? 4C 8B C0",
+    "48 8B 3D ?? ?? ?? ?? 48 85 FF 74 ?? B8",
+    "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 83 79 28 00",
+)
 
 
 class _PROCESSENTRY32W(ctypes.Structure):
@@ -60,6 +67,7 @@ def _compile_aob(pattern: str) -> bytes:
 
 _RX_WCM = re.compile(_compile_aob(_AOB_WORLD_CHR_MAN), re.DOTALL)
 _RX_GDM = re.compile(_compile_aob(_AOB_GAME_DATA_MAN), re.DOTALL)
+_RX_EFM = [re.compile(_compile_aob(p), re.DOTALL) for p in _AOB_EVENT_FLAG_CANDS]
 
 
 def _find_process_pid(exe_name: str) -> Optional[int]:
@@ -111,6 +119,10 @@ class EldenRingMemoryReader:
         self._base: int = 0
         self._wcm_addr: int = 0
         self._gdm_addr: int = 0
+        self._efm_addr: int = 0
+        self._inv_off: Optional[int] = None
+        self._storage_ptr_off: Optional[int] = None
+        self._mp_cache: Optional[Tuple[int, int, int]] = None
         self._last_try: float = 0.0
 
     def close(self):
@@ -124,6 +136,10 @@ class EldenRingMemoryReader:
         self._base = 0
         self._wcm_addr = 0
         self._gdm_addr = 0
+        self._efm_addr = 0
+        self._inv_off = None
+        self._storage_ptr_off = None
+        self._mp_cache = None
 
     def _is_alive(self) -> bool:
         if not self._handle:
@@ -194,7 +210,24 @@ class EldenRingMemoryReader:
             disp = struct.unpack_from("<i", text, idx + 3)[0]
             return self._base + text_va + idx + 7 + disp
 
-        return resolve_rip(_RX_WCM), resolve_rip(_RX_GDM)
+        efm = 0
+        for rx in _RX_EFM:
+            for m in rx.finditer(text):
+                idx = m.start()
+                disp = struct.unpack_from("<i", text, idx + 3)[0]
+                cand = self._base + text_va + idx + 7 + disp
+                ptr = self._ru64(cand)
+                if ptr >= 0x10000:
+                    hdr = self._read_bytes(ptr + 0x1C, 12)
+                    if hdr and len(hdr) == 12:
+                        div, hsz, cnt = struct.unpack("<III", hdr)
+                        if div == 1000 and hsz == 125 and 500 <= cnt <= 20000:
+                            efm = cand
+                            break
+            if efm:
+                break
+
+        return resolve_rip(_RX_WCM), resolve_rip(_RX_GDM), efm
 
     def ensure_attached(self, min_retry_secs: float = 2.0) -> bool:
         if self._is_alive() and (self._wcm_addr or self._gdm_addr):
@@ -219,12 +252,13 @@ class EldenRingMemoryReader:
         self._handle = handle
         self._pid = pid
         self._base = base
-        wcm, gdm = self._scan_singletons()
+        wcm, gdm, efm = self._scan_singletons()
         if not wcm and not gdm:
             self.close()
             return False
         self._wcm_addr = wcm
         self._gdm_addr = gdm
+        self._efm_addr = efm
         return True
 
     def _get_player_ins(self) -> int:
@@ -341,3 +375,143 @@ class EldenRingMemoryReader:
             "talismans": talismans,
             "source": "ram",
         }
+
+    def read_event_flags(self, flag_bst: Optional[Dict[int, int]], wanted_flags: Optional[Set[int]]) -> Optional[List[int]]:
+        if not self._efm_addr or not flag_bst or not wanted_flags:
+            return None
+        efm = self._ru64(self._efm_addr)
+        if efm < 0x10000:
+            return None
+        hdr = self._read_bytes(efm + 0x1C, 20)
+        if not hdr or len(hdr) < 20:
+            return None
+        div, hsz, cnt = struct.unpack_from("<III", hdr, 0)
+        blocks_ptr = struct.unpack_from("<Q", hdr, 12)[0]
+        if div != 1000 or hsz != 125 or cnt < 500 or blocks_ptr < 0x10000:
+            return None
+        buf = self._read_bytes(blocks_ptr, min(cnt * 125, 0x200000))
+        if not buf:
+            return None
+        return save_reader.decode_event_flags(buf, flag_bst, wanted_flags)
+
+    def _collect_live_inv_table(self, inv_ptr: int, ncap: int, kcap: int, weapons: Set[int], armor: Set[int], talismans: Set[int], goods: Set[int]) -> bool:
+        hdr = self._read_bytes(inv_ptr + 0x0C, 36)
+        if not hdr or len(hdr) < 36:
+            return False
+        cap_n, head_n, len_n, cap_k, head_k, len_k = struct.unpack_from("<IQIIQI", hdr, 0)
+        if cap_n != ncap or cap_k != kcap or len_n > cap_n or len_k > cap_k:
+            return False
+        for head_ptr, count in ((head_n, len_n), (head_k, len_k)):
+            if head_ptr < 0x10000 or count == 0:
+                continue
+            blob = self._read_bytes(head_ptr, count * 0x18)
+            if not blob:
+                continue
+            for i in range(count):
+                gh, item_id, qty = struct.unpack_from("<III", blob, i * 0x18)
+                if gh == 0 or qty == 0 or item_id in (0, 0xFFFFFFFF):
+                    continue
+                top = item_id & 0xF0000000
+                raw = item_id & 0x0FFFFFFF
+                if top == 0x00000000:
+                    weapons.add((raw // 100) * 100)
+                elif top == 0x10000000:
+                    armor.add(raw)
+                elif top == 0x20000000:
+                    talismans.add(raw)
+                elif top == 0x40000000:
+                    goods.add(raw)
+        return True
+
+    def read_inventory(self) -> Optional[Dict[str, List[int]]]:
+        if not self._gdm_addr:
+            return None
+        gdm = self._ru64(self._gdm_addr)
+        if gdm < 0x10000:
+            return None
+        pgd = self._ru64(gdm + 0x8)
+        if pgd < 0x10000:
+            return None
+
+        weapons: Set[int] = set()
+        armor: Set[int] = set()
+        talismans: Set[int] = set()
+        goods: Set[int] = set()
+
+        if self._inv_off is None:
+            for off in range(0x3D0, 0x520, 8):
+                hdr = self._read_bytes(pgd + off + 0x0C, 24)
+                if hdr and len(hdr) == 24:
+                    cn, hn, ln, ck = struct.unpack_from("<IQII", hdr, 0)
+                    if cn == 0xA80 and ck == 0x180 and hn >= 0x10000 and ln <= cn:
+                        self._inv_off = off
+                        break
+        if self._inv_off is None or not self._collect_live_inv_table(pgd + self._inv_off, 0xA80, 0x180, weapons, armor, talismans, goods):
+            self._inv_off = None
+            return None
+
+        if self._storage_ptr_off is None:
+            for off in range(0x820, 0x940, 8):
+                ptr = self._ru64(pgd + off)
+                if ptr >= 0x10000:
+                    hdr = self._read_bytes(ptr + 0x0C, 24)
+                    if hdr and len(hdr) == 24:
+                        cn, hn, ln, ck = struct.unpack_from("<IQII", hdr, 0)
+                        if cn == 0x780 and ck == 0x80 and hn >= 0x10000 and ln <= cn:
+                            self._storage_ptr_off = off
+                            break
+        if self._storage_ptr_off is not None:
+            sptr = self._ru64(pgd + self._storage_ptr_off)
+            if sptr < 0x10000 or not self._collect_live_inv_table(sptr, 0x780, 0x80, weapons, armor, talismans, goods):
+                self._storage_ptr_off = None
+
+        return {
+            "weapons": sorted(weapons),
+            "armor": sorted(armor),
+            "talismans": sorted(talismans),
+            "goods": sorted(goods),
+        }
+
+    def read_world_map_pins(self) -> Optional[List[Dict[str, Any]]]:
+        if not self._gdm_addr:
+            return None
+        gdm = self._ru64(self._gdm_addr)
+        if gdm < 0x10000:
+            return None
+        sig = b"\x01\x00\x02\x00\xdc\x0f\x00\x00"
+        if self._mp_cache is not None:
+            off, deref, inner = self._mp_cache
+            base = self._ru64(gdm + off)
+            if base >= 0x10000:
+                if deref:
+                    base = self._ru64(base + inner)
+                    blob = self._read_bytes(base, 0x1008) if base >= 0x10000 else None
+                else:
+                    blob = self._read_bytes(base + inner, 0x1008)
+                if blob and blob[:8] == sig:
+                    return save_reader.parse_world_map_pins(blob[8:])
+            self._mp_cache = None
+
+        for off in range(0x40, 0xB8, 8):
+            ptr = self._ru64(gdm + off)
+            if ptr < 0x10000:
+                continue
+            blk = self._read_bytes(ptr, 0x60)
+            if not blk:
+                continue
+            idx = blk.find(sig)
+            if idx >= 0:
+                blob = self._read_bytes(ptr + idx, 0x1008)
+                if blob and blob[:8] == sig:
+                    self._mp_cache = (off, 0, idx)
+                    return save_reader.parse_world_map_pins(blob[8:])
+            for inner in (0x08, 0x10, 0x18, 0x20):
+                p2 = struct.unpack_from("<Q", blk, inner)[0]
+                if p2 >= 0x10000:
+                    head = self._read_bytes(p2, 8)
+                    if head == sig:
+                        blob = self._read_bytes(p2, 0x1008)
+                        if blob:
+                            self._mp_cache = (off, 1, inner)
+                            return save_reader.parse_world_map_pins(blob[8:])
+        return None

@@ -20,6 +20,8 @@ import os
 import re
 import struct
 import sys
+import tempfile
+import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from ctypes import POINTER, byref, c_int32, c_size_t, c_void_p
@@ -513,10 +515,10 @@ def stitch_map_tiles(vfs):
         print(f"  map_{layer}.jpg -> {os.path.getsize(out_jpg):,} B + {tile_grid*tile_grid} L0 tiles")
 
 
-def extract_game_icons():
-    """Extract official Elden Ring UI & map cursor sprites from ERR/menu/hi/01_common into err_map_icons.json.gz."""
+def extract_game_icons(vfs=None, needed_good_icons=None):
+    """Extract official Elden Ring UI, map cursor, & item sprites into err_map_icons.json.gz."""
     dx = _init_dx()
-    from SoulsFormats import TPF
+    from SoulsFormats import BXF4, TPF
     import System.Drawing as SD
     import System.Drawing.Imaging as SDI
     import System.IO as SIO
@@ -567,6 +569,36 @@ def extract_game_icons():
     finally:
         rdr.Dispose()
 
+    def bitmap_to_data_url(raw_bgra: bytes, sw: int, sh: int, max_dim: int = 56, tint=None) -> str:
+        sbmp = SD.Bitmap(sw, sh, SDI.PixelFormat.Format32bppArgb)
+        sbd = sbmp.LockBits(SD.Rectangle(0, 0, sw, sh), SDI.ImageLockMode.WriteOnly, SDI.PixelFormat.Format32bppArgb)
+        ctypes.memmove(int(sbd.Scan0.ToInt64()), raw_bgra, sw * sh * 4)
+        sbmp.UnlockBits(sbd)
+        scale = min(1.0, float(max_dim) / max(sw, sh))
+        dw = max(1, int(round(sw * scale)))
+        dh = max(1, int(round(sh * scale)))
+        out = SD.Bitmap(dw, dh, SDI.PixelFormat.Format32bppArgb)
+        g = SD.Graphics.FromImage(out)
+        g.InterpolationMode = SD.Drawing2D.InterpolationMode.HighQualityBicubic
+        g.Clear(SD.Color.Transparent)
+        if tint is not None:
+            ia = SDI.ImageAttributes()
+            r_t, g_t, b_t = tint
+            cm = SDI.ColorMatrix([[r_t, 0, 0, 0, 0], [0, g_t, 0, 0, 0], [0, 0, b_t, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1]])
+            ia.SetColorMatrix(cm)
+            g.DrawImage(sbmp, SD.Rectangle(0, 0, dw, dh), 0, 0, sw, sh, SD.GraphicsUnit.Pixel, ia)
+            ia.Dispose()
+        else:
+            g.DrawImage(sbmp, SD.Rectangle(0, 0, dw, dh), SD.Rectangle(0, 0, sw, sh), SD.GraphicsUnit.Pixel)
+        g.Dispose()
+        sbmp.Dispose()
+        ms = SIO.MemoryStream()
+        out.Save(ms, SDI.ImageFormat.Png)
+        b64 = base64.b64encode(bytes(ms.ToArray())).decode("ascii")
+        ms.Dispose()
+        out.Dispose()
+        return f"data:image/png;base64,{b64}"
+
     def sprite_to_data_url(sprite_name: str, max_dim: int = 56, tint=None) -> str:
         info = sprites.get(sprite_name)
         if not info:
@@ -610,7 +642,10 @@ def extract_game_icons():
         ("player", "MENU_MAP_Player_02.png", None),
         ("player_arrow", "MENU_MAP_Player_01.png", None),
         ("poi", "MENU_MAP_05.png", None),
+        ("beacon", "MENU_MAP_Marker.png", None),
     ]
+    for idx in range(10):
+        CATEGORY_MAP.append((f"memo_{idx}", f"MENU_MAP_memo_{20 + idx}.png", None))
     for key, sp_name, tint in CATEGORY_MAP:
         url = sprite_to_data_url(sp_name, max_dim=56, tint=tint)
         if url:
@@ -637,6 +672,72 @@ def extract_game_icons():
 
     for sbmp in sheets.values():
         sbmp.Dispose()
+
+    # Extract individual Goods collectible icons (Bell Bearings, Golden Seeds, Tears, Whetblades, etc.)
+    want_icons = set(needed_good_icons or ()) | {383, 384, 400, 553, 3020, 3142, 3816, 3817}
+    if want_icons:
+        import game_map_extractor as gme
+
+        oodle_fn = gme._load_oodle(GAME)
+
+        def _ingest_solo(bhd_raw: bytes, bdt_reader, bdt_base: int = 0):
+            for entry_name, d_off, c_sz, _u_sz in gme._parse_bnd4_entries(bhd_raw):
+                m = re.search(r"MENU_Knowledge_(\d+)", entry_name, re.I)
+                if not m:
+                    continue
+                iid = int(m.group(1))
+                gkey = f"good_{iid}"
+                if iid not in want_icons or gkey in icons:
+                    continue
+                blob = bdt_reader(bdt_base + d_off, c_sz)
+                if blob[:4] == b"DCX\x00":
+                    blob = gme._dcx_decompress(blob, oodle_fn)
+                tpf_texs = gme._parse_tpf(blob)
+                if not tpf_texs:
+                    continue
+                decoded = _dds_to_bgra(dx, next(iter(tpf_texs.values())))
+                if decoded:
+                    sw, sh, raw = decoded
+                    icons[gkey] = bitmap_to_data_url(raw, sw, sh, max_dim=48)
+
+        err_bhd = os.path.join(ERR_MOD, "menu", "hi", "00_Solo.tpfbhd")
+        err_bdt = os.path.join(ERR_MOD, "menu", "hi", "00_Solo.tpfbdt")
+        if os.path.exists(err_bhd) and os.path.exists(err_bdt):
+            eb = open(err_bhd, "rb").read()
+            if eb[:4] == b"DCX\x00":
+                eb = gme._dcx_decompress(eb, oodle_fn)
+            with open(err_bdt, "rb") as bf:
+                def _read_err(off, sz):
+                    bf.seek(off)
+                    return bf.read(sz)
+                _ingest_solo(eb, _read_err, 0)
+
+        # Fill any missing icons directly from base Data0 00_solo
+        if any(f"good_{iid}" not in icons for iid in want_icons):
+            bhd_raw = gme._decrypt_bhd5(os.path.join(GAME, "Data0.bhd"), gme.DATA0_RSA_PEM)
+            d_ents = gme._find_bhd_entries(bhd_raw, ("/menu/hi/00_solo.tpfbhd", "/menu/hi/00_solo.tpfbdt"))
+            if len(d_ents) == 2:
+                with open(os.path.join(GAME, "Data0.bdt"), "rb") as dbf:
+                    sbhd = gme._read_bdt_entry(dbf, d_ents["/menu/hi/00_solo.tpfbhd"])
+                    bbase = d_ents["/menu/hi/00_solo.tpfbdt"]["offset"]
+                    def _read_base(off, sz):
+                        dbf.seek(off)
+                        return dbf.read(sz)
+                    _ingest_solo(sbhd, _read_base, bbase)
+
+        for cat_key, default_id in (
+            ("bell_bearing", 3142),
+            ("golden_seed", 383),
+            ("sacred_tear", 384),
+            ("scadutree", 3816),
+            ("revered_ash", 3817),
+            ("crystal_tear", 400),
+            ("memory_stone", 553),
+            ("whetblade", 3020),
+        ):
+            gkey = f"good_{default_id}"
+            if gkey in icons and cat_key not in icons:
+                icons[cat_key] = icons[gkey]
 
     with gzip.open(ICONS_OUT_PATH, "wt", encoding="utf-8", compresslevel=6) as fh:
         json.dump(icons, fh, separators=(",", ":"))
@@ -668,12 +769,28 @@ def main():
     ICONS_OUT_PATH = os.path.abspath(args.icons_out)
     MAP_CACHE_DIR = os.path.join(os.path.dirname(OUT_PATH), "map_cache")
 
+    def collect_event_flag(fid: int):
+        if isinstance(fid, int) and fid > 0:
+            return fid
+        return 0
+
+    def _fetch_cached_text(fname: str, url: str) -> str:
+        cdir = os.path.join(tempfile.gettempdir(), "err_calc_cache")
+        os.makedirs(cdir, exist_ok=True)
+        cp = os.path.join(cdir, fname)
+        if os.path.exists(cp):
+            return open(cp, "r", encoding="utf-8", errors="replace").read()
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        txt = urllib.request.urlopen(req, timeout=20).read().decode("utf-8", errors="replace")
+        with open(cp, "w", encoding="utf-8") as fh:
+            fh.write(txt)
+        return txt
+
     print("Initializing VFS & ERR regulation...")
     init_soulsformats(GAME, SB)
     vfs = ArchiveBinderVirtualFileSystem.FromGameFolder(GAME, Game.ER)
     if args.maps:
         stitch_map_tiles(vfs)
-    available_icons = extract_game_icons() if (args.maps or args.icons) else set()
 
     reg = SFUtil.DecryptERRegulation(REG_PATH)
     fmgs = load_merged_fmgs(vfs)
@@ -694,6 +811,7 @@ def main():
     wep_param = load_param(reg, "EquipParamWeapon")
     pro_param = load_param(reg, "EquipParamProtector")
     acc_param = load_param(reg, "EquipParamAccessory")
+    gds_param = load_param(reg, "EquipParamGoods")
     cstm_param = load_param(reg, "EquipParamCustomWeapon")
     il_map = load_param(reg, "ItemLotParam_map", "ItemLotParam")
     il_enemy = load_param(reg, "ItemLotParam_enemy", "ItemLotParam")
@@ -721,8 +839,49 @@ def main():
     wep_rows = {int(r.ID): r for r in wep_param.Rows}
     pro_rows = {int(r.ID): r for r in pro_param.Rows}
     acc_rows = {int(r.ID): r for r in acc_param.Rows}
+    gds_rows = {int(r.ID): r for r in gds_param.Rows}
     cstm_rows = {int(r.ID): r for r in cstm_param.Rows}
     npc_rows = {int(r.ID): r for r in npc_param.Rows}
+
+    GOOD_CATS = ("bell_bearing", "golden_seed", "sacred_tear", "scadutree", "revered_ash", "crystal_tear", "memory_stone", "whetblade")
+    good_cache = {}
+    needed_good_icons = set()
+    for gid, gr in gds_rows.items():
+        gname = fmg_lookup(fmgs, GDS_KEYS, gid)
+        if not gname or "[ERROR]" in gname:
+            continue
+        nl = gname.lower()
+        gt = safe_int(gr, "goodsType", -1)
+        gcat = None
+        if "bell bearing" in nl:
+            gcat = "bell_bearing"
+        elif nl == "golden seed":
+            gcat = "golden_seed"
+        elif nl == "sacred tear":
+            gcat = "sacred_tear"
+        elif nl == "scadutree fragment":
+            gcat = "scadutree"
+        elif nl == "revered spirit ash":
+            gcat = "revered_ash"
+        elif gt == 10:
+            gcat = "crystal_tear"
+        elif nl == "memory stone":
+            gcat = "memory_stone"
+        elif "whetblade" in nl or nl == "whetstone knife":
+            gcat = "whetblade"
+        if gcat:
+            gicon = safe_int(gr, "iconId", 0)
+            if gicon > 0:
+                needed_good_icons.add(gicon)
+            good_cache[gid] = {"cat": gcat, "id": gid, "goodId": gid, "goodIcon": gicon, "name": gname}
+
+    available_icons = extract_game_icons(vfs, needed_good_icons) if (args.maps or args.icons) else set()
+    if not available_icons and os.path.exists(ICONS_OUT_PATH):
+        try:
+            with gzip.open(ICONS_OUT_PATH, "rt", encoding="utf-8") as fh:
+                available_icons = set(json.load(fh).keys())
+        except Exception:
+            pass
 
     def resolve_weapon_info(raw_id: int, is_custom: bool = False):
         wid = raw_id
@@ -771,9 +930,14 @@ def main():
             return None
         return {"cat": "talisman", "id": raw_id, "name": name}
 
+    def resolve_good_info(raw_id: int):
+        g = good_cache.get(raw_id)
+        return dict(g) if g else None
+
     def extract_lot_items(row) -> list:
         out = []
         seen = set()
+        lot_flag = safe_int(row, "getItemFlagId", 0)
         for slot in range(1, 9):
             cat = int(row[f"lotItemCategory0{slot}"].Value)
             iid = int(row[f"lotItemId0{slot}"].Value)
@@ -781,7 +945,9 @@ def main():
                 continue
             seen.add((cat, iid))
             info = None
-            if cat == 2:
+            if cat == 1:
+                info = resolve_good_info(iid)
+            elif cat == 2:
                 info = resolve_weapon_info(iid, False)
             elif cat == 6:
                 info = resolve_weapon_info(iid, True)
@@ -790,13 +956,70 @@ def main():
             elif cat == 4:
                 info = resolve_talisman_info(iid)
             if info:
+                sf = safe_int(row, f"getItemFlagId0{slot}", 0)
+                ef = sf if sf > 0 else (lot_flag if lot_flag > 0 else 0)
+                if ef > 0:
+                    info["eventFlag"] = ef
                 out.append(info)
         return out
+
+    # Load upstream boss defeat flags & EventFlag BST lookup table
+    bst_txt = _fetch_cached_text(
+        "eventflag-bst.txt",
+        "https://raw.githubusercontent.com/EthanShoeDev/elden-ring-compass/main/packages/vendored-data/assets/eventflag-bst.txt",
+    )
+    event_flag_bst = {}
+    for ln in bst_txt.splitlines():
+        if "," in ln:
+            k_s, v_s = ln.strip().split(",", 1)
+            event_flag_bst[int(k_s)] = int(v_s)
+
+    boss_ts_txt = _fetch_cached_text(
+        "bosses.ts",
+        "https://raw.githubusercontent.com/EthanShoeDev/elden-ring-compass/main/packages/data/src/generated/bosses.ts",
+    )
+    upstream_bosses = []
+    for ln in boss_ts_txt.splitlines():
+        ls = ln.strip().rstrip(",")
+        if ls.startswith("{") and ls.endswith("}"):
+            try:
+                bobj = json.loads(ls)
+                mm = re.match(r"m(\d+)_(\d+)_(\d+)_(\d+)", bobj.get("mapId", ""))
+                if mm and bobj.get("defeatFlagId"):
+                    ba, bgx, bgz, bsub = map(int, mm.groups())
+                    bp = resolve_coords(ba, bgx, bgz, float(bobj["x"]), float(bobj["y"]), float(bobj["z"]), sub_map=bsub, is_msb=True)
+                    if bp:
+                        upstream_bosses.append({
+                            "flag": int(bobj["defeatFlagId"]),
+                            "name": (bobj.get("name") or "").lower(),
+                            "layer": bp["layer"],
+                            "u": bp["u"],
+                            "v": bp["v"],
+                        })
+            except Exception:
+                pass
+
+    def find_matching_boss_flags(layer: str, u: float, v: float, name: str, extra_flags=None):
+        flags = []
+        if extra_flags:
+            for f in extra_flags:
+                if f and f > 0 and f not in flags:
+                    flags.append(f)
+        nl = (name or "").lower()
+        for ub in upstream_bosses:
+            if ub["layer"] != layer:
+                continue
+            dist_m = math.hypot(ub["u"] - u, ub["v"] - v) * 10496.0
+            if dist_m <= 130.0 and (not ub["name"] or ub["name"] in nl or nl in ub["name"] or dist_m <= 45.0):
+                if ub["flag"] not in flags:
+                    flags.append(ub["flag"])
+        return flags
 
     il_map_rows = {int(r.ID): r for r in il_map.Rows}
     il_enemy_rows = {int(r.ID): r for r in il_enemy.Rows}
 
     markers = []
+    map_layers = {}
 
     # ------------------------------------------------------------------
     # 1. GRACES (BonfireWarpParam)
@@ -841,22 +1064,25 @@ def main():
         sub_id = int(r["bonfireSubCategoryId"].Value)
         sub_info = sub_to_tab.get(sub_id, {})
         region = sub_info.get("subName") or tab_names.get(sub_info.get("tabId"), "") or ""
+        map_layers.setdefault(f"{area}_{gx}_{gz}", pos["layer"])
         grace_coords.append((pos["layer"], pos["u"], pos["v"], name.lower()))
-        markers.append(
-            {
-                "id": f"grace:{int(r.ID)}",
-                "cat": "grace",
-                "name": name,
-                "layer": pos["layer"],
-                "u": pos["u"],
-                "v": pos["v"],
-                "sub": region,
-                "mapId": f"m{area:02d}_{gx:02d}_{gz:02d}",
-                "wx": pos["wx"],
-                "wy": pos["wy"],
-                "wz": pos["wz"],
-            }
-        )
+        efid = safe_int(r, "eventflagId", 0)
+        gm = {
+            "id": f"grace:{int(r.ID)}",
+            "cat": "grace",
+            "name": name,
+            "layer": pos["layer"],
+            "u": pos["u"],
+            "v": pos["v"],
+            "sub": region,
+            "mapId": f"m{area:02d}_{gx:02d}_{gz:02d}",
+            "wx": pos["wx"],
+            "wy": pos["wy"],
+            "wz": pos["wz"],
+        }
+        if efid > 0:
+            gm["eventFlag"] = efid
+        markers.append(gm)
 
     # ------------------------------------------------------------------
     # 2. LANDMARKS / DUNGEONS (WorldMapPointParam)
@@ -972,6 +1198,15 @@ def main():
         }
         if not is_wmp_boss and wmp_icon_key in available_icons:
             m_poi["icon"] = wmp_icon_key
+        if is_wmp_boss:
+            wev = safe_int(r, "eventFlagId", 0)
+            bflags = find_matching_boss_flags(pos["layer"], pos["u"], pos["v"], name, [wev] if wev > 0 else None)
+            if bflags:
+                m_poi["eventFlag"] = bflags[0]
+                if len(bflags) > 1:
+                    m_poi["eventFlags"] = bflags
+        else:
+            map_layers.setdefault(f"{area}_{gx}_{gz}", pos["layer"])
         markers.append(m_poi)
 
     # ------------------------------------------------------------------
@@ -1091,22 +1326,25 @@ def main():
                 pass
             if cat == "armor":
                 treasure_items_count["armor"] += 1
-                markers.append(
-                    {
-                        "id": f"tr:{map_code}:{cat}:{uniq[0]['id']}",
-                        "cat": "armor",
-                        "name": title if len(uniq) > 1 else uniq[0]["name"],
-                        "layer": layer,
-                        "u": u,
-                        "v": v,
-                        "sub": sub if len(uniq) > 1 else uniq[0]["source"],
-                        "items": [x["name"] for x in uniq],
-                        "mapId": map_code,
-                        "wx": wx,
-                        "wy": wy,
-                        "wz": wz,
-                    }
-                )
+                am = {
+                    "id": f"tr:{map_code}:{cat}:{uniq[0]['id']}",
+                    "cat": "armor",
+                    "name": title if len(uniq) > 1 else uniq[0]["name"],
+                    "layer": layer,
+                    "u": u,
+                    "v": v,
+                    "sub": sub if len(uniq) > 1 else uniq[0]["source"],
+                    "items": [x["name"] for x in uniq],
+                    "itemIds": [int(x["id"]) for x in uniq],
+                    "itemId": int(uniq[0]["id"]),
+                    "mapId": map_code,
+                    "wx": wx,
+                    "wy": wy,
+                    "wz": wz,
+                }
+                if uniq[0].get("eventFlag"):
+                    am["eventFlag"] = int(uniq[0]["eventFlag"])
+                markers.append(am)
             else:
                 for it in uniq:
                     treasure_items_count[cat] += 1
@@ -1126,6 +1364,17 @@ def main():
                     if it.get("calcId") is not None:
                         m_obj["calcId"] = it["calcId"]
                         m_obj["baseName"] = it["baseName"]
+                    if it.get("baseId") is not None:
+                        m_obj["itemId"] = int(it["baseId"])
+                    elif cat in ("talisman",):
+                        m_obj["itemId"] = int(it["id"])
+                    if it.get("goodId") is not None:
+                        m_obj["goodId"] = int(it["goodId"])
+                    if it.get("goodIcon"):
+                        m_obj["goodIcon"] = int(it["goodIcon"])
+                        m_obj["icon"] = f"good_{int(it['goodIcon'])}"
+                    if it.get("eventFlag"):
+                        m_obj["eventFlag"] = int(it["eventFlag"])
                     markers.append(m_obj)
 
         # B. MSBE Enemies -> Bosses, Merchants, Guaranteed NPC/Scarab drops
@@ -1177,24 +1426,27 @@ def main():
                 armor_drops = [it for it in drop_items if it["cat"] == "armor"]
                 if armor_drops:
                     treasure_items_count["armor"] += 1
-                    markers.append(
-                        {
-                            "id": f"drop:{map_code}:{npc_id}:armor:{armor_drops[0]['id']}",
-                            "cat": "armor",
-                            "name": f"{armor_drops[0]['name']} (+{len(armor_drops)-1})" if len(armor_drops) > 1 else armor_drops[0]["name"],
-                            "layer": pos["layer"],
-                            "u": pos["u"],
-                            "v": pos["v"],
-                            "sub": f"Drop — {disp_name or 'Enemy'}" if len(armor_drops) == 1 else f"Drop ({disp_name or 'Enemy'}): " + ", ".join(x["name"] for x in armor_drops[:4]),
-                            "items": [x["name"] for x in armor_drops],
-                            "mapId": map_code,
-                            "wx": pos["wx"],
-                            "wy": pos["wy"],
-                            "wz": pos["wz"],
-                        }
-                    )
+                    dm = {
+                        "id": f"drop:{map_code}:{npc_id}:armor:{armor_drops[0]['id']}",
+                        "cat": "armor",
+                        "name": f"{armor_drops[0]['name']} (+{len(armor_drops)-1})" if len(armor_drops) > 1 else armor_drops[0]["name"],
+                        "layer": pos["layer"],
+                        "u": pos["u"],
+                        "v": pos["v"],
+                        "sub": f"Drop — {disp_name or 'Enemy'}" if len(armor_drops) == 1 else f"Drop ({disp_name or 'Enemy'}): " + ", ".join(x["name"] for x in armor_drops[:4]),
+                        "items": [x["name"] for x in armor_drops],
+                        "itemIds": [int(x["id"]) for x in armor_drops],
+                        "itemId": int(armor_drops[0]["id"]),
+                        "mapId": map_code,
+                        "wx": pos["wx"],
+                        "wy": pos["wy"],
+                        "wz": pos["wz"],
+                    }
+                    if armor_drops[0].get("eventFlag"):
+                        dm["eventFlag"] = int(armor_drops[0]["eventFlag"])
+                    markers.append(dm)
                 for it in drop_items:
-                    if it["cat"] in ("weapon", "talisman"):
+                    if it["cat"] in ("weapon", "talisman") or it["cat"] in GOOD_CATS:
                         treasure_items_count[it["cat"]] += 1
                         m_obj = {
                             "id": f"drop:{map_code}:{npc_id}:{it['cat']}:{it['id']}",
@@ -1212,6 +1464,17 @@ def main():
                         if it.get("calcId") is not None:
                             m_obj["calcId"] = it["calcId"]
                             m_obj["baseName"] = it["baseName"]
+                        if it.get("baseId") is not None:
+                            m_obj["itemId"] = int(it["baseId"])
+                        elif it["cat"] == "talisman":
+                            m_obj["itemId"] = int(it["id"])
+                        if it.get("goodId") is not None:
+                            m_obj["goodId"] = int(it["goodId"])
+                        if it.get("goodIcon"):
+                            m_obj["goodIcon"] = int(it["goodIcon"])
+                            m_obj["icon"] = f"good_{int(it['goodIcon'])}"
+                        if it.get("eventFlag"):
+                            m_obj["eventFlag"] = int(it["eventFlag"])
                         markers.append(m_obj)
 
             # 2) Merchant detection (strictly exclude bosses / whole-word match so 'Malenia' never matches 'enia')
@@ -1264,6 +1527,10 @@ def main():
                             if sit.get("calcId") is not None:
                                 sm["calcId"] = sit["calcId"]
                                 sm["baseName"] = sit["baseName"]
+                            if sit.get("baseId") is not None:
+                                sm["itemId"] = int(sit["baseId"])
+                            elif sit["cat"] in ("armor", "talisman"):
+                                sm["itemId"] = int(sit["id"])
                             markers.append(sm)
                 continue
 
@@ -1281,22 +1548,27 @@ def main():
                 if bk not in seen_boss:
                     seen_boss.add(bk)
                     drop_names = [x["name"] for x in drop_items[:6]]
-                    markers.append(
-                        {
-                            "id": f"boss:{map_code}:{npc_id}:{round(pos['u'],4)}",
-                            "cat": "boss",
-                            "name": bname,
-                            "layer": pos["layer"],
-                            "u": pos["u"],
-                            "v": pos["v"],
-                            "sub": f"HP {hp:,}" + (f" · {get_soul:,} Runes" if get_soul > 0 else ""),
-                            "items": drop_names,
-                            "mapId": map_code,
-                            "wx": pos["wx"],
-                            "wy": pos["wy"],
-                            "wz": pos["wz"],
-                        }
-                    )
+                    drop_flags = [int(x["eventFlag"]) for x in drop_items if x.get("eventFlag")]
+                    bflags = find_matching_boss_flags(pos["layer"], pos["u"], pos["v"], bname, drop_flags)
+                    bm = {
+                        "id": f"boss:{map_code}:{npc_id}:{round(pos['u'],4)}",
+                        "cat": "boss",
+                        "name": bname,
+                        "layer": pos["layer"],
+                        "u": pos["u"],
+                        "v": pos["v"],
+                        "sub": f"HP {hp:,}" + (f" · {get_soul:,} Runes" if get_soul > 0 else ""),
+                        "items": drop_names,
+                        "mapId": map_code,
+                        "wx": pos["wx"],
+                        "wy": pos["wy"],
+                        "wz": pos["wz"],
+                    }
+                    if bflags:
+                        bm["eventFlag"] = bflags[0]
+                        if len(bflags) > 1:
+                            bm["eventFlags"] = bflags
+                    markers.append(bm)
 
     # Deduplicate overlapping identical items placed twice by alternate map layers (_00 vs _01/_02)
     final_markers = []
@@ -1308,9 +1580,40 @@ def main():
         seen_global.add(key)
         final_markers.append(m)
 
+    # Merge eventFlags from nearby overlapping boss pins so WMP bosses & MSBE bosses share defeat flags
+    wmp_bosses = [m for m in final_markers if m["cat"] == "boss" and m["id"].startswith("poi:")]
+    for m in final_markers:
+        if m["cat"] != "boss" or m["id"].startswith("poi:"):
+            continue
+        for wb in wmp_bosses:
+            if wb["layer"] != m["layer"]:
+                continue
+            if math.hypot(wb["u"] - m["u"], wb["v"] - m["v"]) * 10496.0 <= 120.0:
+                merged = []
+                for src in (m, wb):
+                    if src.get("eventFlag"):
+                        merged.append(src["eventFlag"])
+                    for f in src.get("eventFlags", []):
+                        merged.append(f)
+                uniq_f = list(dict.fromkeys(x for x in merged if x > 0))
+                if uniq_f:
+                    m["eventFlag"] = uniq_f[0]
+                    if len(uniq_f) > 1:
+                        m["eventFlags"] = uniq_f
+
     counts = defaultdict(int)
+    flag_bst_used = {}
     for m in final_markers:
         counts[m["cat"]] += 1
+        fids = []
+        if m.get("eventFlag"):
+            fids.append(int(m["eventFlag"]))
+        for f in m.get("eventFlags", []):
+            fids.append(int(f))
+        for fid in fids:
+            blk = fid // 1000
+            if blk in event_flag_bst:
+                flag_bst_used[str(blk)] = event_flag_bst[blk]
 
     legacy_conv = []
     for r in conv_param.Rows:
@@ -1343,10 +1646,12 @@ def main():
         )
 
     payload = {
-        "version": 2,
+        "version": 3,
         "mod": "ELDEN RING Reforged v2.3.9.1",
         "tileGrid": 8,
         "layers": CALIBRATIONS,
+        "mapLayers": map_layers,
+        "flagBst": flag_bst_used,
         "legacyConv": legacy_conv,
         "legacyOffsets": legacy_offsets_export,
         "counts": dict(counts),

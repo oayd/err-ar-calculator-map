@@ -37,6 +37,11 @@
       <button id="topCompareBtn" class="top-btn gold-outline" title="Open Compare Tray">Compare (0)</button>
       <button id="topPipBtn" class="top-btn gold-outline" type="button" title="Open Always-on-Top Mini Overlay (Map or Stats)">Overlay</button>
       <button id="topRefreshModBtn" class="top-btn" title="Re-extract regulation.bin data if extract_err_data.py is present">Refresh Mod</button>
+      <button id="topSettingsBtn" class="icon-btn" title="Settings &amp; Global Keybinds">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        </svg>
+      </button>
       <button id="topSearchFocusBtn" class="icon-btn" title="Search weapons (Ctrl+F)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
           <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
@@ -427,6 +432,10 @@
       <div class="map-side-group">
         <div class="group-header">
           <span class="group-title">Map Layer</span>
+          <label class="cb-row map-auto-layer-lbl" title="Automatically switch between Lands Between, Underground, and DLC when your character moves between layers">
+            <input type="checkbox" id="mapAutoLayerCb" checked />
+            <span>Auto-Switch</span>
+          </label>
         </div>
         <div class="map-layer-tabs">
           <button type="button" class="map-layer-btn active" data-layer="m00">The Lands Between</button>
@@ -445,6 +454,7 @@
         </div>
         <div id="mapCatList" class="map-cat-list">
           <label class="map-cat-row"><input type="checkbox" id="mapCatPlayer" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-player" alt="" /><span class="map-dot player"></span></span><span class="map-cat-label">Live Player</span><span id="mapPlayerStatusTag" class="map-cat-cnt">Live</span></label>
+          <label class="map-cat-row" title="Show Elden Ring's in-game Blue Beacons (1-5) and Map Stamps from Live RAM or Save"><input type="checkbox" id="mapCatPins" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-beacon" alt="" /><span class="map-dot beacon"></span></span><span class="map-cat-label">In-Game Pins (Blue)</span><span id="cnt-pins" class="map-cat-cnt">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="grace" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-grace" alt="" /><span class="map-dot grace"></span></span><span class="map-cat-label">Sites of Grace</span><span class="map-cat-cnt" id="cnt-grace">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="weapon" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-weapon" alt="" /><span class="map-dot weapon"></span></span><span class="map-cat-label">Weapons</span><span class="map-cat-cnt" id="cnt-weapon">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="talisman" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-talisman" alt="" /><span class="map-dot talisman"></span></span><span class="map-cat-label">Talismans</span><span class="map-cat-cnt" id="cnt-talisman">0</span></label>
@@ -452,6 +462,32 @@
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="boss" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-boss" alt="" /><span class="map-dot boss"></span></span><span class="map-cat-label">Bosses</span><span class="map-cat-cnt" id="cnt-boss">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="merchant" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-merchant" alt="" /><span class="map-dot merchant"></span></span><span class="map-cat-label">Merchants</span><span class="map-cat-cnt" id="cnt-merchant">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="poi" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-poi" alt="" /><span class="map-dot poi"></span></span><span class="map-cat-label">Landmarks &amp; Dungeons</span><span class="map-cat-cnt" id="cnt-poi">0</span></label>
+          <div class="map-subcat-hdr">
+            <span>Collectibles &amp; Key Items</span>
+            <button id="mapCollectiblesToggleBtn" class="link-act" type="button">Toggle All</button>
+          </div>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="bell_bearing" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-bell_bearing" alt="" /><span class="map-dot bell_bearing"></span></span><span class="map-cat-label">Bell Bearings</span><span class="map-cat-cnt" id="cnt-bell_bearing">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="golden_seed" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-golden_seed" alt="" /><span class="map-dot golden_seed"></span></span><span class="map-cat-label">Golden Seeds</span><span class="map-cat-cnt" id="cnt-golden_seed">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="sacred_tear" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-sacred_tear" alt="" /><span class="map-dot sacred_tear"></span></span><span class="map-cat-label">Sacred Tears</span><span class="map-cat-cnt" id="cnt-sacred_tear">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="scadutree" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-scadutree" alt="" /><span class="map-dot scadutree"></span></span><span class="map-cat-label">Scadutree Fragments</span><span class="map-cat-cnt" id="cnt-scadutree">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="revered_ash" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-revered_ash" alt="" /><span class="map-dot revered_ash"></span></span><span class="map-cat-label">Revered Spirit Ashes</span><span class="map-cat-cnt" id="cnt-revered_ash">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="crystal_tear" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-crystal_tear" alt="" /><span class="map-dot crystal_tear"></span></span><span class="map-cat-label">Crystal Tears</span><span class="map-cat-cnt" id="cnt-crystal_tear">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="memory_stone" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-memory_stone" alt="" /><span class="map-dot memory_stone"></span></span><span class="map-cat-label">Memory Stones</span><span class="map-cat-cnt" id="cnt-memory_stone">0</span></label>
+          <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="whetblade" /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-whetblade" alt="" /><span class="map-dot whetblade"></span></span><span class="map-cat-label">Whetblades</span><span class="map-cat-cnt" id="cnt-whetblade">0</span></label>
+        </div>
+        <div class="map-completion-bar">
+          <label class="cb-row" title="Automatically detect collected items, touched Graces, and defeated bosses from your save / offline RAM">
+            <input type="checkbox" id="mapAutoDetectCb" checked />
+            <span>Auto-Detect</span>
+          </label>
+          <label class="map-comp-sel-wrap" title="How collected items &amp; defeated bosses appear on the map">
+            <span>Done:</span>
+            <select id="mapCompletedModeSel">
+              <option value="dim">Dim</option>
+              <option value="show">Show</option>
+              <option value="hide">Hide</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -534,6 +570,7 @@
     </div>
   </div>
 
+  <div id="pipGhostBanner" class="pip-ghost-banner hidden">GHOST MODE (Click-Through)</div>
   <div id="pipOpacityPopover" class="pip-opacity-popover hidden" role="dialog" aria-label="Overlay Opacity">
     <div class="pip-op-hdr">
       <span>Overlay Opacity</span>
@@ -576,6 +613,38 @@
   <div class="pip-resize-edge pip-edge-ne" data-edge="ne" title="Drag corner to resize"></div>
   <div class="pip-resize-edge pip-edge-sw" data-edge="sw" title="Drag corner to resize"></div>
   <div id="pipResizeGrip" class="pip-resize-edge pip-edge-se pip-resize-grip" data-edge="se" title="Drag corner to resize"></div>
+
+  <!-- Settings & Global Keybinds Modal -->
+  <div id="settingsModal" class="settings-backdrop hidden" role="dialog" aria-modal="true" aria-label="Settings and Keybinds">
+    <div class="settings-card">
+      <div class="settings-hdr">
+        <span class="settings-title">Settings &amp; Global Keybinds</span>
+        <button id="settingsCloseBtn" class="banner-close" type="button" title="Close (Esc)">&times;</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-sec-title">Global Hotkeys (work while Elden Ring is focused)</div>
+        <div id="keybindsList" class="keybinds-list"></div>
+        <div id="keybindErrorNote" class="keybind-err-note"></div>
+        <div class="settings-sec-title" style="margin-top:12px;">Map &amp; Overlay Preferences</div>
+        <div class="settings-prefs-grid">
+          <label class="cb-row"><input type="checkbox" id="setAutoLayerCb" checked /><span>Auto-Switch Map Layer (Lands Between / Underground / DLC)</span></label>
+          <label class="cb-row"><input type="checkbox" id="setAutoDetectCb" checked /><span>Auto-Detect Collected Items, Graces &amp; Defeated Bosses</span></label>
+          <label class="settings-inline-row">
+            <span>Completed Markers Display:</span>
+            <select id="setCompletedModeSel">
+              <option value="dim">Dim + Checkmark</option>
+              <option value="show">Show Normally</option>
+              <option value="hide">Hide Completed</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="settings-ftr">
+        <button id="keybindResetBtn" class="mini-link-btn" type="button">Reset Default Keybinds</button>
+        <button id="settingsDoneBtn" class="top-btn gold-outline" type="button">Done</button>
+      </div>
+    </div>
+  </div>
 
   <!-- INJECT_JS -->
 </body>

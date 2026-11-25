@@ -447,6 +447,12 @@
     ramPos: null,
     pipMode: "off",
     pipOpacity: 1.0,
+    pipClickThrough: false,
+    overlayHidden: false,
+    keybinds: {},
+    defaultKeybinds: {},
+    hotkeyErrors: {},
+    recordingKeybindAction: null,
     bannerDismissed: false,
     lastRenderedKey: "",
     domColsSpec: [],
@@ -460,7 +466,35 @@
     boss: { label: "Boss", color: "#ff4466", shape: "triangle" },
     merchant: { label: "Merchant", color: "#f0b840", shape: "ring" },
     poi: { label: "Landmark", color: "#c5cbd6", shape: "circle" },
+    bell_bearing: { label: "Bell Bearing", color: "#f3c46b", shape: "circle" },
+    golden_seed: { label: "Golden Seed", color: "#ffd84d", shape: "diamond" },
+    sacred_tear: { label: "Sacred Tear", color: "#ff8a65", shape: "circle" },
+    scadutree: { label: "Scadutree Fragment", color: "#d6b25e", shape: "diamond" },
+    revered_ash: { label: "Revered Spirit Ash", color: "#a8b7d4", shape: "circle" },
+    crystal_tear: { label: "Crystal Tear", color: "#7ad7f0", shape: "circle" },
+    memory_stone: { label: "Memory Stone", color: "#b48eff", shape: "hex" },
+    whetblade: { label: "Whetblade", color: "#c8d2dc", shape: "square" },
   };
+
+  const MAP_COLLECTIBLE_CATS = [
+    "bell_bearing",
+    "golden_seed",
+    "sacred_tear",
+    "scadutree",
+    "revered_ash",
+    "crystal_tear",
+    "memory_stone",
+    "whetblade",
+  ];
+
+  const KEYBIND_ACTIONS = [
+    { key: "togglePipMap", label: "Toggle PiP Minimap / Expand" },
+    { key: "togglePipStats", label: "Toggle PiP Stats HUD / Expand" },
+    { key: "togglePipClickThrough", label: "Toggle PiP Ghost Mode (Click-Through)" },
+    { key: "toggleFollow", label: "Toggle Live Follow (30 Hz)" },
+    { key: "focusPipSearch", label: "Focus Map Search" },
+    { key: "toggleOverlayHide", label: "Hide / Show Overlay" },
+  ];
 
   const mapState = {
     loaded: false,
@@ -468,15 +502,42 @@
     data: null,
     icons: {},
     iconImgs: {},
+    unlitGraceCanvas: null,
     images: {},
     imgPromises: {},
     tiles: new Map(),
     tilePromises: new Map(),
     tileInFlight: 0,
     layer: "m00",
-    cats: { grace: true, weapon: true, talisman: true, armor: true, boss: true, merchant: true, poi: true },
+    cats: {
+      grace: true,
+      weapon: true,
+      talisman: true,
+      armor: true,
+      boss: true,
+      merchant: true,
+      poi: true,
+      bell_bearing: true,
+      golden_seed: false,
+      sacred_tear: false,
+      scadutree: false,
+      revered_ash: false,
+      crystal_tear: false,
+      memory_stone: false,
+      whetblade: false,
+    },
     showPlayer: true,
+    showPins: true,
     followPlayer: false,
+    autoSwitchLayer: true,
+    autoDetect: true,
+    completedMode: "dim",
+    manualCompleted: {},
+    lastPlayerLayer: null,
+    ramPins: null,
+    ramOwned: null,
+    ramFlags: null,
+    offscreenTarget: null,
     search: "",
     selectedPin: null,
     hoveredPin: null,
@@ -1888,6 +1949,11 @@
     const saveName = state.savePath ? state.savePath.split(/[/\\]/).pop() : "save";
     $("infoBannerText").innerHTML =
       `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
+    if (ch.playerPos && mapState.loaded) maybeAutoSwitchPlayerLayer(ch.playerPos);
+    if (state.activeView === "map") {
+      updateMapSearchList();
+      renderMapCanvas();
+    }
   }
 
   function matchEquippedLevels(recalc = true) {
@@ -1935,6 +2001,16 @@
       liveWatch: state.liveWatch,
       bannerDismissed: state.bannerDismissed,
       pipOpacity: state.pipOpacity,
+      keybinds: state.keybinds,
+      mapLayer: mapState.layer,
+      mapCats: mapState.cats,
+      mapShowPlayer: mapState.showPlayer,
+      mapShowPins: mapState.showPins,
+      mapFollow: mapState.followPlayer,
+      mapAutoSwitchLayer: mapState.autoSwitchLayer,
+      mapAutoDetect: mapState.autoDetect,
+      mapCompletedMode: mapState.completedMode,
+      manualCompleted: mapState.manualCompleted,
     });
   }
 
@@ -2299,8 +2375,142 @@
       }
     });
 
+    // Settings & Keybinds Modal
+    const openSettingsModal = (open) => {
+      const mod = $("settingsModal");
+      if (!mod) return;
+      if (!open) state.recordingKeybindAction = null;
+      else renderKeybindsUi();
+      mod.classList.toggle("hidden", !open);
+    };
+    const renderKeybindsUi = () => {
+      const box = $("keybindsList");
+      if (!box) return;
+      box.innerHTML = KEYBIND_ACTIONS.map(({ key, label }) => {
+        const cur = state.keybinds[key] || "";
+        const rec = state.recordingKeybindAction === key;
+        const txt = rec ? "Press key combo..." : (cur || "Unbound");
+        return `<div class="kb-row">
+          <span class="kb-label">${escHtml(label)}</span>
+          <span class="kb-controls">
+            <button type="button" class="kb-cap-btn${rec ? " recording" : ""}" data-kb-act="${key}">${escHtml(txt)}</button>
+            <button type="button" class="kb-clear-btn" data-kb-clr="${key}" title="Clear keybind">&times;</button>
+          </span>
+        </div>`;
+      }).join("");
+      box.querySelectorAll(".kb-cap-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.recordingKeybindAction = state.recordingKeybindAction === btn.dataset.kbAct ? null : btn.dataset.kbAct;
+          renderKeybindsUi();
+        });
+      });
+      box.querySelectorAll(".kb-clear-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const k = btn.dataset.kbClr;
+          state.keybinds[k] = "";
+          await syncKeybindsToBackend();
+          renderKeybindsUi();
+        });
+      });
+      const errs = Object.values(state.hotkeyErrors || {}).filter(Boolean);
+      const errEl = $("keybindErrorNote");
+      if (errEl) errEl.textContent = errs.join(" · ");
+      if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
+      if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
+      if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+    };
+    const syncKeybindsToBackend = async () => {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_keybinds) {
+        const res = await window.pywebview.api.set_keybinds(state.keybinds);
+        if (res) {
+          state.hotkeyErrors = res.errors || {};
+          if (res.keybinds) state.keybinds = Object.assign({}, res.keybinds);
+        }
+      }
+      persistSettings();
+    };
+    window.__renderKeybindsUi = renderKeybindsUi;
+    if ($("topSettingsBtn")) $("topSettingsBtn").addEventListener("click", () => openSettingsModal(true));
+    if ($("settingsCloseBtn")) $("settingsCloseBtn").addEventListener("click", () => openSettingsModal(false));
+    if ($("settingsDoneBtn")) $("settingsDoneBtn").addEventListener("click", () => openSettingsModal(false));
+    if ($("settingsModal")) {
+      $("settingsModal").addEventListener("mousedown", (e) => {
+        if (e.target === $("settingsModal")) openSettingsModal(false);
+      });
+    }
+    if ($("keybindResetBtn")) {
+      $("keybindResetBtn").addEventListener("click", async () => {
+        state.recordingKeybindAction = null;
+        state.keybinds = Object.assign({}, state.defaultKeybinds);
+        await syncKeybindsToBackend();
+        renderKeybindsUi();
+      });
+    }
+    if ($("setAutoLayerCb")) {
+      $("setAutoLayerCb").addEventListener("change", (e) => {
+        mapState.autoSwitchLayer = e.target.checked;
+        if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = mapState.autoSwitchLayer;
+        persistSettings();
+      });
+    }
+    if ($("setAutoDetectCb")) {
+      $("setAutoDetectCb").addEventListener("change", (e) => {
+        mapState.autoDetect = e.target.checked;
+        if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = mapState.autoDetect;
+        persistSettings();
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    }
+    if ($("setCompletedModeSel")) {
+      $("setCompletedModeSel").addEventListener("change", (e) => {
+        mapState.completedMode = e.target.value;
+        if ($("mapCompletedModeSel")) $("mapCompletedModeSel").value = mapState.completedMode;
+        persistSettings();
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    }
+
+    const formatKeyEventCombo = (e) => {
+      const k = e.key;
+      if (["Control", "Shift", "Alt", "Meta"].includes(k)) return null;
+      const mods = [];
+      if (e.ctrlKey) mods.push("Ctrl");
+      if (e.altKey) mods.push("Alt");
+      if (e.shiftKey) mods.push("Shift");
+      let main = "";
+      if (/^[a-zA-Z0-9]$/.test(k)) main = k.toUpperCase();
+      else if (/^F([1-9]|1[0-9]|2[0-4])$/i.test(k)) main = k.toUpperCase();
+      else if (k === " ") main = "Space";
+      else if (["Tab", "Insert", "Delete", "Home", "End", "PageUp", "PageDown"].includes(k)) main = k;
+      else if (k.startsWith("Arrow")) main = k.slice(5);
+      else if (["`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/"].includes(k)) main = k;
+      else return null;
+      if (!mods.length && !main.startsWith("F")) return null;
+      return [...mods, main].join("+");
+    };
+
     // Keyboard shortcuts
-    window.addEventListener("keydown", (e) => {
+    window.addEventListener("keydown", async (e) => {
+      if (state.recordingKeybindAction) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === "Escape") {
+          state.recordingKeybindAction = null;
+          renderKeybindsUi();
+          return;
+        }
+        const combo = formatKeyEventCombo(e);
+        if (combo) {
+          const act = state.recordingKeybindAction;
+          state.recordingKeybindAction = null;
+          state.keybinds[act] = combo;
+          await syncKeybindsToBackend();
+          renderKeybindsUi();
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
         if (state.pipMode === "map") {
@@ -2311,9 +2521,12 @@
           $("searchInput").select();
         }
       } else if (e.key === "Escape") {
+        const sMod = $("settingsModal");
         const sPop = $("pipSearchPopover");
         const opPop = $("pipOpacityPopover");
-        if (sPop && !sPop.classList.contains("hidden")) {
+        if (sMod && !sMod.classList.contains("hidden")) {
+          openSettingsModal(false);
+        } else if (sPop && !sPop.classList.contains("hidden")) {
           setPipSearchPopover(false);
         } else if (opPop && !opPop.classList.contains("hidden")) {
           setPipOpacityPopover(false);
@@ -2366,7 +2579,12 @@
     if (applySavePayload(saveObj, true)) {
       recalculateAndRender();
       pulseSavePill();
+      const ch = getActiveSaveChar();
+      if (ch && ch.playerPos) maybeAutoSwitchPlayerLayer(ch.playerPos);
       if (state.activeView === "map") {
+        const cntEl = $("cnt-pins");
+        if (cntEl) cntEl.textContent = String(getActiveWorldPins().length);
+        updateMapSearchList();
         updateMapPlayerReadout();
         renderMapCanvas();
       }
@@ -2388,6 +2606,8 @@
         recalculateAndRender();
       }
     }
+    const chNow = getActiveSaveChar();
+    if (chNow && chNow.playerPos) maybeAutoSwitchPlayerLayer(chNow.playerPos);
     updateMapPlayerReadout();
     if (state.activeView === "map") renderMapCanvas();
   }
@@ -2431,11 +2651,118 @@
     updateMapPlayerReadout();
   }
 
+  function getActiveCharKey() {
+    if (state.ramLive && state.ramChar && state.ramChar.name) {
+      return `ram:${state.ramChar.name}`;
+    }
+    const saveName = state.savePath ? state.savePath.split(/[/\\]/).pop() : "manual";
+    return `${saveName}:${state.activeSlot ?? 0}`;
+  }
+
+  function getActiveSaveChar() {
+    return state.characters.find((c) => c.slot === state.activeSlot) || state.characters[0] || null;
+  }
+
+  let _cachedSetsKey = "";
+  let _cachedSetsVal = null;
+  function getActiveProgressSets() {
+    const ch = getActiveSaveChar();
+    const useRamOwned = Boolean(state.ramLive && mapState.ramOwned);
+    const useRamFlags = Boolean(state.ramLive && Array.isArray(mapState.ramFlags));
+    const ow = useRamOwned ? mapState.ramOwned : (ch && ch.owned) || {};
+    const fl = useRamFlags ? mapState.ramFlags : (ch && ch.setFlags) || [];
+    const key = `${state.ramLive}|${state.activeSlot}|${fl.length}|${(ow.weapons || []).length}|${(ow.armor || []).length}|${(ow.talismans || []).length}|${(ow.goods || []).length}`;
+    if (key === _cachedSetsKey && _cachedSetsVal) return _cachedSetsVal;
+    _cachedSetsKey = key;
+    _cachedSetsVal = {
+      weapons: new Set(ow.weapons || []),
+      armor: new Set(ow.armor || []),
+      talismans: new Set(ow.talismans || []),
+      goods: new Set(ow.goods || []),
+      flags: new Set(fl || []),
+    };
+    return _cachedSetsVal;
+  }
+
+  function getManualOverride(markerId) {
+    const ck = getActiveCharKey();
+    const map = mapState.manualCompleted && mapState.manualCompleted[ck];
+    if (map && Object.prototype.hasOwnProperty.call(map, markerId)) {
+      return map[markerId];
+    }
+    return undefined;
+  }
+
+  function isMarkerCompleted(m) {
+    if (!m) return false;
+    const man = getManualOverride(m.id);
+    if (typeof man === "boolean") return man;
+    if (!mapState.autoDetect) return false;
+    const sets = getActiveProgressSets();
+    if (m.eventFlag && sets.flags.has(m.eventFlag)) return true;
+    if (Array.isArray(m.eventFlags)) {
+      for (const f of m.eventFlags) {
+        if (sets.flags.has(f)) return true;
+      }
+    }
+    if (m.cat === "weapon" && m.itemId && sets.weapons.has(m.itemId)) return true;
+    if (m.cat === "talisman" && m.itemId && sets.talismans.has(m.itemId)) return true;
+    if (m.cat === "armor") {
+      if (Array.isArray(m.itemIds) && m.itemIds.length > 0 && m.itemIds.every((id) => sets.armor.has(id))) return true;
+      if (m.itemId && sets.armor.has(m.itemId)) return true;
+    }
+    if (m.goodId && sets.goods.has(m.goodId)) return true;
+    return false;
+  }
+
+  function setMarkerManualState(markerId, val) {
+    const ck = getActiveCharKey();
+    if (!mapState.manualCompleted || typeof mapState.manualCompleted !== "object") {
+      mapState.manualCompleted = {};
+    }
+    if (!mapState.manualCompleted[ck]) mapState.manualCompleted[ck] = {};
+    if (val === null || val === undefined) {
+      delete mapState.manualCompleted[ck][markerId];
+    } else {
+      mapState.manualCompleted[ck][markerId] = Boolean(val);
+    }
+    persistSettings();
+    if (mapState.selectedPin && mapState.selectedPin.id === markerId) {
+      showMapPinCard(mapState.selectedPin);
+    }
+    updateMapSearchList();
+    renderMapCanvas();
+  }
+
+  function getActiveWorldPins() {
+    if (state.ramLive && Array.isArray(mapState.ramPins)) return mapState.ramPins;
+    const ch = getActiveSaveChar();
+    return (ch && Array.isArray(ch.mapPins)) ? ch.mapPins : [];
+  }
+
+  function maybeAutoSwitchPlayerLayer(pp) {
+    if (!pp || !mapState.loaded) return;
+    const lp = resolvePlayerToMapLayer(pp);
+    if (!lp || !lp.layer) return;
+    const prev = mapState.lastPlayerLayer;
+    mapState.lastPlayerLayer = lp.layer;
+    if (mapState.autoSwitchLayer && lp.layer !== prev && mapState.layer !== lp.layer) {
+      mapState.layer = lp.layer;
+      syncMapLayerButtons();
+      ensureMapImage(lp.layer).then(() => {
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+      persistSettings();
+    }
+  }
+
   function applyLiveRamPos(pos) {
     if (!pos) return;
     state.ramLive = true;
     state.ramPos = pos;
     updateMapPlayerReadout();
+    maybeAutoSwitchPlayerLayer(pos);
     if (state.activeView === "map") {
       if (mapState.followPlayer) {
         const lp = resolvePlayerToMapLayer(pos);
@@ -2461,6 +2788,9 @@
     state.ramLive = false;
     state.ramChar = null;
     state.ramPos = null;
+    mapState.ramPins = null;
+    mapState.ramOwned = null;
+    mapState.ramFlags = null;
     $("saveStatusPill").classList.remove("ram-live");
     const ch = state.characters.find((c) => c.slot === state.activeSlot) || state.characters[0];
     if (ch) {
@@ -2474,7 +2804,64 @@
       recalculateAndRender();
     }
     updateMapPlayerReadout();
+    if (state.activeView === "map") {
+      updateMapSearchList();
+      renderMapCanvas();
+    }
+  }
+
+  function applyLiveRamPins(pins) {
+    if (!Array.isArray(pins)) return;
+    mapState.ramPins = pins;
+    const cntEl = $("cnt-pins");
+    if (cntEl) cntEl.textContent = String(pins.length);
     if (state.activeView === "map") renderMapCanvas();
+  }
+
+  function applyLiveRamProgress(prog) {
+    if (!prog || typeof prog !== "object") return;
+    if (prog.owned) mapState.ramOwned = prog.owned;
+    if (Array.isArray(prog.setFlags)) mapState.ramFlags = prog.setFlags;
+    if (state.activeView === "map") {
+      updateMapSearchList();
+      renderMapCanvas();
+    }
+  }
+
+  async function handleGlobalHotkey(action) {
+    if (action === "togglePipMap") {
+      await setPipMode(state.pipMode === "map" ? "off" : "map");
+    } else if (action === "togglePipStats") {
+      await setPipMode(state.pipMode === "stats" ? "off" : "stats");
+    } else if (action === "togglePipClickThrough") {
+      if (state.pipMode === "off") return;
+      state.pipClickThrough = !state.pipClickThrough;
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_click_through) {
+        const res = await window.pywebview.api.set_pip_click_through(state.pipClickThrough);
+        if (res && typeof res.clickThrough === "boolean") state.pipClickThrough = res.clickThrough;
+      }
+      const gb = $("pipGhostBanner");
+      if (gb) gb.classList.toggle("hidden", !state.pipClickThrough);
+    } else if (action === "toggleFollow") {
+      await setMapFollow(!mapState.followPlayer);
+    } else if (action === "focusPipSearch") {
+      if (state.pipMode === "map") {
+        setPipSearchPopover(true);
+      } else {
+        await switchMainView("map");
+        if ($("mapSearchInput")) {
+          $("mapSearchInput").focus();
+          $("mapSearchInput").select();
+        }
+      }
+    } else if (action === "toggleOverlayHide") {
+      if (state.pipMode === "off") return;
+      state.overlayHidden = !state.overlayHidden;
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_overlay_hidden) {
+        const res = await window.pywebview.api.set_overlay_hidden(state.overlayHidden);
+        if (res && typeof res.hidden === "boolean") state.overlayHidden = res.hidden;
+      }
+    }
   }
 
   window.__onLiveSavePush = applyIncomingSaveUpdate;
@@ -2482,6 +2869,9 @@
   window.__onLiveRamChar = applyLiveRamCharacter;
   window.__onLiveRamPos = applyLiveRamPos;
   window.__onLiveRamStatus = applyLiveRamStatus;
+  window.__onLiveRamPins = applyLiveRamPins;
+  window.__onLiveRamProgress = applyLiveRamProgress;
+  window.__onGlobalHotkey = handleGlobalHotkey;
 
   function resolvePlayerToMapLayer(pp) {
     if (!pp || !mapState.data) return null;
@@ -2506,7 +2896,9 @@
       wx = off[1] + pp.x;
       wz = off[2] + pp.z;
     }
-    const layer = dstArea === 61 ? "m10" : (pp.area === 12 ? "m01" : "m00");
+    const mlKey = `${pp.area}_${pp.gridX}_${pp.gridZ}`;
+    const mappedLayer = mapState.data.mapLayers && mapState.data.mapLayers[mlKey];
+    const layer = dstArea === 61 ? "m10" : (mappedLayer || (pp.area === 12 ? "m01" : "m00"));
     const cal = mapState.data.layers[layer];
     if (!cal) return null;
     const u = (wx - cal.ox) / cal.span;
@@ -2599,14 +2991,40 @@
         img.src = url;
       }));
     }
+    mapState.unlitGraceCanvas = null;
     await Promise.all(decodes);
-    for (const k of ["player", "grace", "weapon", "talisman", "armor", "boss", "merchant", "poi"]) {
+    for (const k of ["player", "grace", "weapon", "talisman", "armor", "boss", "merchant", "poi", "beacon", ...MAP_COLLECTIBLE_CATS]) {
       const el = $(`icon-legend-${k}`);
       if (el && rawIcons[k]) {
         el.src = rawIcons[k];
         el.classList.add("loaded");
       }
     }
+  }
+
+  function getUnlitGraceCanvas() {
+    if (mapState.unlitGraceCanvas) return mapState.unlitGraceCanvas;
+    const sp = mapState.iconImgs.grace;
+    if (!sp || !sp.naturalWidth) return null;
+    const c = document.createElement("canvas");
+    c.width = sp.naturalWidth;
+    c.height = sp.naturalHeight;
+    const cctx = c.getContext("2d");
+    cctx.drawImage(sp, 0, 0);
+    const id = cctx.getImageData(0, 0, c.width, c.height);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3];
+      if (!a) continue;
+      const lum = Math.min(240, Math.round((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) * 1.15 + 24));
+      d[i] = Math.round(lum * 0.88);
+      d[i + 1] = Math.round(lum * 0.93);
+      d[i + 2] = Math.min(255, Math.round(lum * 1.04));
+      d[i + 3] = Math.round(a * 0.56);
+    }
+    cctx.putImageData(id, 0, 0);
+    mapState.unlitGraceCanvas = c;
+    return c;
   }
 
   function requestMapTile(layer, cx, cy) {
@@ -2666,10 +3084,15 @@
         const cel = $(`cnt-${k}`);
         if (cel) cel.textContent = String(cnts[k] || 0);
       }
+      const pcntEl = $("cnt-pins");
+      if (pcntEl) pcntEl.textContent = String(getActiveWorldPins().length);
       if (!mapState.firstOpenDone) {
         mapState.firstOpenDone = true;
         const lp = getActiveLivePlayerPos();
-        if (lp && lp.layer) mapState.layer = lp.layer;
+        if (lp && lp.layer) {
+          mapState.lastPlayerLayer = lp.layer;
+          if (mapState.autoSwitchLayer) mapState.layer = lp.layer;
+        }
       }
       syncMapLayerButtons();
       await ensureMapImage(mapState.layer);
@@ -2811,11 +3234,13 @@
       return [];
     }
     const q = mapState.search.trim().toLowerCase();
+    const hideCompleted = mapState.completedMode === "hide";
     const out = [];
     for (const m of mapState.data.markers) {
       if (m.layer !== mapState.layer) continue;
       if (!mapState.cats[m.cat]) continue;
       if (!markerMatchesSearch(m, q)) continue;
+      if (hideCompleted && m.cat !== "grace" && isMarkerCompleted(m)) continue;
       out.push(m);
     }
     mapState.visibleMarkers = out;
@@ -2879,30 +3304,72 @@
   }
 
   function drawMarkerPin(ctx, m, x, y, iconPx, isSelected, isHovered) {
+    const completed = isMarkerCompleted(m);
     const ikey = getMarkerIconKey(m);
-    const sprite = mapState.iconImgs[ikey];
-    if (sprite && sprite.naturalWidth > 0) {
-      const ratio = sprite.naturalWidth / Math.max(1, sprite.naturalHeight);
+    let sprite = mapState.iconImgs[ikey] || mapState.iconImgs[m.cat];
+    const isGrace = m.cat === "grace";
+    const isUnlitGrace = isGrace && !completed;
+    const isDimOther = !isGrace && completed && mapState.completedMode === "dim";
+
+    if (isUnlitGrace) {
+      const unlit = getUnlitGraceCanvas();
+      if (unlit) sprite = unlit;
+    }
+
+    if (sprite && (sprite.naturalWidth > 0 || sprite.width > 0)) {
+      const sw = sprite.naturalWidth || sprite.width;
+      const sh = sprite.naturalHeight || sprite.height;
+      const ratio = sw / Math.max(1, sh);
       let dw = iconPx;
       let dh = iconPx;
       if (ratio > 1) dh = iconPx / ratio;
       else if (ratio < 1) dw = iconPx * ratio;
       ctx.save();
+      if (isDimOther) ctx.globalAlpha = 0.34;
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(dw, dh) * 0.448, 0, Math.PI * 2);
-      ctx.fillStyle = isSelected ? "rgba(25, 20, 14, 0.88)" : "rgba(12, 11, 10, 0.58)";
+      const rad = Math.max(dw, dh) * 0.448;
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fillStyle = isSelected ? "rgba(25, 20, 14, 0.88)" : (isUnlitGrace ? "rgba(12, 13, 16, 0.42)" : "rgba(12, 11, 10, 0.58)");
       ctx.fill();
-      if (isSelected || isHovered) {
+      if (isUnlitGrace && !isSelected) {
+        ctx.save();
+        ctx.setLineDash([2.5, 2.5]);
+        ctx.strokeStyle = isHovered ? "#ffffff" : "rgba(195, 206, 222, 0.55)";
+        ctx.lineWidth = isHovered ? 1.5 : 1.1;
+        ctx.stroke();
+        ctx.restore();
+      } else if (isSelected || isHovered) {
         ctx.strokeStyle = isSelected ? "#f2cf7e" : "#ffffff";
         ctx.lineWidth = isSelected ? 2.2 : 1.4;
         ctx.stroke();
       }
       ctx.drawImage(sprite, x - dw * 0.5, y - dh * 0.5, dw, dh);
+      if (completed && !isGrace && iconPx >= 15) {
+        ctx.globalAlpha = 0.92;
+        const br = Math.max(4.5, Math.min(7, iconPx * 0.22));
+        const bx = x + dw * 0.32;
+        const by = y + dh * 0.32;
+        ctx.beginPath();
+        ctx.arc(bx, by, br, 0, Math.PI * 2);
+        ctx.fillStyle = "#194d2c";
+        ctx.fill();
+        ctx.strokeStyle = "#4df088";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx - br * 0.45, by);
+        ctx.lineTo(bx - br * 0.1, by + br * 0.35);
+        ctx.lineTo(bx + br * 0.45, by - br * 0.35);
+        ctx.stroke();
+      }
       ctx.restore();
       return;
     }
     const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
-    drawMarkerShape(ctx, meta.shape, x, y, iconPx * 0.34, meta.color, isSelected);
+    ctx.save();
+    if (isDimOther || isUnlitGrace) ctx.globalAlpha = isUnlitGrace ? 0.42 : 0.34;
+    drawMarkerShape(ctx, meta.shape, x, y, iconPx * 0.34, isUnlitGrace ? "#9aa6b8" : meta.color, isSelected);
+    ctx.restore();
   }
 
   function computePipProximityScale(baseIconPx, distPx) {
@@ -3030,7 +3497,11 @@
       }
     };
 
-    const drawOrder = ["poi", "armor", "talisman", "weapon", "merchant", "boss", "grace"];
+    const drawOrder = [
+      "poi", "armor", "talisman", "weapon",
+      "crystal_tear", "golden_seed", "sacred_tear", "scadutree", "revered_ash", "memory_stone", "whetblade",
+      "bell_bearing", "merchant", "boss", "grace",
+    ];
     const byCat = new Map(drawOrder.map((c) => [c, []]));
     for (const m of vis) {
       if (m === mapState.selectedPin || m === mapState.hoveredPin) continue;
@@ -3044,6 +3515,61 @@
         const sy = oy + m.v * scale;
         if (sx < -cullPad || sx > w + cullPad || sy < -cullPad || sy > h + cullPad) continue;
         drawPinWithProx(m, sx, sy, iconPx, false, false);
+      }
+    }
+
+    // Native Elden Ring Blue Beacons (1-5) & Green Map Stamps
+    if (mapState.showPins) {
+      const pins = getActiveWorldPins();
+      for (const pin of pins) {
+        if (pin.layer !== mapState.layer) continue;
+        const sx = ox + pin.u * scale;
+        const sy = oy + pin.v * scale;
+        if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue;
+        ctx.save();
+        if (pin.kind === "beacon") {
+          const bPx = Math.max(24, Math.min(34, iconPx * 1.12));
+          ctx.beginPath();
+          ctx.arc(sx, sy, bPx * 0.48, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(40, 150, 255, 0.24)";
+          ctx.fill();
+          ctx.strokeStyle = "#5cc8ff";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          const bImg = mapState.iconImgs.beacon;
+          if (bImg && bImg.naturalWidth > 0) {
+            const br = bImg.naturalWidth / Math.max(1, bImg.naturalHeight);
+            const bh = bPx;
+            const bw = bh * br;
+            ctx.drawImage(bImg, sx - bw * 0.5, sy - bh * 0.5, bw, bh);
+          } else {
+            ctx.beginPath();
+            ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = "#5cc8ff";
+            ctx.fill();
+          }
+          ctx.beginPath();
+          ctx.arc(sx + bPx * 0.34, sy - bPx * 0.34, 7, 0, Math.PI * 2);
+          ctx.fillStyle = "#0b1a2a";
+          ctx.fill();
+          ctx.strokeStyle = "#5cc8ff";
+          ctx.lineWidth = 1.3;
+          ctx.stroke();
+          ctx.fillStyle = "#bfe8ff";
+          ctx.font = "700 9.5px Consolas, monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(pin.slot || ""), sx + bPx * 0.34, sy - bPx * 0.34);
+        } else {
+          const sPx = Math.max(18, Math.min(26, iconPx * 0.85));
+          const sImg = mapState.iconImgs[`memo_${pin.stampType}`] || mapState.iconImgs.memo_0;
+          if (sImg && sImg.naturalWidth > 0) {
+            ctx.drawImage(sImg, sx - sPx * 0.5, sy - sPx * 0.5, sPx, sPx);
+          } else {
+            drawMarkerShape(ctx, "diamond", sx, sy, 6, "#7ee69a", false);
+          }
+        }
+        ctx.restore();
       }
     }
 
@@ -3112,6 +3638,86 @@
       }
       ctx.restore();
     }
+
+    // Nearest off-screen target arrow + distance in PiP Map Mode (single nearest match only)
+    mapState.offscreenTarget = null;
+    if (state.pipMode === "map" && isSearching && vis.length > 0) {
+      const cal = (mapState.data && mapState.data.layers && mapState.data.layers[mapState.layer]) || { span: 10496.0 };
+      const span = cal.span || 10496.0;
+      const refU = hasPlayerOnLayer ? lp.u : (w * 0.5 - ox) / scale;
+      const refV = hasPlayerOnLayer ? lp.v : (h * 0.5 - oy) / scale;
+      let nearestM = null;
+      let nearestDist = Infinity;
+      for (const m of vis) {
+        const dist = Math.hypot(m.u - refU, m.v - refV) * span;
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestM = m;
+        }
+      }
+      if (nearestM) {
+        const tx = ox + nearestM.u * scale;
+        const ty = oy + nearestM.v * scale;
+        const margin = 12;
+        if (tx < margin || tx > w - margin || ty < margin || ty > h - margin) {
+          const cx0 = w * 0.5;
+          const cy0 = h * 0.5;
+          const dx = tx - cx0;
+          const dy = ty - cy0;
+          const leftB = 42;
+          const rightB = w - 42;
+          const topB = 40;
+          const botB = h - 22;
+          let tEdge = Infinity;
+          if (dx > 0.001) tEdge = Math.min(tEdge, (rightB - cx0) / dx);
+          else if (dx < -0.001) tEdge = Math.min(tEdge, (leftB - cx0) / dx);
+          if (dy > 0.001) tEdge = Math.min(tEdge, (botB - cy0) / dy);
+          else if (dy < -0.001) tEdge = Math.min(tEdge, (topB - cy0) / dy);
+          if (Number.isFinite(tEdge) && tEdge > 0) {
+            const ix = Math.max(leftB, Math.min(rightB, cx0 + dx * tEdge));
+            const iy = Math.max(topB, Math.min(botB, cy0 + dy * tEdge));
+            const ang = Math.atan2(dy, dx);
+            const distTxt = nearestDist >= 1000 ? `${(nearestDist / 1000).toFixed(1)}km` : `${Math.round(nearestDist)}m`;
+            ctx.save();
+            ctx.font = "700 11px Segoe UI, sans-serif";
+            const tw = ctx.measureText(distTxt).width;
+            const pw = tw + 28;
+            const ph = 22;
+            const bx = Math.max(6, Math.min(w - pw - 6, ix - pw * 0.5));
+            const by = Math.max(30, Math.min(h - ph - 6, iy - ph * 0.5));
+            ctx.fillStyle = "rgba(18, 15, 11, 0.92)";
+            ctx.strokeStyle = "#e6c16c";
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            if (ctx.roundRect) ctx.roundRect(bx, by, pw, ph, 11);
+            else ctx.rect(bx, by, pw, ph);
+            ctx.fill();
+            ctx.stroke();
+
+            // Directional arrow rotated toward off-screen target
+            ctx.save();
+            ctx.translate(bx + 12, by + ph * 0.5);
+            ctx.rotate(ang);
+            ctx.beginPath();
+            ctx.moveTo(6, 0);
+            ctx.lineTo(-4, -4.5);
+            ctx.lineTo(-2, 0);
+            ctx.lineTo(-4, 4.5);
+            ctx.closePath();
+            ctx.fillStyle = "#ffe48a";
+            ctx.fill();
+            ctx.restore();
+
+            ctx.fillStyle = "#ffe48a";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(distTxt, bx + 21, by + ph * 0.5 + 0.5);
+            ctx.restore();
+            mapState.offscreenTarget = { id: nearestM.id, name: nearestM.name, distMeters: Math.round(nearestDist), ix: Math.round(ix), iy: Math.round(iy) };
+          }
+        }
+      }
+    }
   }
 
   function findHitMarker(clientX, clientY) {
@@ -3132,6 +3738,29 @@
         best = m;
       }
     }
+    if (!best && mapState.showPins) {
+      for (const pin of getActiveWorldPins()) {
+        if (pin.layer !== mapState.layer) continue;
+        const sx = ox + pin.u * scale;
+        const sy = oy + pin.v * scale;
+        const d2 = (sx - mx) ** 2 + (sy - my) ** 2;
+        if (d2 <= bestDist2) {
+          bestDist2 = d2;
+          best = {
+            id: `pin:${pin.kind}:${pin.slot ?? pin.stampType}:${pin.u}`,
+            cat: "poi",
+            isNativePin: true,
+            name: pin.kind === "beacon" ? `Blue Beacon #${pin.slot}` : "Map Stamp",
+            sub: pin.kind === "beacon" ? "In-Game Waypoint Beacon" : "In-Game Custom Map Marker",
+            layer: pin.layer,
+            u: pin.u,
+            v: pin.v,
+            wx: Math.round(pin.u * 10496 + 7040),
+            wz: Math.round(16512 - pin.v * 10496),
+          };
+        }
+      }
+    }
     return best;
   }
 
@@ -3146,7 +3775,10 @@
     mapState.selectedPin = m;
     const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
     const badge = $("mapPinBadge");
-    badge.textContent = meta.label;
+    const completed = !m.isNativePin && isMarkerCompleted(m);
+    badge.textContent = completed
+      ? `${meta.label} ✓`
+      : meta.label;
     badge.style.color = meta.color;
     badge.style.borderColor = meta.color;
     $("mapPinTitle").textContent = m.name;
@@ -3169,6 +3801,25 @@
       btn.addEventListener("click", () => openWeaponInCalculator(m.calcId, m.baseName || m.name));
       acts.appendChild(btn);
     }
+    if (!m.isNativePin) {
+      const verb = m.cat === "boss" ? "Defeated" : (m.cat === "grace" ? "Discovered" : "Collected");
+      const mBtn = document.createElement("button");
+      mBtn.type = "button";
+      mBtn.className = "top-btn";
+      mBtn.textContent = completed ? `Unmark ${verb}` : `Mark ${verb}`;
+      mBtn.addEventListener("click", () => setMarkerManualState(m.id, !completed));
+      acts.appendChild(mBtn);
+
+      if (typeof getManualOverride(m.id) === "boolean") {
+        const clrBtn = document.createElement("button");
+        clrBtn.type = "button";
+        clrBtn.className = "mini-link-btn";
+        clrBtn.textContent = "Auto";
+        clrBtn.title = "Clear manual override and return to auto-detect";
+        clrBtn.addEventListener("click", () => setMarkerManualState(m.id, null));
+        acts.appendChild(clrBtn);
+      }
+    }
     card.classList.remove("hidden");
     renderMapCanvas();
   }
@@ -3188,9 +3839,11 @@
       pipInp.value = mapState.search;
     }
     if (!listEl || !mapState.data) return;
+    const hideComp = mapState.completedMode === "hide";
     const matches = [];
     for (const m of mapState.data.markers) {
       if (!mapState.cats[m.cat]) continue;
+      if (hideComp && m.cat !== "grace" && isMarkerCompleted(m)) continue;
       if (q && !markerMatchesSearch(m, q)) continue;
       matches.push(m);
       if (!q && matches.length >= 40) break;
@@ -3202,15 +3855,17 @@
     const renderItemsHtml = (arr) => arr.map((m, idx) => {
       const meta = MAP_CAT_META[m.cat] || MAP_CAT_META.poi;
       const layerTag = m.layer === "m10" ? "DLC" : (m.layer === "m01" ? "UG" : "LB");
+      const done = isMarkerCompleted(m);
       const ikey = getMarkerIconKey(m);
       const iurl = mapState.icons[ikey] || mapState.icons[m.cat];
       const iconHtml = iurl
         ? `<img class="map-search-icon" src="${iurl}" alt="" />`
         : `<span class="map-dot ${m.cat}" style="background:${meta.color}"></span>`;
+      const doneTag = done ? ` <span style="color:#4df088;font-size:10px;">✓</span>` : "";
       return `<button type="button" class="map-search-item" data-midx="${idx}">
         ${iconHtml}
         <span class="map-search-item-txt">
-          <div class="map-search-item-name">${escHtml(m.name)}</div>
+          <div class="map-search-item-name">${escHtml(m.name)}${doneTag}</div>
           <div class="map-search-item-sub">[${layerTag}] ${escHtml(m.sub || meta.label)}</div>
         </span>
       </button>`;
@@ -3395,6 +4050,10 @@
       setPipSearchPopover(false);
     }
     if (next === "off") {
+      state.pipClickThrough = false;
+      state.overlayHidden = false;
+      const gb = $("pipGhostBanner");
+      if (gb) gb.classList.add("hidden");
       document.body.classList.remove("pip-hover");
       setPipOpacityPopover(false);
     }
@@ -3487,21 +4146,70 @@
         mapState.layer = layer;
         syncMapLayerButtons();
         showMapPinCard(null);
+        persistSettings();
         await ensureMapImage(layer);
         updateMapSearchList();
         resetMapView(true);
       });
     });
 
+    if ($("mapAutoLayerCb")) {
+      $("mapAutoLayerCb").addEventListener("change", (e) => {
+        mapState.autoSwitchLayer = e.target.checked;
+        if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
+        persistSettings();
+      });
+    }
+    if ($("mapAutoDetectCb")) {
+      $("mapAutoDetectCb").addEventListener("change", (e) => {
+        mapState.autoDetect = e.target.checked;
+        if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
+        persistSettings();
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    }
+    if ($("mapCompletedModeSel")) {
+      $("mapCompletedModeSel").addEventListener("change", (e) => {
+        mapState.completedMode = e.target.value;
+        if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+        persistSettings();
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    }
+    if ($("mapCatPins")) {
+      $("mapCatPins").addEventListener("change", (e) => {
+        mapState.showPins = e.target.checked;
+        persistSettings();
+        renderMapCanvas();
+      });
+    }
+    if ($("mapCollectiblesToggleBtn")) {
+      $("mapCollectiblesToggleBtn").addEventListener("click", () => {
+        const anyOff = MAP_COLLECTIBLE_CATS.some((c) => !mapState.cats[c]);
+        for (const c of MAP_COLLECTIBLE_CATS) {
+          mapState.cats[c] = anyOff;
+          const cb = document.querySelector(`.map-cat-cb[data-cat='${c}']`);
+          if (cb) cb.checked = anyOff;
+        }
+        persistSettings();
+        updateMapSearchList();
+        renderMapCanvas();
+      });
+    }
+
     document.querySelectorAll(".map-cat-cb").forEach((cb) => {
       cb.addEventListener("change", () => {
         mapState.cats[cb.dataset.cat] = cb.checked;
+        persistSettings();
         updateMapSearchList();
         renderMapCanvas();
       });
     });
     $("mapCatPlayer").addEventListener("change", (e) => {
       mapState.showPlayer = e.target.checked;
+      persistSettings();
       renderMapCanvas();
     });
     $("mapCatAllBtn").addEventListener("click", () => {
@@ -3511,6 +4219,9 @@
       });
       mapState.showPlayer = true;
       $("mapCatPlayer").checked = true;
+      mapState.showPins = true;
+      if ($("mapCatPins")) $("mapCatPins").checked = true;
+      persistSettings();
       updateMapSearchList();
       renderMapCanvas();
     });
@@ -3519,6 +4230,7 @@
         cb.checked = false;
         mapState.cats[cb.dataset.cat] = false;
       });
+      persistSettings();
       updateMapSearchList();
       renderMapCanvas();
     });
@@ -3783,6 +4495,13 @@
       const hit = findHitMarker(e.clientX, e.clientY);
       showMapPinCard(hit);
     });
+    canvas.addEventListener("contextmenu", (e) => {
+      const hit = findHitMarker(e.clientX, e.clientY);
+      if (hit && !hit.isNativePin) {
+        e.preventDefault();
+        setMarkerManualState(hit.id, !isMarkerCompleted(hit));
+      }
+    });
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
@@ -3815,6 +4534,9 @@
     populateGearDropdowns();
 
     const cfg = payload.settings || {};
+    state.defaultKeybinds = Object.assign({}, payload.defaultKeybinds || {});
+    state.keybinds = Object.assign({}, state.defaultKeybinds, (cfg.keybinds && typeof cfg.keybinds === "object") ? cfg.keybinds : {});
+    state.hotkeyErrors = Object.assign({}, payload.hotkeyErrors || {});
     if (typeof cfg.twoHand === "boolean") state.twoHand = cfg.twoHand;
     if (typeof cfg.groupByType === "boolean") state.groupByType = cfg.groupByType;
     if (typeof cfg.numericScaling === "boolean") state.numericScaling = cfg.numericScaling;
@@ -3838,6 +4560,37 @@
     if (typeof cfg.pipOpacity === "number" && Number.isFinite(cfg.pipOpacity)) {
       applyPipOpacity(Math.round(cfg.pipOpacity * 100), false);
     }
+    if (typeof cfg.mapLayer === "string" && ["m00", "m01", "m10"].includes(cfg.mapLayer)) {
+      mapState.layer = cfg.mapLayer;
+      mapState.firstOpenDone = true;
+    }
+    if (cfg.mapCats && typeof cfg.mapCats === "object") {
+      for (const k of Object.keys(MAP_CAT_META)) {
+        if (typeof cfg.mapCats[k] === "boolean") mapState.cats[k] = cfg.mapCats[k];
+      }
+    }
+    if (typeof cfg.mapShowPlayer === "boolean") mapState.showPlayer = cfg.mapShowPlayer;
+    if (typeof cfg.mapShowPins === "boolean") mapState.showPins = cfg.mapShowPins;
+    if (typeof cfg.mapFollow === "boolean") mapState.followPlayer = cfg.mapFollow;
+    if (typeof cfg.mapAutoSwitchLayer === "boolean") mapState.autoSwitchLayer = cfg.mapAutoSwitchLayer;
+    if (typeof cfg.mapAutoDetect === "boolean") mapState.autoDetect = cfg.mapAutoDetect;
+    if (["dim", "show", "hide"].includes(cfg.mapCompletedMode)) mapState.completedMode = cfg.mapCompletedMode;
+    if (cfg.manualCompleted && typeof cfg.manualCompleted === "object") mapState.manualCompleted = cfg.manualCompleted;
+
+    document.querySelectorAll(".map-cat-cb").forEach((cb) => {
+      cb.checked = Boolean(mapState.cats[cb.dataset.cat]);
+    });
+    if ($("mapCatPlayer")) $("mapCatPlayer").checked = mapState.showPlayer;
+    if ($("mapCatPins")) $("mapCatPins").checked = mapState.showPins;
+    if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = mapState.autoSwitchLayer;
+    if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = mapState.autoDetect;
+    if ($("mapCompletedModeSel")) $("mapCompletedModeSel").value = mapState.completedMode;
+    if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
+    if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
+    if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+    if ($("mapFollowBtn")) $("mapFollowBtn").classList.toggle("following", mapState.followPlayer);
+    if ($("pipFollowBtn")) $("pipFollowBtn").classList.toggle("following", mapState.followPlayer);
+    syncMapLayerButtons();
 
     $("twoHandCb").checked = state.twoHand;
     $("groupByTypeCb").checked = state.groupByType;
@@ -4074,6 +4827,18 @@
         const ramMeta = $("charMetaText").textContent;
         const ramStr = state.stats.str;
         const ramHasPos = Boolean(getActiveLivePlayerPos());
+        // Test Auto-Switch Layer (even with Follow OFF) to Shadow of the Erdtree (area 61)
+        const prevAuto = mapState.autoSwitchLayer;
+        mapState.autoSwitchLayer = true;
+        mapState.lastPlayerLayer = "m00";
+        window.__onLiveRamPos({ area: 61, gridX: 48, gridZ: 40, sub: 0, x: 10.0, y: 0.0, z: 20.0, yaw: 0.5 });
+        const autoSwitchedToDlc = mapState.layer === "m10";
+        window.__onLiveRamPins([{ kind: "beacon", slot: 1, layer: "m10", u: 0.5, v: 0.5, order: 1 }]);
+        const pinsCount = getActiveWorldPins().length;
+        // Reset cleanly back to m00
+        mapState.layer = "m00";
+        mapState.autoSwitchLayer = prevAuto;
+        syncMapLayerButtons();
         window.__onLiveRamStatus({ attached: false });
         return {
           followOn,
@@ -4082,6 +4847,8 @@
           ramMeta,
           ramStr,
           ramHasPos,
+          autoSwitchedToDlc,
+          pinsCount,
           restoredRamActive: state.ramLive,
           restoredMeta: $("charMetaText").textContent,
         };
@@ -4097,6 +4864,17 @@
         updateMapSearchList();
         const searchHits = document.querySelectorAll("#pipSearchList .map-search-item").length;
         const searchBtnActive = $("pipSearchBtn").classList.contains("active");
+
+        // Test nearest off-screen target arrow in PiP Mode
+        const prevL = mapState.layer;
+        mapState.layer = "m00";
+        centerMapOnUV(0.05, 0.05, 6.0);
+        const offTarget = mapState.offscreenTarget ? Object.assign({}, mapState.offscreenTarget) : null;
+        const targetM = offTarget ? (mapState.data && mapState.data.markers || []).find((m) => m.id === offTarget.id) : null;
+        if (targetM) centerMapOnUV(targetM.u, targetM.v, 4.0);
+        const onScreenCleared = mapState.offscreenTarget === null;
+        mapState.layer = prevL;
+
         mapState.search = "";
         $("pipSearchInput").value = "";
         updateMapSearchList();
@@ -4122,7 +4900,34 @@
           proxZero.iconPx === 14 &&
           pFar === 1.0 && pZero < 0.6
         );
-        return { mapBody, statsBody, statsCells, offClean, hoverClean, opacityClampedLow, proxShrinkOk, pipSearchOk };
+        return {
+          mapBody,
+          statsBody,
+          statsCells,
+          offClean,
+          hoverClean,
+          opacityClampedLow,
+          proxShrinkOk,
+          pipSearchOk,
+          offscreenArrowOk: Boolean(offTarget && offTarget.distMeters > 0 && onScreenCleared),
+        };
+      },
+      testV15Features() {
+        const g = (mapState.data && mapState.data.markers || []).find((m) => m.cat === "grace" && m.eventFlag);
+        const beforeMan = g ? isMarkerCompleted(g) : null;
+        if (g) setMarkerManualState(g.id, !beforeMan);
+        const afterMan = g ? isMarkerCompleted(g) : null;
+        if (g) setMarkerManualState(g.id, null);
+        $("topSettingsBtn").click();
+        const modalOpen = !$("settingsModal").classList.contains("hidden") && document.querySelectorAll("#keybindsList .kb-row").length === 6;
+        $("settingsCloseBtn").click();
+        const modalClosed = $("settingsModal").classList.contains("hidden");
+        const bbWithIcon = (mapState.data && mapState.data.markers || []).filter((m) => m.cat === "bell_bearing" && m.icon && m.icon.startsWith("good_")).length;
+        return {
+          manualToggleOk: g ? (afterMan === !beforeMan) : false,
+          modalOk: modalOpen && modalClosed,
+          bbWithIcon,
+        };
       },
       startMapImagesTest() {
         window.__ERR_MAP_IMAGES = null;

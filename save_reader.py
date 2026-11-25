@@ -91,7 +91,184 @@ def _extract_player_pos(sdata: bytes) -> Optional[Tuple[int, Dict[str, Any]]]:
     return None
 
 
-def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int]] = None) -> Dict:
+def parse_world_map_pins(mp_bytes: bytes) -> List[Dict[str, Any]]:
+    """Decode CS::MENU_WORLD_MAP_SAVEDATA (5 blue beacons + 100 custom map stamps)."""
+    if not mp_bytes or len(mp_bytes) < 0x7E8:
+        return []
+    u0, u2 = struct.unpack_from("<HH", mp_bytes, 0)
+    if (u0, u2) != (1, 2):
+        return []
+    layer_map = {0: "m00", 1: "m01", 10: "m10"}
+    pins: List[Dict[str, Any]] = []
+    for idx in range(105):
+        off = 0x108 + idx * 16
+        t, x, y, fl = struct.unpack_from("<IffI", mp_bytes, off)
+        if t == 0xFFFFFFFF:
+            continue
+        if not (math.isfinite(x) and math.isfinite(y) and 0.0 <= x <= 10496.0 and 0.0 <= y <= 10496.0):
+            continue
+        layer = layer_map.get(fl & 0xFF, "m00")
+        u = round(x / 10496.0, 6)
+        v = round(y / 10496.0, 6)
+        if idx < 5:
+            pins.append(
+                {
+                    "kind": "beacon",
+                    "slot": idx + 1,
+                    "layer": layer,
+                    "u": u,
+                    "v": v,
+                    "order": int(t),
+                }
+            )
+        else:
+            pins.append(
+                {
+                    "kind": "stamp",
+                    "stampType": int(t % 10),
+                    "layer": layer,
+                    "u": u,
+                    "v": v,
+                }
+            )
+    return pins
+
+
+def decode_event_flags(ef_bytes: bytes, flag_bst: Optional[Dict[int, int]], wanted_flags: Optional[Set[int]]) -> List[int]:
+    if not ef_bytes or not flag_bst or not wanted_flags:
+        return []
+    out: List[int] = []
+    nbytes = len(ef_bytes)
+    for fid in sorted(wanted_flags):
+        mult = flag_bst.get(fid // 1000)
+        if mult is None:
+            continue
+        idx = fid % 1000
+        boff = mult * 125 + (idx >> 3)
+        if 0 <= boff < nbytes and (ef_bytes[boff] & (1 << (7 - (idx & 7)))):
+            out.append(fid)
+    return out
+
+
+def _collect_inv_block(
+    sdata: bytes,
+    off: int,
+    cap: int,
+    gmap: Dict[int, int],
+    weapons: Set[int],
+    armor: Set[int],
+    talismans: Set[int],
+    goods: Set[int],
+):
+    for i in range(cap):
+        gh, qty, _idx = struct.unpack_from("<III", sdata, off + i * 12)
+        if gh == 0 or qty == 0:
+            continue
+        nib = gh & 0xF0000000
+        if nib == 0x80000000:
+            iid = gmap.get(gh)
+            if iid:
+                weapons.add(((iid & 0x0FFFFFFF) // 100) * 100)
+        elif nib == 0x90000000:
+            iid = gmap.get(gh)
+            if iid:
+                armor.add(iid & 0x0FFFFFFF)
+        elif nib == 0xA0000000:
+            talismans.add(gh & 0x0FFFFFFF)
+        elif nib == 0xB0000000:
+            goods.add(gh & 0x0FFFFFFF)
+
+
+def _parse_slot_extras(
+    sdata: bytes,
+    flag_bst: Optional[Dict[int, int]] = None,
+    wanted_flags: Optional[Set[int]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Walk slot binary using SL2.bt layout to extract inventory, map pins, and event flags."""
+    if len(sdata) < 0x45000:
+        return None
+    ver = struct.unpack_from("<I", sdata, 0x10)[0]
+    if ver == 0:
+        return None
+    pos = 0x30
+    gcount = 0x1400 if ver > 81 else 0x13FE
+    gmap: Dict[int, int] = {}
+    for _ in range(gcount):
+        gh, iid = struct.unpack_from("<II", sdata, pos)
+        pos += 8
+        if gh != 0:
+            gmap[gh] = iid
+            nib = gh & 0xF0000000
+            if nib == 0x80000000:
+                pos += 13
+            elif nib == 0x90000000:
+                pos += 8
+
+    # PlayerGameData (0x1B0) + SPEffects (0xD0) + ChrAsmEquipment*3 + ArmStyle (0x58 + 0x1C + 0x58 + 0x58)
+    pos += 0x1B0 + 0xD0 + 0x58 + 0x1C + 0x58 + 0x58
+
+    weapons: Set[int] = set()
+    armor: Set[int] = set()
+    talismans: Set[int] = set()
+    goods: Set[int] = set()
+
+    # InventoryHeld(0xA80 common, 0x180 key)
+    _collect_inv_block(sdata, pos + 4, 0xA80, gmap, weapons, armor, talismans, goods)
+    _collect_inv_block(sdata, pos + 4 + 0xA80 * 12 + 4, 0x180, gmap, weapons, armor, talismans, goods)
+    pos += 4 + 0xA80 * 12 + 4 + 0x180 * 12 + 8
+
+    # EquipMagicData + EquipItemData + GestureEquipData
+    pos += (14 * 8 + 4) + (10 * 8 + 4 + 6 * 8 + 8) + 24
+    proj_cnt = struct.unpack_from("<I", sdata, pos)[0]
+    if proj_cnt > 0x1000:
+        return None
+    pos += 4 + proj_cnt * 8
+    # EquippedArmamentsAndItems (0x9C) + Physic (0xC) + FaceData (0x12F)
+    pos += 0x9C + 0xC + 0x12F
+
+    # InventoryStorageBox(0x780 common, 0x80 key)
+    _collect_inv_block(sdata, pos + 4, 0x780, gmap, weapons, armor, talismans, goods)
+    _collect_inv_block(sdata, pos + 4 + 0x780 * 12 + 4, 0x80, gmap, weapons, armor, talismans, goods)
+    pos += 4 + 0x780 * 12 + 4 + 0x80 * 12 + 8
+
+    # Gestures (0x100) + Regions + Horse (0x28) + control_byte (1) + BloodStainData (0x44) + unk_gdm (8)
+    pos += 0x100
+    reg_cnt = struct.unpack_from("<I", sdata, pos)[0]
+    if reg_cnt > 0x4000:
+        return None
+    pos += 4 + reg_cnt * 4
+    pos += 0x28 + 1 + 0x44 + 8
+
+    mp_off = pos
+    if mp_off + 0x1008 > len(sdata):
+        return None
+    mp_bytes = sdata[mp_off + 8 : mp_off + 8 + 4096]
+    map_pins = parse_world_map_pins(mp_bytes)
+
+    ef_off = mp_off + 0x1008 + 0x34 + (8 + 0x1B58 * 16) + 0x408 + 3 + 4 + 4 + 1 + 4 + 4 + 1 + 4 + 4
+    if ef_off + 0x1BF9A0 > len(sdata) or sdata[ef_off + 0x1BF99F] != 0:
+        return None
+    set_flags = decode_event_flags(sdata[ef_off : ef_off + 0x1BF99F], flag_bst, wanted_flags)
+
+    return {
+        "owned": {
+            "weapons": sorted(weapons),
+            "armor": sorted(armor),
+            "talismans": sorted(talismans),
+            "goods": sorted(goods),
+        },
+        "setFlags": set_flags,
+        "mapPins": map_pins,
+        "mpRelOff": mp_off + 8,
+    }
+
+
+def read_save_characters(
+    save_path: str,
+    known_weapon_base_ids: Optional[Set[int]] = None,
+    flag_bst: Optional[Dict[int, int]] = None,
+    wanted_flags: Optional[Set[int]] = None,
+) -> Dict:
     """Read character slots & last-played slot index strictly read-only from an ER save file."""
     with open(save_path, "rb") as fh:
         data = fh.read()
@@ -163,6 +340,13 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
             pos_rel, player_pos = pos_hit
             stat_offsets[f"pos_{slot}"] = s_off + pos_rel
         vig, mnd, end, strength, dex, intel, fai, arc = struct.unpack_from("<8I", sdata, pos - 0x60)
+        extras = None
+        try:
+            extras = _parse_slot_extras(sdata, flag_bst=flag_bst, wanted_flags=wanted_flags)
+        except Exception:
+            extras = None
+        if extras and extras.get("mpRelOff"):
+            stat_offsets[f"mp_{slot}"] = s_off + int(extras["mpRelOff"])
         characters.append(
             {
                 "slot": slot,
@@ -184,6 +368,9 @@ def read_save_characters(save_path: str, known_weapon_base_ids: Optional[Set[int
                 "armor": armor,
                 "talismans": talismans,
                 "playerPos": player_pos,
+                "owned": extras["owned"] if extras else {"weapons": [], "armor": [], "talismans": [], "goods": []},
+                "setFlags": extras["setFlags"] if extras else [],
+                "mapPins": extras["mapPins"] if extras else [],
             }
         )
 
@@ -223,7 +410,8 @@ def read_save_fingerprint(save_path: str, stat_offsets: Optional[Dict[str, int]]
         if stat_offsets:
             for slot_key in sorted(stat_offsets.keys()):
                 abs_off = int(stat_offsets[slot_key])
-                if 0 <= abs_off and abs_off + 64 <= file_size:
+                read_sz = 0x750 if slot_key.startswith("mp_") else 64
+                if 0 <= abs_off and abs_off + read_sz <= file_size:
                     fh.seek(abs_off)
-                    h.update(fh.read(64))
+                    h.update(fh.read(read_sz))
     return h.hexdigest()
