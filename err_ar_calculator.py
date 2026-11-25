@@ -355,6 +355,7 @@ class CalculatorApi:
         self._map_icons: Optional[Dict[str, str]] = None
         self._flag_bst: Dict[int, int] = {}
         self._wanted_flags: Set[int] = set()
+        self._npc_meta: Dict[int, tuple] = {}
         self._load_flag_meta()
         self._mem = memory_reader.EldenRingMemoryReader()
         self._known_armor_ids = {int(k) for k in (self._data.get("armors") or {}).keys() if int(k) > 10300}
@@ -366,6 +367,9 @@ class CalculatorApi:
         self._pip_opacity: float = max(0.15, min(1.0, float(cfg0.get("pipOpacity", 100)) / 100.0 if float(cfg0.get("pipOpacity", 1.0)) > 1.0 else float(cfg0.get("pipOpacity", 1.0))))
         self._pip_click_through: bool = False
         self._pip_boss_hud: bool = bool(cfg0.get("pipBossHud", True))
+        self._pip_map_boss_hud: bool = bool(cfg0.get("pipMapBossHud", True))
+        d0 = str(cfg0.get("pipBossDesign", "1"))
+        self._pip_boss_design: str = d0 if d0 in ("1", "2", "3") else "1"
         self._overlay_hidden: bool = False
         self._normal_bounds = None
         saved_pb = cfg0.get("pipBounds")
@@ -392,6 +396,11 @@ class CalculatorApi:
                 md = json.load(fh)
             self._map_data = md
             self._flag_bst = {int(k): int(v) for k, v in (md.get("flagBst") or {}).items()}
+            self._npc_meta = {
+                int(k): (str(v[0] or ""), int(v[1] or 0))
+                for k, v in (md.get("npcMeta") or {}).items()
+                if isinstance(v, (list, tuple)) and len(v) >= 2
+            }
             wanted: Set[int] = set()
             for mk in md.get("markers", []):
                 ef = mk.get("eventFlag")
@@ -727,6 +736,23 @@ class CalculatorApi:
             self.save_settings(cfg)
         return {"pipBossHud": self._pip_boss_hud}
 
+    def set_pip_map_boss_hud(self, enabled: bool) -> Dict[str, Any]:
+        self._pip_map_boss_hud = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipMapBossHud"] = self._pip_map_boss_hud
+            self.save_settings(cfg)
+        return {"pipMapBossHud": self._pip_map_boss_hud}
+
+    def set_pip_boss_design(self, design: str) -> Dict[str, Any]:
+        d = str(design or "1")
+        self._pip_boss_design = d if d in ("1", "2", "3") else "1"
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipBossDesign"] = self._pip_boss_design
+            self.save_settings(cfg)
+        return {"pipBossDesign": self._pip_boss_design}
+
     def _win32_nc_hit(self, ht_code: int) -> bool:
         if self._self_test_mode or self._pip_mode == "off":
             return False
@@ -919,11 +945,13 @@ class CalculatorApi:
             last_save_t = 0.0
             miss_streak = 0
             while True:
+                want_boss = (
+                    (self._pip_mode == "stats" and self._pip_boss_hud)
+                    or (self._pip_mode == "map" and self._pip_map_boss_hud)
+                )
                 if self._ram_active:
-                    if self._ui_view == "map" and self._map_follow:
+                    if (self._ui_view == "map" and self._map_follow) or want_boss:
                         dt = 0.033
-                    elif self._pip_mode == "stats" and self._pip_boss_hud:
-                        dt = 0.08 if has_active_boss else 0.15
                     elif self._ui_view == "map":
                         dt = 0.10
                     else:
@@ -1002,8 +1030,8 @@ class CalculatorApi:
                                         self._window.evaluate_js(
                                             f"window.__onLiveRamProgress && window.__onLiveRamProgress({prog_key});"
                                         )
-                            if self._pip_mode == "stats" and self._pip_boss_hud:
-                                bosses = self._mem.read_active_bosses() or []
+                            if want_boss:
+                                bosses = self._mem.read_active_bosses(self._npc_meta) or []
                                 has_active_boss = bool(bosses)
                                 boss_key = json.dumps(bosses, sort_keys=True)
                                 if not was_active or boss_key != last_boss_key:
@@ -1084,7 +1112,7 @@ class CalculatorApi:
                 return {"error": "err_map_data.json.gz not found", "markers": [], "counts": {}, "layers": {}, "legacyConv": [], "availableImages": {}}
             with gzip.open(p, "rt", encoding="utf-8") as fh:
                 self._map_data = json.load(fh)
-        out = dict(self._map_data)
+        out = {k: v for k, v in self._map_data.items() if k != "npcMeta"}
         out["availableImages"] = {layer: bool(map_image_path(layer)) for layer in ("m00", "m01", "m10")}
         return out
 
@@ -1506,12 +1534,16 @@ def run_self_test(report_path: Optional[str]):
             v15_res = w.evaluate_js("window.__ERR_TEST.testV15Features()")
             assert v15_res["manualToggleOk"] and v15_res["modalOk"] and v15_res["bbWithIcon"] >= 50, f"v1.5 features failed: {v15_res}"
             assert isinstance(memory_reader._is_eac_running(), bool)
+            assert len(api._npc_meta) >= 500, f"Expected ERR npcMeta >= 500, got {len(api._npc_meta)}"
             boss_res = w.evaluate_js("window.__ERR_TEST.testBossHud()")
             assert (
-                boss_res["shown"]
+                boss_res["shownStats"]
+                and boss_res["shownMap"]
                 and boss_res["hpTextOk"]
                 and boss_res["stanceOk"]
                 and boss_res["statusesOk"]
+                and boss_res["designsOk"]
+                and boss_res["ramBadgesOk"]
                 and boss_res["toggleOffHidden"]
                 and boss_res["detachCleared"]
                 and boss_res["settingsSynced"]
@@ -1549,6 +1581,7 @@ def run_self_test(report_path: Optional[str]):
                 f"MAP_TILES_OK={bool(tile_check and tile_check.get('m00') and tile_check.get('m10'))}",
                 f"MAP_DUMMY_COUNT={map_state['dummyCount']}",
                 f"MAP_CLAYMORE_HITS={clay_hits}",
+                f"NPC_META_COUNT={len(api._npc_meta)}",
                 f"BOSS_HUD_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",

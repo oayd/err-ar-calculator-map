@@ -547,6 +547,7 @@
         <div id="mapPinCoords" class="map-pin-coords"></div>
         <div id="mapPinActions" class="map-pin-actions"></div>
       </div>
+      <div id="pipMapBossBox" class="pip-map-boss-box hidden"></div>
     </section>
   </div>
 
@@ -556,6 +557,12 @@
       <span class="pip-drag-grip" title="Drag bar to move overlay">&#8942;&#8942;</span>
       <button id="pipModeMapBtn" class="pip-pill" type="button" title="Switch overlay to Live Minimap">Map</button>
       <button id="pipModeStatsBtn" class="pip-pill" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
+      <div id="pipDesignGroup" class="pip-design-grp" title="Boss / Target HUD Design (1: Tall In-Bar, 2: ER Medallions, 3: Full Stacked)">
+        <span class="pip-design-lbl">DESIGN:</span>
+        <button type="button" class="pip-d-btn active" data-design="1">1</button>
+        <button type="button" class="pip-d-btn" data-design="2">2</button>
+        <button type="button" class="pip-d-btn" data-design="3">3</button>
+      </div>
     </div>
     <div class="pip-group">
       <button id="pipSearchBtn" class="pip-pill pip-icon-pill" type="button" title="Search map markers (Ctrl+F)" aria-label="Search map markers">
@@ -564,7 +571,8 @@
         </svg>
       </button>
       <button id="pipFollowBtn" class="pip-pill" type="button" title="Follow live player position at 30 Hz">Follow</button>
-      <button id="pipBossBtn" class="pip-pill active" type="button" title="Show Live Boss HP, Stance &amp; Status Buildup (Offline RAM only, auto-off with EAC)">Boss</button>
+      <button id="pipBossBtn" class="pip-pill active" type="button" title="Toggle Live Boss / Locked Enemy Bar (30 Hz Offline RAM, auto-off under EAC)">Boss</button>
+      <span id="pipMapRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
       <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)">Opacity 100%</button>
       <button id="pipExitBtn" class="pip-pill gold" type="button" title="Return to full window (Esc)">Expand</button>
@@ -631,7 +639,16 @@
         <div class="settings-prefs-grid">
           <label class="cb-row"><input type="checkbox" id="setAutoLayerCb" checked /><span>Auto-Switch Map Layer (Lands Between / Underground / DLC)</span></label>
           <label class="cb-row"><input type="checkbox" id="setAutoDetectCb" checked /><span>Auto-Detect Collected Items, Graces &amp; Defeated Bosses</span></label>
-          <label class="cb-row"><input type="checkbox" id="setPipBossHudCb" checked /><span>Show Live Boss HP, Stance &amp; Status Buildup in PiP Stats HUD (Offline RAM only, auto-off under EAC)</span></label>
+          <label class="cb-row"><input type="checkbox" id="setPipBossHudCb" checked /><span>Show Boss / Locked-On Enemy Bar in PiP Stats HUD (30 Hz Offline RAM)</span></label>
+          <label class="cb-row"><input type="checkbox" id="setPipMapBossHudCb" checked /><span>Show Compact Boss / Locked-On Enemy Bar in PiP Map (30 Hz Offline RAM)</span></label>
+          <div class="settings-inline-row">
+            <span>Boss / Target HUD Design:</span>
+            <div id="setDesignGroup" class="pip-design-grp">
+              <button type="button" class="pip-d-btn active" data-design="1">1</button>
+              <button type="button" class="pip-d-btn" data-design="2">2</button>
+              <button type="button" class="pip-d-btn" data-design="3">3</button>
+            </div>
+          </div>
           <label class="settings-inline-row">
             <span>Completed Markers Display:</span>
             <select id="setCompletedModeSel">

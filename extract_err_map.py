@@ -817,6 +817,7 @@ def main():
     il_enemy = load_param(reg, "ItemLotParam_enemy", "ItemLotParam")
     shop_param = load_param(reg, "ShopLineupParam")
     npc_param = load_param(reg, "NpcParam")
+    sp_param = load_param(reg, "SpEffectParam", "SpEffect")
     bonfire_param = load_param(reg, "BonfireWarpParam")
     bonfire_sub = load_param(reg, "BonfireWarpSubCategoryParam")
     bonfire_tab = load_param(reg, "BonfireWarpTabParam")
@@ -842,6 +843,7 @@ def main():
     gds_rows = {int(r.ID): r for r in gds_param.Rows}
     cstm_rows = {int(r.ID): r for r in cstm_param.Rows}
     npc_rows = {int(r.ID): r for r in npc_param.Rows}
+    sp_rows = {int(r.ID): r for r in sp_param.Rows}
 
     GOOD_CATS = ("bell_bearing", "golden_seed", "sacred_tear", "scadutree", "revered_ash", "crystal_tear", "memory_stone", "whetblade")
     good_cache = {}
@@ -1645,6 +1647,42 @@ def main():
             ]
         )
 
+    npc_meta = {}
+    for nid, nr in npc_rows.items():
+        name_id = safe_int(nr, "nameId", -1)
+        fmg_n = clean_text(fmg_lookup(fmgs, NPC_KEYS, name_id)) if name_id > 0 else ""
+        crn_n = clean_text(crn_npc.get(nid, ""))
+        disp = fmg_n or crn_n
+        mask = 0
+        # 6-bit mask: 1=Bleed, 2=Frost, 4=Rot, 8=Sleep, 16=Poison, 32=Madness
+        for col, bit in (
+            ("resist_blood", 1),
+            ("resist_freeze", 2),
+            ("resist_desease", 4),
+            ("resist_sleep", 8),
+            ("resist_poison", 16),
+            ("resist_madness", 32),
+        ):
+            rv = safe_int(nr, col, 0)
+            if rv <= 0 or rv >= 9999:
+                mask |= bit
+        for i in range(32):
+            sid = safe_int(nr, f"spEffectID{i}", -1)
+            if sid > 0 and sid in sp_rows:
+                sr = sp_rows[sid]
+                for scol, bit in (
+                    ("disableBlood", 1),
+                    ("disableFreeze", 2),
+                    ("disableDisease", 4),
+                    ("disableSleep", 8),
+                    ("disablePoison", 16),
+                    ("disableMadness", 32),
+                ):
+                    if safe_int(sr, scol, 0) > 0:
+                        mask |= bit
+        if disp or mask:
+            npc_meta[str(nid)] = [disp, mask]
+
     payload = {
         "version": 3,
         "mod": "ELDEN RING Reforged v2.3.9.1",
@@ -1654,6 +1692,7 @@ def main():
         "flagBst": flag_bst_used,
         "legacyConv": legacy_conv,
         "legacyOffsets": legacy_offsets_export,
+        "npcMeta": npc_meta,
         "counts": dict(counts),
         "markers": final_markers,
     }

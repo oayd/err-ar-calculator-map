@@ -450,6 +450,8 @@
     pipOpacity: 1.0,
     pipClickThrough: false,
     pipBossHud: true,
+    pipMapBossHud: true,
+    pipBossDesign: "1",
     overlayHidden: false,
     keybinds: {},
     defaultKeybinds: {},
@@ -2004,6 +2006,8 @@
       bannerDismissed: state.bannerDismissed,
       pipOpacity: state.pipOpacity,
       pipBossHud: state.pipBossHud,
+      pipMapBossHud: state.pipMapBossHud,
+      pipBossDesign: state.pipBossDesign,
       keybinds: state.keybinds,
       mapLayer: mapState.layer,
       mapCats: mapState.cats,
@@ -2421,6 +2425,10 @@
       if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
       if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
       if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
+      if ($("setPipMapBossHudCb")) $("setPipMapBossHudCb").checked = state.pipMapBossHud;
+      document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
+      });
       if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
     };
     const syncKeybindsToBackend = async () => {
@@ -2471,6 +2479,14 @@
         setPipBossHud(e.target.checked, true);
       });
     }
+    if ($("setPipMapBossHudCb")) {
+      $("setPipMapBossHudCb").addEventListener("change", (e) => {
+        setPipMapBossHud(e.target.checked, true);
+      });
+    }
+    document.querySelectorAll("#setDesignGroup .pip-d-btn").forEach((b) => {
+      b.addEventListener("click", () => setPipBossDesign(b.dataset.design, true));
+    });
     if ($("setCompletedModeSel")) {
       $("setCompletedModeSel").addEventListener("change", (e) => {
         mapState.completedMode = e.target.value;
@@ -2656,6 +2672,7 @@
     $("infoBannerText").innerHTML =
       `Using regulation data from <strong>ELDEN RING Reforged v2.3.9.1</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>LIVE RAM</strong>`;
     recalculateAndRender();
+    renderPipRamBadges();
     pulseSavePill();
     updateMapPlayerReadout();
   }
@@ -2768,8 +2785,13 @@
 
   function applyLiveRamPos(pos) {
     if (!pos) return;
+    const wasLive = state.ramLive;
     state.ramLive = true;
     state.ramPos = pos;
+    if (!wasLive || state.pipMode !== "off") {
+      renderPipRamBadges();
+      renderPipBossBoxes();
+    }
     updateMapPlayerReadout();
     maybeAutoSwitchPlayerLayer(pos);
     if (state.activeView === "map") {
@@ -2814,6 +2836,10 @@
       recalculateAndRender();
     }
     if (state.pipMode === "stats") renderPipStats();
+    else {
+      renderPipRamBadges();
+      renderPipBossBoxes();
+    }
     updateMapPlayerReadout();
     if (state.activeView === "map") {
       updateMapSearchList();
@@ -2823,7 +2849,7 @@
 
   function applyLiveRamBosses(bosses) {
     state.ramBosses = Array.isArray(bosses) ? bosses : [];
-    if (state.pipMode === "stats") renderPipBossBox();
+    renderPipBossBoxes();
   }
 
   function applyLiveRamPins(pins) {
@@ -3951,80 +3977,146 @@
     }
   }
 
-  function renderPipBossBox() {
-    const box = $("pipBossBox");
-    if (!box) return;
-    const bossBtn = $("pipBossBtn");
-    if (bossBtn) bossBtn.classList.toggle("active", state.pipBossHud);
-    const show = Boolean(
-      state.ramLive && state.pipBossHud && Array.isArray(state.ramBosses) && state.ramBosses.length > 0
-    );
-    box.classList.toggle("hidden", !show);
-    if (!show) {
-      box.innerHTML = "";
-      return;
+  const RAM_CHECK_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+  const RAM_CROSS_SVG = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  const STATUS_SVGS = {
+    bleed: '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5C12 2.5 5.5 10 5.5 14.8A6.5 6.5 0 0 0 18.5 14.8C18.5 10 12 2.5 12 2.5Z"/></svg>',
+    frost: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 2v20M4.5 7l15 10M19.5 7l-15 10"/></svg>',
+    rot: '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3c2 2.5 2 5 0 7 2.5-.5 4.8.5 6.2 2.5-2.2 1.2-4.5 1-6.2-.2 1.6 1.8 2 4.3.8 6.7-1.8-1.6-2.5-3.8-2.8-6-.3 2.2-1 4.4-2.8 6-1.2-2.4-.8-4.9.8-6.7-1.7 1.2-4 1.4-6.2.2C7.2 10.5 9.5 9.5 12 10c-2-2-2-4.5 0-7z"/></svg>',
+    sleep: '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14.5 3.5a8.5 8.5 0 1 0 6 14.5A7 7 0 0 1 14.5 3.5z"/></svg>',
+    poison: '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="14" r="2.2"/><circle cx="15" cy="14" r="2.2"/><path d="M12 3a8 8 0 0 0-7.5 10.7L6 18h12l1.5-4.3A8 8 0 0 0 12 3zm0 11a5.5 5.5 0 0 1-5-3.2A5.5 5.5 0 0 1 12 5.5a5.5 5.5 0 0 1 5 5.3A5.5 5.5 0 0 1 12 14z"/></svg>',
+    madness: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" aria-hidden="true"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/></svg>',
+  };
+
+  function renderRamBadgeEl(el, isLive) {
+    if (!el) return;
+    el.classList.toggle("on", Boolean(isLive));
+    el.classList.toggle("off", !isLive);
+    el.innerHTML = `${isLive ? RAM_CHECK_SVG : RAM_CROSS_SVG}<span>RAM</span>`;
+  }
+
+  function renderPipRamBadges() {
+    renderRamBadgeEl($("pipRamBadge"), state.ramLive);
+    renderRamBadgeEl($("pipMapRamBadge"), state.ramLive);
+  }
+
+  function renderStatusesForDesign(design, rawStatuses) {
+    const list = Array.isArray(rawStatuses) ? rawStatuses.filter((s) => s && !s.immune && Number(s.max) > 0) : [];
+    if (!list.length) return "";
+    if (design === "2") {
+      return `<div class="er-row-2">${list.map((s) => {
+        const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
+        const ic = STATUS_SVGS[s.key] || "";
+        return `<div class="er-med-2 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}">
+          <div class="er-med-2-fill" style="height:${pct.toFixed(1)}%"></div>
+          <div class="er-med-2-in">
+            <div class="er-st-lbl">${ic}<span>${escHtml(s.label)}</span></div>
+            <div class="er-st-num">${Math.round(s.cur)}/${Math.round(s.max)}</div>
+          </div>
+        </div>`;
+      }).join("")}</div>`;
     }
-    box.innerHTML = state.ramBosses.map((b) => {
+    if (design === "3") {
+      return `<div class="er-stack-3">${list.map((s) => {
+        const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
+        const ic = STATUS_SVGS[s.key] || "";
+        return `<div class="er-bar-3 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}">
+          <div class="er-bar-3-fill" style="width:${pct.toFixed(1)}%"></div>
+          <div class="er-bar-3-in">
+            <span class="er-st-lbl">${ic}<span>${escHtml(s.label)}</span></span>
+            <span class="er-st-num">${Math.round(s.cur)} / ${Math.round(s.max)}</span>
+          </div>
+        </div>`;
+      }).join("")}</div>`;
+    }
+    const cols3 = (list.length === 3 || list.length >= 5) ? " cols-3" : "";
+    return `<div class="er-grid-1${cols3}">${list.map((s) => {
+      const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
+      const ic = STATUS_SVGS[s.key] || "";
+      const showLbl = list.length <= 2 ? `<span>${escHtml(s.label)}</span>` : "";
+      return `<div class="er-pill-1 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}" title="${escHtml(s.label)}: ${Math.round(s.cur)}/${Math.round(s.max)}">
+        <div class="er-pill-1-fill" style="width:${pct.toFixed(1)}%"></div>
+        <div class="er-pill-1-in">
+          <span class="er-st-lbl">${ic}${showLbl}</span>
+          <span class="er-st-num">${Math.round(s.cur)}/${Math.round(s.max)}</span>
+        </div>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
+  function buildBossCardsHtml(bosses, compact) {
+    const design = state.pipBossDesign || "1";
+    return bosses.map((b) => {
       const hp = Math.max(0, Math.round(b.hp || 0));
       const maxHp = Math.max(1, Math.round(b.maxHp || 1));
       const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
       const stMax = Number(b.maxStance) || 0;
       const stCur = Math.max(0, Number(b.stance) || 0);
       const stPct = stMax > 0 ? Math.max(0, Math.min(100, (stCur / stMax) * 100)) : 0;
-      const stLbl = b.stanceKind === "poise" ? "Poise" : (b.stanceKind === "guard" ? "Guard" : "Stance");
+      const stLbl = b.stanceKind === "poise" ? "POISE" : (b.stanceKind === "guard" ? "GUARD" : "STANCE");
       const broken = Boolean(b.stanceBroken);
-      const stVal = broken
-        ? "BROKEN!"
-        : `${Math.round(stCur)} / ${Math.round(stMax)}${b.stanceReset > 0 ? ` · ${b.stanceReset.toFixed(1)}s` : ""}`;
+      const stResetTxt = b.stanceReset > 0 ? `${b.stanceReset.toFixed(1)}s` : "";
       const stRow = stMax > 0
-        ? `<div class="pip-bar-row">
-            <span class="pip-bar-lbl">${stLbl}</span>
-            <div class="pip-bar-track"><div class="pip-bar-fill stance${broken ? " broken" : ""}" style="width:${broken ? 100 : stPct.toFixed(1)}%"></div></div>
-            <span class="pip-bar-val${broken ? " broken" : ""}">${escHtml(stVal)}</span>
+        ? `<div class="er-cap-row">
+            <span class="er-cap st left"></span>
+            ${broken
+              ? `<div class="er-meter st broken"><div class="er-meter-fill er-fill-st-broken"></div><div class="er-broken-text">STANCE BROKEN &mdash; RIPOSTE READY</div></div>`
+              : `<div class="er-meter st"><div class="er-meter-fill er-fill-st" style="width:${stPct.toFixed(1)}%"></div><div class="er-meter-text"><span>${stLbl} ${Math.round(stCur)}/${Math.round(stMax)}</span><span>${stResetTxt}</span></div></div>`
+            }
+            <span class="er-cap st right"></span>
           </div>`
         : "";
-      const statuses = Array.isArray(b.statuses) ? b.statuses : [];
-      const stGrid = statuses.length
-        ? `<div class="pip-status-grid">${statuses.map((s) => {
-            if (s.immune || !s.max) {
-              return `<div class="pip-status-item">
-                <div class="pip-status-hdr"><span>${escHtml(s.label)}</span><span class="pip-status-immune">Immune</span></div>
-                <div class="pip-bar-track"><div class="pip-bar-fill ${escHtml(s.key)}" style="width:0%"></div></div>
-              </div>`;
-            }
-            const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
-            return `<div class="pip-status-item">
-              <div class="pip-status-hdr"><span>${escHtml(s.label)}</span><span class="pip-status-val">${Math.round(s.cur)}/${Math.round(s.max)}</span></div>
-              <div class="pip-bar-track"><div class="pip-bar-fill ${escHtml(s.key)}" style="width:${pct.toFixed(1)}%"></div></div>
-            </div>`;
-          }).join("")}</div>`
-        : "";
-      return `<div class="pip-boss-card">
-        <div class="pip-boss-top">
-          <span class="pip-boss-name">${escHtml(b.name || "Boss")}</span>
-          <span class="pip-boss-hp-num">${hp.toLocaleString()} / ${maxHp.toLocaleString()} (${Math.round(hpPct)}%)</span>
+      const stHtml = renderStatusesForDesign(design, b.statuses);
+      return `<div class="pip-boss-card${compact ? " compact" : ""}">
+        <div class="er-boss-name">${escHtml(b.name || "Boss")}</div>
+        <div class="er-bars-col">
+          <div class="er-cap-row">
+            <span class="er-cap left"></span>
+            <div class="er-meter hp">
+              <div class="er-meter-fill er-fill-hp" style="width:${hpPct.toFixed(1)}%"></div>
+              <div class="er-meter-text">
+                <span>${hp.toLocaleString()} / ${maxHp.toLocaleString()}</span>
+                <span>${Math.round(hpPct)}%</span>
+              </div>
+            </div>
+            <span class="er-cap right"></span>
+          </div>
+          ${stRow}
         </div>
-        <div class="pip-bar-row">
-          <span class="pip-bar-lbl">HP</span>
-          <div class="pip-bar-track"><div class="pip-bar-fill hp" style="width:${hpPct.toFixed(1)}%"></div></div>
-          <span class="pip-bar-val">${Math.round(hpPct)}%</span>
-        </div>
-        ${stRow}
-        ${stGrid}
+        ${stHtml}
       </div>`;
     }).join("");
   }
 
+  function renderPipBossBoxes() {
+    const bossBtn = $("pipBossBtn");
+    const activeEnabled = state.pipMode === "map" ? state.pipMapBossHud : state.pipBossHud;
+    if (bossBtn) bossBtn.classList.toggle("active", Boolean(activeEnabled));
+    const hasData = Boolean(state.ramLive && Array.isArray(state.ramBosses) && state.ramBosses.length > 0);
+
+    const statsBox = $("pipBossBox");
+    if (statsBox) {
+      const showStats = hasData && state.pipBossHud && state.pipMode === "stats";
+      statsBox.classList.toggle("hidden", !showStats);
+      statsBox.innerHTML = showStats ? buildBossCardsHtml(state.ramBosses, state.ramBosses.length > 1) : "";
+    }
+
+    const mapBox = $("pipMapBossBox");
+    if (mapBox) {
+      const showMap = hasData && state.pipMapBossHud && state.pipMode === "map";
+      mapBox.classList.toggle("hidden", !showMap);
+      mapBox.innerHTML = showMap ? buildBossCardsHtml(state.ramBosses, true) : "";
+    }
+  }
+
   function renderPipStats() {
-    renderPipBossBox();
+    renderPipRamBadges();
+    renderPipBossBoxes();
     const ch = state.ramLive && state.ramChar
       ? state.ramChar
       : (state.characters.find((c) => c.slot === state.activeSlot) || null);
     const chName = ch ? `${ch.name} (Lv.${ch.level})` : "Manual Stats";
     $("pipCharName").textContent = chName;
-    const badge = $("pipRamBadge");
-    badge.textContent = state.ramLive ? "LIVE RAM" : (ch ? "SAVE" : "MANUAL");
-    badge.classList.toggle("live", Boolean(state.ramLive));
 
     const vig = ch && ch.stats ? ch.stats.vig : "-";
     const mnd = ch && ch.stats ? ch.stats.mnd : "-";
@@ -4124,14 +4216,38 @@
 
   function setPipBossHud(enabled, persist = true) {
     state.pipBossHud = Boolean(enabled);
-    if ($("pipBossBtn")) $("pipBossBtn").classList.toggle("active", state.pipBossHud);
     if ($("setPipBossHudCb")) $("setPipBossHudCb").checked = state.pipBossHud;
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_hud) {
       window.pywebview.api.set_pip_boss_hud(state.pipBossHud);
     }
-    if (state.pipMode === "stats") renderPipBossBox();
+    renderPipBossBoxes();
     if (persist) persistSettings();
     return state.pipBossHud;
+  }
+
+  function setPipMapBossHud(enabled, persist = true) {
+    state.pipMapBossHud = Boolean(enabled);
+    if ($("setPipMapBossHudCb")) $("setPipMapBossHudCb").checked = state.pipMapBossHud;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_map_boss_hud) {
+      window.pywebview.api.set_pip_map_boss_hud(state.pipMapBossHud);
+    }
+    renderPipBossBoxes();
+    if (persist) persistSettings();
+    return state.pipMapBossHud;
+  }
+
+  function setPipBossDesign(design, persist = true) {
+    const d = ["1", "2", "3"].includes(String(design)) ? String(design) : "1";
+    state.pipBossDesign = d;
+    document.querySelectorAll("#pipDesignGroup .pip-d-btn, #setDesignGroup .pip-d-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.design === d);
+    });
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_design) {
+      window.pywebview.api.set_pip_boss_design(d);
+    }
+    renderPipBossBoxes();
+    if (persist) persistSettings();
+    return d;
   }
 
   async function setPipMode(mode) {
@@ -4153,6 +4269,8 @@
     }
     $("pipModeMapBtn").classList.toggle("active", next === "map");
     $("pipModeStatsBtn").classList.toggle("active", next === "stats");
+    renderPipRamBadges();
+    renderPipBossBoxes();
     if (next === "stats") renderPipStats();
 
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
@@ -4396,8 +4514,14 @@
     $("pipExitBtn").addEventListener("click", () => setPipMode("off"));
     $("pipFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
     if ($("pipBossBtn")) {
-      $("pipBossBtn").addEventListener("click", () => setPipBossHud(!state.pipBossHud, true));
+      $("pipBossBtn").addEventListener("click", () => {
+        if (state.pipMode === "map") setPipMapBossHud(!state.pipMapBossHud, true);
+        else setPipBossHud(!state.pipBossHud, true);
+      });
     }
+    document.querySelectorAll("#pipDesignGroup .pip-d-btn").forEach((b) => {
+      b.addEventListener("click", () => setPipBossDesign(b.dataset.design, true));
+    });
     $("pipTwoHandBtn").addEventListener("click", () => {
       state.twoHand = !state.twoHand;
       $("twoHandCb").checked = state.twoHand;
@@ -4657,11 +4781,10 @@
     if (typeof cfg.pipOpacity === "number" && Number.isFinite(cfg.pipOpacity)) {
       applyPipOpacity(Math.round(cfg.pipOpacity * 100), false);
     }
-    if (typeof cfg.pipBossHud === "boolean") {
-      setPipBossHud(cfg.pipBossHud, false);
-    } else {
-      setPipBossHud(true, false);
-    }
+    setPipBossHud(typeof cfg.pipBossHud === "boolean" ? cfg.pipBossHud : true, false);
+    setPipMapBossHud(typeof cfg.pipMapBossHud === "boolean" ? cfg.pipMapBossHud : true, false);
+    setPipBossDesign(typeof cfg.pipBossDesign === "string" ? cfg.pipBossDesign : "1", false);
+    renderPipRamBadges();
     if (typeof cfg.mapLayer === "string" && ["m00", "m01", "m10"].includes(cfg.mapLayer)) {
       mapState.layer = cfg.mapLayer;
       mapState.firstOpenDone = true;
@@ -5034,13 +5157,12 @@
       testBossHud() {
         const prevMode = state.pipMode;
         const prevBossHud = state.pipBossHud;
+        const prevMapBossHud = state.pipMapBossHud;
+        const prevDesign = state.pipBossDesign;
         const prevRamLive = state.ramLive;
         const prevBosses = state.ramBosses;
 
-        setPipMode("stats");
-        setPipBossHud(true, false);
-        state.ramLive = true;
-        window.__onLiveRamBosses([
+        const payload = [
           {
             slot: 0,
             name: "Margit, the Fell Omen",
@@ -5052,40 +5174,74 @@
             stanceBroken: false,
             stanceKind: "stance",
             statuses: [
-              { key: "bleed", label: "Bleed", cur: 210, max: 318, immune: false },
-              { key: "frost", label: "Frost", cur: 95, max: 318, immune: false },
-              { key: "rot", label: "Rot", cur: 0, max: 0, immune: true },
+              { key: "bleed", label: "Bleed", cur: 210, max: 318 },
+              { key: "frost", label: "Frost", cur: 95, max: 318 },
+              { key: "rot", label: "Rot", cur: 145, max: 318 },
             ],
           },
-        ]);
+        ];
 
-        const box = $("pipBossBox");
-        const shown = Boolean(box && !box.classList.contains("hidden") && box.querySelectorAll(".pip-boss-card").length === 1);
-        const txt = box ? box.textContent : "";
-        const hpTextOk = txt.includes("Margit, the Fell Omen") && txt.includes("3,120") && txt.includes("4,174");
-        const stanceOk = txt.includes("43 / 80") && txt.includes("3.4s");
-        const statusesOk = txt.includes("210/318") && txt.includes("95/318") && txt.includes("Immune");
+        setPipMode("stats");
+        setPipBossHud(true, false);
+        setPipMapBossHud(true, false);
+        setPipBossDesign("1", false);
+        state.ramLive = true;
+        renderPipRamBadges();
+        window.__onLiveRamBosses(payload);
 
+        const statsBox = $("pipBossBox");
+        const shownStats = Boolean(statsBox && !statsBox.classList.contains("hidden") && statsBox.querySelectorAll(".pip-boss-card").length === 1);
+        const txt = statsBox ? statsBox.textContent : "";
+        const hpTextOk = txt.includes("Margit, the Fell Omen") && txt.includes("3,120") && txt.includes("4,174") && !txt.includes("LOCKED") && !txt.includes("Immune");
+        const stanceOk = txt.includes("STANCE 43/80") && txt.includes("3.4s");
+        const statusesOk = txt.includes("210/318") && txt.includes("95/318") && txt.includes("145/318");
+
+        const d1Ok = Boolean(statsBox && statsBox.querySelector(".er-grid-1"));
+        setPipBossDesign("2", false);
+        const d2Ok = Boolean(statsBox && statsBox.querySelector(".er-row-2"));
+        setPipBossDesign("3", false);
+        const d3Ok = Boolean(statsBox && statsBox.querySelector(".er-stack-3"));
+        const designsOk = d1Ok && d2Ok && d3Ok;
+
+        setPipMode("map");
+        const mapBox = $("pipMapBossBox");
+        const shownMap = Boolean(mapBox && !mapBox.classList.contains("hidden") && mapBox.querySelectorAll(".pip-boss-card").length === 1);
+        const ramOnOk = Boolean($("pipMapRamBadge") && $("pipMapRamBadge").classList.contains("on") && $("pipMapRamBadge").textContent.includes("RAM"));
+
+        setPipMapBossHud(false, false);
         setPipBossHud(false, false);
-        const toggleOffHidden = Boolean(box && box.classList.contains("hidden"));
+        const toggleOffHidden = Boolean(
+          mapBox && mapBox.classList.contains("hidden") && statsBox && statsBox.classList.contains("hidden")
+        );
         $("topSettingsBtn").click();
-        const cbSyncedOff = $("setPipBossHudCb") ? !$("setPipBossHudCb").checked : false;
+        const cbSyncedOff = Boolean(
+          $("setPipBossHudCb") && !$("setPipBossHudCb").checked &&
+          $("setPipMapBossHudCb") && !$("setPipMapBossHudCb").checked
+        );
         $("settingsCloseBtn").click();
 
         setPipBossHud(true, false);
+        setPipMapBossHud(true, false);
         window.__onLiveRamStatus({ attached: false });
-        const detachCleared = Boolean(state.ramBosses.length === 0 && box && box.classList.contains("hidden"));
+        const ramOffOk = Boolean($("pipMapRamBadge") && $("pipMapRamBadge").classList.contains("off"));
+        const detachCleared = Boolean(state.ramBosses.length === 0 && mapBox && mapBox.classList.contains("hidden"));
 
         state.ramBosses = prevBosses;
         state.ramLive = prevRamLive;
+        setPipBossDesign(prevDesign, false);
         setPipBossHud(prevBossHud, false);
+        setPipMapBossHud(prevMapBossHud, false);
         setPipMode(prevMode);
+        renderPipRamBadges();
 
         return {
-          shown,
+          shownStats,
+          shownMap,
           hpTextOk,
           stanceOk,
           statusesOk,
+          designsOk,
+          ramBadgesOk: ramOnOk && ramOffOk,
           toggleOffHidden,
           detachCleared,
           settingsSynced: cbSyncedOff,
