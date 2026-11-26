@@ -16,6 +16,10 @@ Download the latest standalone `ERR_AR_Calculator.exe` from the [GitHub Releases
 
 > **One-Click In-App Map Texture Extraction**: Due to copyright, pre-rendered Elden Ring map tiles (`map_cache/`) and UI icons (`err_map_icons.json.gz`) are not bundled in the public release. If you own Elden Ring on PC, switch to the **Map** tab and click **Extract Game Maps & Icons** inside the app to extract native high-res L0 map tiles and icons directly from your local Steam/Elden Ring install.
 
+## User Guides
+- **[Quick-Start Guide (PDF, 5 pages)](docs/ERR_AR_Calculator_Quick_Start_Guide.pdf)** — fast setup, core workflows, hotkeys, and common fixes.
+- **[Complete User Guide (PDF, 14 pages)](docs/ERR_AR_Calculator_Complete_User_Guide.pdf)** — full reference covering all 25 affinities, 45 weapon classes, Respec Optimizer, defense math, 15 map categories, PiP overlay, Boss HUD designs, Buff Timers, and Settings Toggleables.
+
 ## Building from Source
 Requires Python 3.13+ on Windows:
 
