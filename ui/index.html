@@ -633,7 +633,18 @@
         <button id="settingsCloseBtn" class="banner-close" type="button" title="Close (Esc)">&times;</button>
       </div>
       <div class="settings-body">
-        <div class="settings-sec-title">Global Hotkeys (work while Elden Ring is focused)</div>
+        <div class="settings-sec-title">Mod / Regulation Source</div>
+        <div id="modSourceSection" class="mod-source-box">
+          <div id="modRegPathDisplay" class="mod-path-display">Bundled data (auto-detects running game)</div>
+          <div class="mod-source-actions">
+            <button id="modBrowseRegBtn" class="top-btn gold-outline" type="button">Browse regulation.bin...</button>
+            <button id="modReadGameBtn" class="top-btn" type="button" title="Reads live params or active ModEngine2 regulation.bin while Elden Ring is running">Read from Running Game</button>
+            <button id="modRefreshNowBtn" class="top-btn" type="button">Refresh Now</button>
+            <button id="modClearRegBtn" class="mini-link-btn" type="button" title="Reset path back to bundled data">Clear</button>
+          </div>
+          <div id="modSourceStatus" class="mod-source-status"></div>
+        </div>
+        <div class="settings-sec-title" style="margin-top:8px;">Global Hotkeys (work while Elden Ring is focused)</div>
         <div id="keybindsList" class="keybinds-list"></div>
         <div id="keybindErrorNote" class="keybind-err-note"></div>
         <div class="settings-sec-title" style="margin-top:10px;">Toggleables</div>

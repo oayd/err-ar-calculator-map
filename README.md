@@ -10,6 +10,7 @@ A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** c
 - **Always-On-Top In-Game Overlay (PiP)**: Borderless corner minimap (with decluttered nearby-only marker names and an off-screen arrow pointing to your searched target) or compact live stats & equipped AR HUD, controlled via customizable global hotkeys; per-marker name label toggles live under **Settings → Toggleables**.
 - **Live Boss & Enemy HUD (30 Hz)**: Optional Elden Ring–style enemy bar in the overlay showing live HP, Stance/Poise (including stance-broken state), and status buildup (Bleed, Frost, Rot, Sleep, Poison, Madness) for active bosses or your locked-on target, with 3 switchable layouts. Read-only offline RAM only; automatically disabled when EAC is active.
 - **Live Player Buff & Debuff Timers**: Shows strictly finite active buffs and debuffs in both the Stats and Map overlays with reversed full-to-empty clockwise radial sweep timers, crisp offline status icons, crimson `▼` debuff indicators, ≤10s expiring pulse alerts, and hover tooltips — customizable under **Settings → Toggleables**.
+- **Built-In `regulation.bin` Picker & Live-Game Mod Refresh**: Re-extract custom weapon/poise/affinity updates directly from any `regulation.bin` (with native file picker in **Settings → Mod / Regulation Source**) or pull active params straight from a running Elden Ring session (ModEngine2 / live offline RAM) — no external Smithbox or Python installation required.
 
 ## Download
 Download the latest standalone `ERR_AR_Calculator.exe` from the [GitHub Releases](../../releases) page. No Python installation or external files are required (requires Windows 10/11 with Microsoft Edge WebView2, which is built into modern Windows).
@@ -32,7 +33,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name ERR_AR_Calculator 
   --add-data "err_buff_icons.json.gz;." `
   --add-data "err_icon.ico;." `
   --add-data "ui;ui" `
-  --collect-all clr_loader --collect-all pythonnet --collect-all texture2ddecoder `
+  --collect-all clr_loader --collect-all pythonnet --collect-all texture2ddecoder --collect-all zstandard `
   err_ar_calculator.py
 ```
 

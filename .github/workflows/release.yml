@@ -40,6 +40,7 @@ jobs:
             --collect-all clr_loader `
             --collect-all pythonnet `
             --collect-all texture2ddecoder `
+            --collect-all zstandard `
             err_ar_calculator.py
 
       - name: Run WebView2 self-test

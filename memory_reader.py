@@ -3,16 +3,23 @@
 import ctypes
 import ctypes.wintypes as wt
 import math
+import os
 import re
 import struct
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    import tomllib as _tomllib
+except ImportError:
+    _tomllib = None
 
 import save_reader
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 _PROCESS_QUERY_INFORMATION = 0x0400
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_VM_READ = 0x0010
 _TH32CS_SNAPPROCESS = 0x00000002
 _TH32CS_SNAPMODULE = 0x00000008
@@ -21,6 +28,7 @@ _STILL_ACTIVE = 259
 
 _AOB_WORLD_CHR_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 0F 48 39 88"
 _AOB_GAME_DATA_MAN = "48 8B 05 ?? ?? ?? ?? 48 85 C0 74 05 48 8B 40 58 C3 C3"
+_AOB_SOLO_PARAM_REPO = "48 8B 0D ?? ?? ?? ?? 48 85 C9 0F 84 ?? ?? ?? ?? 45 33 C0 BA 8E 00 00 00"
 _AOB_CS_FE_MAN = (
     "48 8B 0D ?? ?? ?? ?? 8B DA 48 85 C9 75 ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
     "4C 8B C8 4C 8D 05 ?? ?? ?? ?? BA B4 00 00 00 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? "
@@ -77,6 +85,7 @@ def _compile_aob(pattern: str) -> bytes:
 
 _RX_WCM = re.compile(_compile_aob(_AOB_WORLD_CHR_MAN), re.DOTALL)
 _RX_GDM = re.compile(_compile_aob(_AOB_GAME_DATA_MAN), re.DOTALL)
+_RX_SPR = re.compile(_compile_aob(_AOB_SOLO_PARAM_REPO), re.DOTALL)
 _RX_FEM = re.compile(_compile_aob(_AOB_CS_FE_MAN), re.DOTALL)
 _RX_EFM = [re.compile(_compile_aob(p), re.DOTALL) for p in _AOB_EVENT_FLAG_CANDS]
 
@@ -229,6 +238,7 @@ class EldenRingMemoryReader:
         self._gdm_addr: int = 0
         self._efm_addr: int = 0
         self._fem_addr: int = 0
+        self._spr_addr: int = 0
         self._inv_off: Optional[int] = None
         self._storage_ptr_off: Optional[int] = None
         self._mp_cache: Optional[Tuple[int, int, int]] = None
@@ -248,6 +258,7 @@ class EldenRingMemoryReader:
         self._gdm_addr = 0
         self._efm_addr = 0
         self._fem_addr = 0
+        self._spr_addr = 0
         self._inv_off = None
         self._storage_ptr_off = None
         self._mp_cache = None
@@ -404,6 +415,124 @@ class EldenRingMemoryReader:
         self._efm_addr = efm
         self._fem_addr = fem
         return True
+
+    def _ensure_spr_addr(self) -> int:
+        if self._spr_addr:
+            return self._spr_addr
+        if not self._handle or not self._base:
+            return 0
+        dos = self._read_bytes(self._base, 0x1000)
+        if not dos or len(dos) < 0x100 or dos[:2] != b"MZ":
+            return 0
+        pe_off = struct.unpack_from("<I", dos, 0x3C)[0]
+        if pe_off + 24 >= len(dos) or dos[pe_off : pe_off + 4] != b"PE\x00\x00":
+            return 0
+        num_sec = struct.unpack_from("<H", dos, pe_off + 6)[0]
+        opt_sz = struct.unpack_from("<H", dos, pe_off + 20)[0]
+        sec_off = pe_off + 24 + opt_sz
+        text_va = text_sz = 0
+        for i in range(num_sec):
+            off = sec_off + i * 40
+            if off + 40 > len(dos):
+                break
+            sec = dos[off : off + 40]
+            if sec[:8].rstrip(b"\x00").decode("ascii", errors="ignore") == ".text":
+                vsz, va = struct.unpack_from("<II", sec, 8)
+                text_va, text_sz = va, vsz
+                break
+        if not text_va or not text_sz or text_sz > 0x6000000:
+            return 0
+        buf = bytearray()
+        chunk = 1024 * 1024
+        for off in range(0, text_sz, chunk):
+            n = min(chunk, text_sz - off)
+            part = self._read_bytes(self._base + text_va + off, n)
+            buf.extend(part if part else b"\x00" * n)
+        m = _RX_SPR.search(bytes(buf))
+        if m:
+            idx = m.start()
+            disp = struct.unpack_from("<i", buf, idx + 3)[0]
+            self._spr_addr = self._base + text_va + idx + 7 + disp
+        return self._spr_addr
+
+    def _read_param_res_name(self, addr: int) -> str:
+        name = self._read_menu_string(addr)
+        if name:
+            return name
+        raw = self._read_bytes(addr, 0x20)
+        if not raw or len(raw) < 0x20:
+            return ""
+        sz, cap = struct.unpack_from("<QQ", raw, 0x10)
+        if 0 < sz <= 128 and sz <= cap <= 1024:
+            if cap < 8:
+                return raw[: sz * 2].decode("utf-16-le", errors="replace").split("\x00")[0].strip()
+            ptr = struct.unpack_from("<Q", raw, 0x00)[0]
+            if ptr >= 0x10000:
+                sbuf = self._read_bytes(ptr, sz * 2)
+                if sbuf:
+                    return sbuf.decode("utf-16-le", errors="replace").split("\x00")[0].strip()
+        return ""
+
+    def read_live_params(self, wanted_names: Set[str]) -> Optional[Dict[str, bytes]]:
+        """Read raw binary PARAM buffers directly from SoloParamRepositoryImp in offline RAM."""
+        if _is_eac_running() or not self.ensure_attached(min_retry_secs=0.2):
+            return None
+        spr_addr = self._ensure_spr_addr()
+        if not spr_addr:
+            return None
+        repo = self._ru64(spr_addr)
+        if repo < 0x10000:
+            return None
+
+        wanted = {w.lower() for w in wanted_names}
+        out: Dict[str, bytes] = {}
+        for i in range(256):
+            cap = self._ru64(repo + 0x88 + i * 0x48)
+            if cap < 0x10000:
+                continue
+            pname = self._read_param_res_name(cap + 0x18)
+            if not pname:
+                continue
+            key = pname.lower() + ".param"
+            if key not in wanted or key in out:
+                continue
+            p_hdr = self._ru64(cap + 0x80)
+            if p_hdr < 0x10000:
+                continue
+            p_data = self._ru64(p_hdr + 0x80)
+            if p_data < 0x10000:
+                p_data = p_hdr
+            hdr_bytes = self._read_bytes(p_data, 0x48)
+            if not hdr_bytes or len(hdr_bytes) < 0x48:
+                continue
+            row_cnt = struct.unpack_from("<H", hdr_bytes, 0x0A)[0]
+            fmt2d = hdr_bytes[0x2D]
+            if not (1 <= row_cnt <= 200000) or not (fmt2d & 0x04):
+                continue
+            tbl_hdr = self._read_bytes(p_data + 0x40, min(row_cnt, 4) * 24)
+            if not tbl_hdr or len(tbl_hdr) < 24:
+                continue
+            last_entry = self._read_bytes(p_data + 0x40 + (row_cnt - 1) * 24, 24)
+            if not last_entry:
+                continue
+            first_off = struct.unpack_from("<q", tbl_hdr, 8)[0]
+            last_off = struct.unpack_from("<q", last_entry, 8)[0]
+            if first_off < 0x40 or last_off < first_off:
+                continue
+            stride = 1024
+            if row_cnt >= 2:
+                second_off = struct.unpack_from("<q", tbl_hdr, 32)[0]
+                if second_off > first_off:
+                    stride = second_off - first_off
+            total_sz = last_off + max(stride, 1024)
+            if total_sz > 32 * 1024 * 1024:
+                continue
+            raw_param = self._read_bytes(p_data, total_sz)
+            if raw_param:
+                out[key] = raw_param
+                if len(out) == len(wanted):
+                    return out
+        return out if len(out) == len(wanted) else None
 
     def _get_player_ins(self) -> int:
         if not self._wcm_addr:
@@ -895,3 +1024,204 @@ class EldenRingMemoryReader:
             node = nxt
 
         return _parse_player_sp_effects(nodes)
+
+
+def _get_process_image_path(pid: int) -> Optional[str]:
+    h = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not h:
+        return None
+    try:
+        buf = ctypes.create_unicode_buffer(1024)
+        sz = wt.DWORD(1024)
+        if _kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(sz)):
+            return buf.value
+        return None
+    finally:
+        _kernel32.CloseHandle(h)
+
+
+def _find_mod_loader_dlls(pid: int, game_dir: Optional[str]) -> List[str]:
+    snap = _kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPMODULE | _TH32CS_SNAPMODULE32, int(pid))
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return []
+    win_dir = os.path.normcase(os.path.abspath(os.environ.get("SystemRoot") or r"C:\Windows"))
+    gdir_norm = os.path.normcase(os.path.abspath(game_dir)) if game_dir else ""
+    hits: List[Tuple[int, str]] = []
+    try:
+        me = _MODULEENTRY32W()
+        me.dwSize = ctypes.sizeof(me)
+        if not _kernel32.Module32FirstW(snap, ctypes.byref(me)):
+            return []
+        while True:
+            mod_l = me.szModule.lower()
+            exe_p = me.szExePath or ""
+            exe_norm = os.path.normcase(os.path.abspath(exe_p)) if exe_p else ""
+            if exe_p and mod_l.endswith(".dll"):
+                if "modengine2" in mod_l:
+                    hits.append((0, exe_p))
+                elif "me3" in mod_l:
+                    hits.append((1, exe_p))
+                elif any(k in mod_l for k in ("reforged", "convergence", "ersc", "ertransmogrify")):
+                    hits.append((2, exe_p))
+                elif not exe_norm.startswith(win_dir + os.sep) and (
+                    not gdir_norm or os.path.dirname(exe_norm) != gdir_norm
+                ):
+                    hits.append((3, exe_p))
+            if not _kernel32.Module32NextW(snap, ctypes.byref(me)):
+                break
+    finally:
+        _kernel32.CloseHandle(snap)
+    hits.sort(key=lambda x: x[0])
+    out: List[str] = []
+    seen: Set[str] = set()
+    for _, p in hits:
+        np = os.path.normcase(os.path.abspath(p))
+        if np not in seen:
+            seen.add(np)
+            out.append(p)
+    return out
+
+
+def _parse_me2_config_mods(toml_path: str) -> List[str]:
+    try:
+        with open(toml_path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return []
+    paths: List[str] = []
+    if _tomllib is not None:
+        try:
+            doc = _tomllib.loads(raw.decode("utf-8", errors="ignore"))
+            me2 = doc.get("extension", {}).get("mod_loader", {})
+            for m in me2.get("mods", []) or []:
+                if isinstance(m, dict) and m.get("enabled", False) and m.get("path"):
+                    paths.append(str(m["path"]))
+            return paths
+        except Exception:
+            pass
+    txt = raw.decode("utf-8", errors="ignore")
+    for m in re.finditer(r'enabled\s*=\s*true[^}]*?path\s*=\s*["\']([^"\']+)["\']', txt, re.DOTALL | re.IGNORECASE):
+        paths.append(m.group(1))
+    return paths
+
+
+def _parse_me3_config_mods(me3_path: str) -> List[str]:
+    try:
+        with open(me3_path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return []
+    paths: List[str] = []
+    if _tomllib is not None:
+        try:
+            doc = _tomllib.loads(raw.decode("utf-8", errors="ignore"))
+            for pkg in doc.get("packages", []) or []:
+                if isinstance(pkg, dict) and pkg.get("path"):
+                    paths.append(str(pkg["path"]))
+            return paths
+        except Exception:
+            pass
+    txt = raw.decode("utf-8", errors="ignore")
+    for m in re.finditer(r'\[\[packages\]\][^\[]*?path\s*=\s*["\']([^"\']+)["\']', txt, re.DOTALL | re.IGNORECASE):
+        paths.append(m.group(1))
+    return paths
+
+
+def detect_running_game_regulation() -> Dict[str, Any]:
+    """Inspect running eldenring.exe + ModEngine2/ModEngine3/mod DLLs to locate active regulation.bin."""
+    pid = _find_process_pid("eldenring.exe")
+    if not pid:
+        return {"running": False, "eac": _is_eac_running()}
+
+    eac = _is_eac_running()
+    exe_path = _get_process_image_path(pid)
+    game_dir = os.path.dirname(exe_path) if exe_path else None
+    mod_dlls = _find_mod_loader_dlls(pid, game_dir)
+    mod_dir = None
+    reg_path = None
+    source = "vanilla"
+
+    for dll_path in mod_dlls:
+        dll_name = os.path.basename(dll_path).lower()
+        loader_tag = (
+            "modengine3"
+            if "me3" in dll_name
+            else ("modengine2" if "modengine2" in dll_name else "modloader")
+        )
+        search_roots: List[str] = []
+        cur = os.path.dirname(dll_path)
+        for _ in range(5):
+            if cur and cur not in search_roots:
+                search_roots.append(cur)
+            parent = os.path.dirname(cur)
+            if not parent or parent == cur:
+                break
+            cur = parent
+
+        for root in search_roots:
+            try:
+                files = os.listdir(root)
+            except OSError:
+                files = []
+            me3s = sorted(
+                [os.path.join(root, fn) for fn in files if fn.lower().endswith(".me3")],
+                key=lambda p: (0 if "offline" in os.path.basename(p).lower() else 1, p),
+            )
+            for mp_file in me3s:
+                for mp in _parse_me3_config_mods(mp_file):
+                    cand_dir = mp if os.path.isabs(mp) else os.path.abspath(os.path.join(root, mp))
+                    cand_reg = os.path.join(cand_dir, "regulation.bin")
+                    if os.path.isfile(cand_reg):
+                        mod_dir = cand_dir
+                        reg_path = cand_reg
+                        source = "modengine3"
+                        break
+                if reg_path:
+                    break
+            if reg_path:
+                break
+
+            tomls = sorted(
+                [os.path.join(root, fn) for fn in files if fn.lower().endswith(".toml")],
+                key=lambda p: (0 if "config_eldenring" in os.path.basename(p).lower() else 1, p),
+            )
+            for tp in tomls:
+                for mp in _parse_me2_config_mods(tp):
+                    cand_dir = mp if os.path.isabs(mp) else os.path.abspath(os.path.join(root, mp))
+                    cand_reg = os.path.join(cand_dir, "regulation.bin")
+                    if os.path.isfile(cand_reg):
+                        mod_dir = cand_dir
+                        reg_path = cand_reg
+                        source = "modengine2"
+                        break
+                if reg_path:
+                    break
+            if reg_path:
+                break
+
+            cand_mod = os.path.join(root, "mod")
+            cand_reg = os.path.join(cand_mod, "regulation.bin")
+            if os.path.isfile(cand_reg):
+                mod_dir = cand_mod
+                reg_path = cand_reg
+                source = loader_tag
+                break
+        if reg_path:
+            break
+
+    if not reg_path and game_dir:
+        vanilla_reg = os.path.join(game_dir, "regulation.bin")
+        if os.path.isfile(vanilla_reg):
+            reg_path = vanilla_reg
+            mod_dir = game_dir
+            source = "vanilla"
+
+    return {
+        "running": True,
+        "pid": pid,
+        "eac": eac,
+        "gameDir": game_dir,
+        "modDir": mod_dir,
+        "regulationPath": reg_path,
+        "source": source,
+    }

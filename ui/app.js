@@ -470,6 +470,7 @@
     hotkeyErrors: {},
     recordingKeybindAction: null,
     bannerDismissed: false,
+    modSource: null,
     lastRenderedKey: "",
     domColsSpec: [],
   };
@@ -2144,28 +2145,125 @@
       if (!drw.classList.contains("hidden") && state.activeTab === "compare") closeDrawer();
       else openDrawer("compare");
     });
-    $("topRefreshModBtn").addEventListener("click", async () => {
+    const applyRefreshedPayload = (res, statusEl = null) => {
+      if (!res || !res.ok || !res.data) return false;
+      state.data = res.data;
+      state.byId.clear();
+      state.byBase.clear();
+      buildSearchTags(state.data);
+      populateGearDropdowns();
+      syncGearDropdownValues();
+      recalculateAndRender();
+      if (res.modSource) state.modSource = res.modSource;
+      const srcTxt = res.source ? String(res.source) : "regulation data";
+      const chName = (state.characters.find((c) => c.slot === state.activeSlot) || {}).name;
+      $("infoBannerText").innerHTML = chName
+        ? `Refreshed <strong>${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons</strong> from <strong>${escHtml(srcTxt)}</strong> &middot; Character: <strong>${escHtml(chName)}</strong>`
+        : `Refreshed <strong>${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons</strong> from <strong>${escHtml(srcTxt)}</strong>`;
+      if (statusEl) {
+        statusEl.className = "mod-source-status ok";
+        statusEl.textContent = `Loaded ${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons from ${srcTxt}`;
+      }
+      if ($("modRegPathDisplay")) syncModSourceUi();
+      return true;
+    };
+
+    const runModRefresh = async (mode = "auto", customPath = null, statusEl = null) => {
       const btn = $("topRefreshModBtn");
+      const prevTxt = btn.textContent;
       btn.disabled = true;
       btn.textContent = "Extracting...";
+      if (statusEl) {
+        statusEl.className = "mod-source-status";
+        statusEl.textContent = mode === "game" ? "Reading active game / regulation data..." : "Extracting regulation data...";
+      }
       try {
-        const res = await window.pywebview.api.refresh_mod_data();
+        let res = await window.pywebview.api.refresh_mod_data(mode, customPath);
+        if (res && res.needsPicker && mode === "auto") {
+          const picked = await window.pywebview.api.browse_regulation();
+          if (!picked || picked.cancelled) {
+            if (statusEl) {
+              statusEl.className = "mod-source-status";
+              statusEl.textContent = "Selection cancelled.";
+            }
+            return;
+          }
+          if (picked.ok && picked.regulationPath) {
+            res = await window.pywebview.api.refresh_mod_data("file", picked.regulationPath);
+          } else {
+            res = picked;
+          }
+        }
         if (res && res.ok) {
-          state.data = res.data;
-          state.byId.clear();
-          state.byBase.clear();
-          buildSearchTags(state.data);
-          populateGearDropdowns();
-          syncGearDropdownValues();
-          recalculateAndRender();
+          applyRefreshedPayload(res, statusEl);
         } else {
-          alert((res && res.message) || "extract_err_data.py not found alongside executable.");
+          const msg = (res && res.message) || "Failed to refresh mod data.";
+          if (statusEl) {
+            statusEl.className = "mod-source-status err";
+            statusEl.textContent = msg;
+          } else {
+            alert(msg);
+          }
         }
       } finally {
         btn.disabled = false;
-        btn.textContent = "Refresh Mod";
+        btn.textContent = prevTxt;
       }
-    });
+    };
+
+    const syncModSourceUi = async (refreshLiveInfo = false) => {
+      if (refreshLiveInfo && window.pywebview && window.pywebview.api && window.pywebview.api.get_mod_source_info) {
+        try {
+          state.modSource = await window.pywebview.api.get_mod_source_info();
+        } catch (_) {}
+      }
+      const disp = $("modRegPathDisplay");
+      if (!disp) return;
+      const ms = state.modSource || {};
+      if (ms.regulationPath) {
+        disp.textContent = ms.regulationPath;
+      } else if (ms.runningGame && ms.runningGame.running) {
+        const rg = ms.runningGame;
+        disp.textContent = rg.regulationPath
+          ? `Auto (Running Game): ${rg.regulationPath}`
+          : `Auto (Running Game PID ${rg.pid}${rg.eac ? " - EAC Active" : " - Offline RAM Ready"})`;
+      } else {
+        disp.textContent = `Bundled (${ms.modLabel || "ERR v2.3.10.1"}) — auto-detects running game or browse regulation.bin`;
+      }
+    };
+    window.__syncModSourceUi = syncModSourceUi;
+
+    $("topRefreshModBtn").addEventListener("click", () => runModRefresh("auto", null, null));
+    if ($("modBrowseRegBtn")) {
+      $("modBrowseRegBtn").addEventListener("click", async () => {
+        const stEl = $("modSourceStatus");
+        const picked = await window.pywebview.api.browse_regulation();
+        if (!picked || picked.cancelled) return;
+        if (picked.ok && picked.regulationPath) {
+          await runModRefresh("file", picked.regulationPath, stEl);
+        } else if (stEl) {
+          stEl.className = "mod-source-status err";
+          stEl.textContent = (picked && picked.message) || "Failed to select regulation.bin.";
+        }
+      });
+    }
+    if ($("modReadGameBtn")) {
+      $("modReadGameBtn").addEventListener("click", () => runModRefresh("game", null, $("modSourceStatus")));
+    }
+    if ($("modRefreshNowBtn")) {
+      $("modRefreshNowBtn").addEventListener("click", () => runModRefresh("auto", null, $("modSourceStatus")));
+    }
+    if ($("modClearRegBtn")) {
+      $("modClearRegBtn").addEventListener("click", async () => {
+        const res = await window.pywebview.api.clear_regulation_path();
+        if (res && res.modSource) state.modSource = res.modSource;
+        await syncModSourceUi(true);
+        if ($("modSourceStatus")) {
+          $("modSourceStatus").className = "mod-source-status";
+          $("modSourceStatus").textContent = "Cleared saved regulation.bin path.";
+        }
+      });
+    }
     $("topGearBtn").addEventListener("click", () => {
       $("gearPanel").classList.toggle("hidden");
       setTimeout(() => renderVirtualViewport(true), 20);
@@ -2530,6 +2628,7 @@
         hideErHoverTip();
       } else {
         renderKeybindsUi();
+        if (window.__syncModSourceUi) window.__syncModSourceUi(true);
       }
       mod.classList.toggle("hidden", !open);
     };
@@ -5359,6 +5458,7 @@
     state.data = payload.data;
     state.enemyPresets = payload.enemyPresets || { "Raw AR (No Defense)": null };
     state.buffIcons = payload.buffIcons || { icons: {}, iconMap: {}, spMeta: {} };
+    state.modSource = payload.modSource || null;
     buildSearchTags(state.data);
     buildAffinitySidebar();
     buildWeaponTypeTree();
@@ -6098,6 +6198,26 @@
           hiddenWhenOffOk,
           nearbyFilterOk,
           resetLabelsOk,
+        };
+      },
+      testModSourceUi() {
+        $("topSettingsBtn").click();
+        const box = $("modSourceSection");
+        const b1 = $("modBrowseRegBtn");
+        const b2 = $("modReadGameBtn");
+        const b3 = $("modRefreshNowBtn");
+        const b4 = $("modClearRegBtn");
+        const disp = $("modRegPathDisplay");
+        const ok = Boolean(
+          box && !box.closest(".hidden") &&
+          b1 && b2 && b3 && b4 && disp && disp.textContent.trim().length > 0
+        );
+        $("settingsCloseBtn").click();
+        return {
+          sectionPresent: Boolean(box),
+          buttonsPresent: Boolean(b1 && b2 && b3 && b4),
+          displayPopulated: Boolean(disp && disp.textContent.trim().length > 0),
+          ok,
         };
       },
       startMapImagesTest() {

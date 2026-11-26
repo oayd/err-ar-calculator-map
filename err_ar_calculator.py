@@ -15,6 +15,7 @@ import webview
 import ar_engine
 import game_map_extractor
 import memory_reader
+import regulation_extractor
 import save_reader
 
 
@@ -357,6 +358,7 @@ class CalculatorApi:
         self._save_pos_key: Optional[str] = None
         cfg0 = self._load_settings()
         self._live_watch: bool = bool(cfg0.get("liveWatch", True))
+        self._regulation_path: str = str(cfg0.get("regulationPath") or "").strip()
         self._watcher_stop = threading.Event()
         self._watcher_thread: Optional[threading.Thread] = None
         self._map_data: Optional[Dict[str, Any]] = None
@@ -495,6 +497,7 @@ class CalculatorApi:
             "defaultKeybinds": dict(DEFAULT_KEYBINDS),
             "hotkeyErrors": dict(self._hotkey_errors),
             "buffIcons": self.get_buff_icons(),
+            "modSource": self.get_mod_source_info(),
             "selfTestMode": self._self_test_mode,
         }
 
@@ -1260,32 +1263,187 @@ class CalculatorApi:
             )
         return {"ms": ms, "entries": out}
 
-    def refresh_mod_data(self) -> Dict[str, Any]:
-        script_path = os.path.join(app_base_dir(), "extract_err_data.py")
-        if not os.path.exists(script_path):
+    def _persist_regulation_path(self, path_str: str) -> None:
+        self._regulation_path = str(path_str or "").strip()
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            if self._regulation_path:
+                cfg["regulationPath"] = self._regulation_path
+            else:
+                cfg.pop("regulationPath", None)
+            self.save_settings(cfg)
+
+    def _reload_extracted_payload(self, payload: Dict[str, Any]) -> None:
+        by_id: Dict[int, Dict] = {}
+        by_base: Dict[int, List[Dict]] = {}
+        for w in payload["weapons"]:
+            by_id[w["id"]] = w
+            by_base.setdefault(w["baseId"], []).append(w)
+        payload["_byId"] = by_id
+        payload["_byBase"] = by_base
+        self._data = payload
+        self._known_weapon_ids = set(by_id.keys())
+        self._known_armor_ids = {int(k) for k in (payload.get("armors") or {}).keys() if int(k) > 10300}
+        self._known_talisman_ids = {int(k) for k in (payload.get("talismans") or {}).keys()}
+
+    def get_mod_source_info(self) -> Dict[str, Any]:
+        return {
+            "regulationPath": self._regulation_path,
+            "runningGame": memory_reader.detect_running_game_regulation(),
+            "modLabel": str(self._data.get("mod", "")),
+            "weaponCount": len(self._data.get("weapons", [])),
+        }
+
+    REGULATION_FILE_TYPES = ("Regulation File (*.bin)", "All files (*.*)")
+
+    def browse_regulation(self) -> Dict[str, Any]:
+        if not self._window or self._self_test_mode:
+            return {"cancelled": True}
+        init_dir = ""
+        if self._regulation_path and os.path.exists(self._regulation_path):
+            init_dir = os.path.dirname(self._regulation_path)
+        else:
+            rg = memory_reader.detect_running_game_regulation()
+            init_dir = rg.get("modDir") or rg.get("gameDir") or game_map_extractor.detect_elden_ring_game_dir() or ""
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.OPEN,
+            directory=init_dir if os.path.isdir(init_dir) else "",
+            allow_multiple=False,
+            file_types=self.REGULATION_FILE_TYPES,
+        )
+        if not chosen:
+            return {"cancelled": True}
+        path = os.path.abspath(chosen[0] if isinstance(chosen, (list, tuple)) else chosen)
+        if not os.path.isfile(path):
+            return {"ok": False, "cancelled": False, "message": "Selected file does not exist."}
+        self._persist_regulation_path(path)
+        return {"ok": True, "cancelled": False, "regulationPath": path}
+
+    def clear_regulation_path(self) -> Dict[str, Any]:
+        self._persist_regulation_path("")
+        return {"ok": True, "modSource": self.get_mod_source_info()}
+
+    def refresh_mod_data(self, mode: str = "auto", custom_path: Optional[str] = None) -> Dict[str, Any]:
+        out_path = os.path.join(app_base_dir(), "err_weapon_data.json.gz")
+        game_dir = game_map_extractor.detect_elden_ring_game_dir()
+        target_path = str(custom_path or "").strip() or self._regulation_path
+
+        use_mode = mode if mode in ("auto", "file", "game") else "auto"
+        running_info = memory_reader.detect_running_game_regulation()
+        if use_mode == "auto":
+            if target_path and os.path.isfile(target_path):
+                use_mode = "file"
+            elif running_info.get("running"):
+                use_mode = "game"
+            else:
+                return {
+                    "ok": False,
+                    "needsPicker": True,
+                    "message": "Select regulation.bin or launch Elden Ring to refresh mod data.",
+                    "modSource": self.get_mod_source_info(),
+                }
+
+        try:
+            if use_mode == "file":
+                if not target_path or not os.path.isfile(target_path):
+                    return {
+                        "ok": False,
+                        "needsPicker": True,
+                        "message": "Configured regulation.bin file was not found.",
+                        "modSource": self.get_mod_source_info(),
+                    }
+                payload = regulation_extractor.extract_from_regulation(
+                    target_path,
+                    out_path,
+                    fallback_data=self._data,
+                    game_dir=game_dir or running_info.get("gameDir"),
+                )
+                self._persist_regulation_path(os.path.abspath(target_path))
+                self._reload_extracted_payload(payload)
+                return {
+                    "ok": True,
+                    "source": os.path.abspath(target_path),
+                    "sourceKind": "file",
+                    "weaponCount": len(payload["weapons"]),
+                    "modSource": self.get_mod_source_info(),
+                    "data": clean_data_for_ui(self._data),
+                }
+
+            # use_mode == "game"
+            if not running_info.get("running"):
+                return {
+                    "ok": False,
+                    "notRunning": True,
+                    "message": "Elden Ring is not currently running. Launch the game first or use Browse regulation.bin.",
+                    "modSource": self.get_mod_source_info(),
+                }
+
+            gdir = running_info.get("gameDir") or game_dir
+            mdir = running_info.get("modDir")
+            reg_disk = running_info.get("regulationPath")
+
+            # Try live offline RAM params first when EAC is off
+            live_params = None
+            if not running_info.get("eac"):
+                try:
+                    live_params = self._mem.read_live_params(set(regulation_extractor.REQUIRED_PARAM_NAMES))
+                except Exception:
+                    live_params = None
+
+            if live_params:
+                payload = regulation_extractor.build_weapon_payload_from_params(
+                    live_params,
+                    mod_dir=mdir,
+                    game_dir=gdir,
+                    fallback_data=self._data,
+                )
+                if len(payload.get("weapons", [])) >= 100:
+                    regulation_extractor.write_weapon_payload(payload, out_path)
+                    self._reload_extracted_payload(payload)
+                    src_label = f"Live Game RAM ({os.path.basename(mdir) if mdir else 'eldenring.exe'})"
+                    return {
+                        "ok": True,
+                        "source": src_label,
+                        "sourceKind": "ram",
+                        "weaponCount": len(payload["weapons"]),
+                        "modSource": self.get_mod_source_info(),
+                        "data": clean_data_for_ui(self._data),
+                    }
+
+            if reg_disk and os.path.isfile(reg_disk):
+                payload = regulation_extractor.extract_from_regulation(
+                    reg_disk,
+                    out_path,
+                    fallback_data=self._data,
+                    game_dir=gdir,
+                )
+                if len(payload.get("weapons", [])) < 100:
+                    return {
+                        "ok": False,
+                        "message": f"Extracted too few weapons ({len(payload.get('weapons', []))}) from {reg_disk}.",
+                        "modSource": self.get_mod_source_info(),
+                    }
+                self._reload_extracted_payload(payload)
+                return {
+                    "ok": True,
+                    "source": reg_disk,
+                    "sourceKind": running_info.get("source") or "game",
+                    "weaponCount": len(payload["weapons"]),
+                    "modSource": self.get_mod_source_info(),
+                    "data": clean_data_for_ui(self._data),
+                }
+
             return {
                 "ok": False,
-                "message": "extract_err_data.py was not found next to the application.",
+                "message": "Elden Ring is running, but active params and regulation.bin could not be located (try Browse regulation.bin).",
+                "modSource": self.get_mod_source_info(),
             }
-        py_exe = None
-        if not getattr(sys, "frozen", False):
-            py_exe = sys.executable
-        else:
-            for cand in (r"C:\Python313\python.exe", shutil.which("python"), shutil.which("py")):
-                if cand and os.path.exists(cand):
-                    py_exe = cand
-                    break
-        if not py_exe:
-            return {"ok": False, "message": "Python interpreter not found to run extract_err_data.py."}
-
-        proc = subprocess.run([py_exe, script_path], capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            msg = (proc.stderr or proc.stdout or f"Extractor exited with code {proc.returncode}").strip()
-            return {"ok": False, "message": msg}
-
-        self._data = load_weapon_data()
-        self._known_weapon_ids = set(self._data["_byId"].keys())
-        return {"ok": True, "data": clean_data_for_ui(self._data)}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "message": f"Failed to extract regulation data: {exc}",
+                "modSource": self.get_mod_source_info(),
+            }
 
     def save_settings(self, cfg: Dict[str, Any]) -> bool:
         if self._self_test_mode:
@@ -1294,6 +1452,10 @@ class CalculatorApi:
             merged = dict(cfg)
             if self._pip_bounds:
                 merged["pipBounds"] = dict(self._pip_bounds)
+            if self._regulation_path and "regulationPath" not in merged:
+                merged["regulationPath"] = self._regulation_path
+            elif not self._regulation_path and "regulationPath" not in merged:
+                merged.pop("regulationPath", None)
             merged.setdefault("keybinds", dict(DEFAULT_KEYBINDS))
             with open(settings_file_path(), "w", encoding="utf-8") as fh:
                 json.dump(merged, fh, indent=2)
@@ -1642,6 +1804,13 @@ def run_self_test(report_path: Optional[str]):
             assert pb_res and all(pb_res.values()), f"Player buffs/Toggleables test failed: {pb_res}"
             ml_res = w.evaluate_js("window.__ERR_TEST.testMapLabels()")
             assert ml_res and all(ml_res.values()), f"Map labels test failed: {ml_res}"
+            mod_info = api.get_mod_source_info()
+            assert "regulationPath" in mod_info and "runningGame" in mod_info and mod_info.get("weaponCount", 0) >= 6000, f"Bad mod info: {mod_info}"
+            from webview.platforms import winforms as _wv_winforms
+            for _ft in CalculatorApi.REGULATION_FILE_TYPES:
+                _wv_winforms.parse_file_type(_ft)
+            ms_res = w.evaluate_js("window.__ERR_TEST.testModSourceUi()")
+            assert ms_res and all(ms_res.values()), f"Mod source UI test failed: {ms_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1680,6 +1849,7 @@ def run_self_test(report_path: Optional[str]):
                 f"BUFF_ICONS_COUNT={len(b_pack.get('icons', {}))}",
                 f"PLAYER_BUFFS_OK=True",
                 f"MAP_LABELS_OK=True",
+                f"MOD_SOURCE_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]
