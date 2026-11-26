@@ -1,50 +1,41 @@
-# Elden Ring Weapon Calculator & Map (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.0.0: UI Update (ERR v2.3.10.1)
 
-A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** combining an exact weapon AR & build calculator, an interactive live map, and an always-on-top in-game overlay.
+A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
 
-## Features
-- **Exact ERR Weapon & Build Calculator**: Calculates AR, spell scaling, status buildup, and effective damage across all ERR weapons and custom affinities — including armor bonuses, talismans, greases, Physick tears, and buffs.
-- **Respec Optimizer, Scaling Curves & Compare**: Find the best stat spread for any weapon, visualize softcaps, and compare weapons side by side.
-- **Interactive Live Map (Base Game, Underground & DLC)**: Over 4,200 searchable markers (Sites of Grace, bosses, weapons, talismans, merchants, upgrade materials, and collectibles) with live player tracking, automatic map layer switching, and one-click extraction of native game map tiles & icons from your install.
-- **Auto Progress Tracking & In-Game Pins**: Automatically marks collected items, defeated bosses, and discovered Graces from your save or live offline game, and displays your in-game blue beacons and green map stamps.
-- **Always-On-Top In-Game Overlay (PiP)**: Borderless corner minimap (with decluttered nearby-only marker names and an off-screen arrow pointing to your searched target) or compact live stats & equipped AR HUD, controlled via customizable global hotkeys; per-marker name label toggles live under **Settings → Toggleables**.
-- **Live Boss & Enemy HUD (30 Hz)**: Optional Elden Ring–style enemy bar in the overlay showing live HP, Stance/Poise (including stance-broken state), and status buildup (Bleed, Frost, Rot, Sleep, Poison, Madness) for active bosses or your locked-on target, with 3 switchable layouts. Read-only offline RAM only; automatically disabled when EAC is active.
-- **Live Player Buff & Debuff Timers**: Shows strictly finite active buffs and debuffs in both the Stats and Map overlays with reversed full-to-empty clockwise radial sweep timers, crisp offline status icons, crimson `▼` debuff indicators, ≤10s expiring pulse alerts, and hover tooltips — customizable under **Settings → Toggleables**.
-- **Built-In `regulation.bin` Picker & Live-Game Mod Refresh**: Re-extract custom weapon/poise/affinity updates directly from any `regulation.bin` (with native file picker in **Settings → Mod / Regulation Source**) or pull active params straight from a running Elden Ring session (ModEngine2 / live offline RAM) — no external Smithbox or Python installation required.
+## What's New in v2.0.0: UI Update
+- **Authentic Elden Ring UI Overhaul**: Rebuilt navigation (`Equipment`, `Armory`, `Map`, `PiP Viewer`, `System`), status effect icons, 24 ERR affinity icons, 44 weapon-class icons, prompt-glyph theme switcher (`Auto`, `Keyboard & Mouse`, `Xbox`, `PS5`), and contextual footer prompts.
+- **Equipment Tab**: Native 3-column Elden Ring equipment screen showing `R1–R3`, `L1–L3`, Arrows, Bolts, Armor, Talismans, and Memorized Spells with an Armament Detail card (Attack Power, Guarded Damage Negation, Scaling & Passive Effects), Status Summary panel (`F` to cycle), Slot Picker, and one-click `Open in Armory`.
+- **Stacked HUD Overlay & Dynamic Boss Bar**:
+  - **Stacked `HUD` Mode** combines the live corner minimap (with distance-based marker labels in `px` & off-screen search arrow), floating buff timers, equipped weapons, and attribute summary in one unified borderless window.
+  - **Adaptive Multi-Row PiP Bar**: Automatically wraps cleanly into dense rows without wasted whitespace when resized narrow.
+  - **Two Clean Boss Bar Placements**: Choose **Show Over Map** (floating overlay with zero map resize) or **Show Below** (pops out cleanly below the window with zero clipping and zero minimap snap).
+  - **Live Applied AR & Automatic 1H/2H Detection**: Reads active offline `SpecialEffect`s and weapon enchants/greases in real time, automatically detects `1H` / `2 (RH)` / `2 (LH)` stance from RAM, and offers **3 selectable 1H/2H Grip Icon placements** in **PiP Overlay Controls** (`Active Weapon Emblem`, `Character Header Medallion`, `Minimap Corner Emblem`).
+
+## Core Features
+- **Exact ERR Weapon & Build Calculator (Armory)**: Calculates raw AR, effective AR vs. boss defenses, spell scaling, and status buildup across all 6,478 unmodded ERR weapons & 25 affinities — plus Respec Optimizer, Scaling Curves, and side-by-side Compare Tray.
+- **Interactive Live Map (Base Game, Underground & DLC)**: Over 4,200 searchable markers across The Lands Between, Underground, and Shadow of the Erdtree with 30 Hz live player tracking, automatic progress dimming/hiding from your save or live RAM, and in-game Blue Beacon & Green Stamp pins.
+- **Live Boss & Enemy HUD (30 Hz)**: Elden Ring–style enemy bar displaying live HP, Stance/Poise (including Stance Broken state), and status buildup (Poison, Scarlet Rot, Bleed, Frost, Sleep, Madness) across 3 switchable layouts. Read-only offline RAM only; automatically disabled when EAC is running.
+- **Live Player Buff & Debuff Timers**: Strictly finite buffs/debuffs with clockwise sweep timers, crimson `▼` debuff indicators, ≤10s expiring pulse alerts, hover tooltips, and automatic suppression of rapidly looping passive effects (`>3×/10s`).
+- **Built-In `regulation.bin` Picker & Live-Game Mod Refresh**: Ships with **unmodded ERR v2.3.10.1** weapon & map data by default, while allowing you to browse any custom/modded `regulation.bin` or pull active params directly from a running Elden Ring session under **System → Mod / Regulation Source**.
 
 ## Download
-Download the latest standalone `ERR_AR_Calculator.exe` from the [GitHub Releases](../../releases) page. No Python installation or external files are required (requires Windows 10/11 with Microsoft Edge WebView2, which is built into modern Windows).
+Download `ERR_AR_Calculator.exe` from the [GitHub Releases](../../releases) page. No Python installation or external files are required (requires Windows 10/11 with Microsoft Edge WebView2, which is built into modern Windows).
 
-> **One-Click In-App Map Texture Extraction**: Due to copyright, pre-rendered Elden Ring map tiles (`map_cache/`) and UI icons (`err_map_icons.json.gz`) are not bundled in the public release. If you own Elden Ring on PC, switch to the **Map** tab and click **Extract Game Maps & Icons** inside the app to extract native high-res L0 map tiles and icons directly from your local Steam/Elden Ring install.
+> **One-Click Local Asset Extraction**: Due to copyright, pre-rendered map tiles (`map_cache/`), map icons (`err_map_icons.json.gz`), and extracted item icons (`er_ui_icons.json.gz`) are not bundled in the public repository or executable. When running locally with a Steam install of Elden Ring, open **Map → Extract Game Maps & Icons** or **System → Mod / Regulation Source → Extract ER UI Icons** to unpack native assets directly from your copy of the game.
 
 ## User Guides
-- **[Quick-Start Guide (PDF, 5 pages)](docs/ERR_AR_Calculator_Quick_Start_Guide.pdf)** — fast setup, core workflows, hotkeys, and common fixes.
-- **[Complete User Guide (PDF, 14 pages)](docs/ERR_AR_Calculator_Complete_User_Guide.pdf)** — full reference covering all 25 affinities, 45 weapon classes, Respec Optimizer, defense math, 15 map categories, PiP overlay, Boss HUD designs, Buff Timers, and Settings Toggleables.
+- **[Quick-Start Guide (PDF, 6 pages)](docs/ERR_AR_Calculator_Quick_Start_Guide.pdf)** — fast setup, all 5 tabs, Stacked HUD, live 1H/2H AR, hotkeys, and quick fixes.
+- **[Complete User Guide (PDF, 14 pages)](docs/ERR_AR_Calculator_Complete_User_Guide.pdf)** — full reference covering Equipment, Armory (24 affinity icons, 44 weapon-class icons, Respec Optimizer, defense math), World Map (15 categories), PiP Viewer & Overlay, Boss HUD, Buff Timers, custom `regulation.bin` extraction, and offline RAM FAQ.
 
 ## Building from Source
 Requires Python 3.13+ on Windows:
 
 ```powershell
 pip install -r requirements.txt
-python -m PyInstaller --noconfirm --onefile --windowed --name ERR_AR_Calculator `
-  --icon "err_icon.ico" `
-  --add-data "err_weapon_data.json.gz;." `
-  --add-data "err_map_data.json.gz;." `
-  --add-data "err_buff_icons.json.gz;." `
-  --add-data "err_icon.ico;." `
-  --add-data "ui;ui" `
-  --collect-all clr_loader --collect-all pythonnet --collect-all texture2ddecoder --collect-all zstandard `
-  err_ar_calculator.py
+python -m PyInstaller --noconfirm ERR_AR_Calculator.spec
 ```
 
 The standalone executable will be written to `dist\ERR_AR_Calculator.exe`.
-
-To regenerate `err_weapon_data.json.gz` or `err_map_data.json.gz` (and optional `map_cache/` tiles) from an ERR `regulation.bin`, run:
-
-```powershell
-python extract_err_data.py --game "<EldenRingGameDir>" --smithbox "<SmithboxDir>" --err-mod "<ERRModDir>"
-python extract_err_map.py  --game "<EldenRingGameDir>" --smithbox "<SmithboxDir>" --err-mod "<ERRModDir>" --maps
-```
 
 ## Privacy Policy
 This application runs **100% offline**. When `Live` is enabled, it may inspect a locally running offline `eldenring.exe` process strictly read-only (`PROCESS_VM_READ`) and/or read local Elden Ring save files read-only to display character stats, equipped gear, and map position. It performs **zero memory writes**, **zero DLL injection**, stores only local UI preferences in `err_ar_settings.json` next to the executable, makes **zero network requests**, and does not collect or transmit any telemetry or personal data.

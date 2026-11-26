@@ -227,6 +227,149 @@ def _parse_player_sp_effects(nodes: List[Tuple[int, int, float, float, int]]) ->
     return out
 
 
+def _aggregate_live_ar_speffects(
+    entries: List[Tuple[int, bytes, float, float, int]],
+    hp: Optional[int] = None,
+    hp_max: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Filter active player SpecialEffect nodes to genuine weapon-AR and stat buffs.
+
+    Evaluates duration, HP thresholds, invocation condition state chains, and attack-type
+    masks before aggregating global, RH, and LH AR multipliers, flats, and stat bonuses.
+    """
+    stat_bonus = [0, 0, 0, 0, 0]
+    g_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
+    g_flat = [0, 0, 0, 0, 0]
+    rh_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
+    rh_flat = [0, 0, 0, 0, 0]
+    lh_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
+    lh_flat = [0, 0, 0, 0, 0]
+    active_cnt = 0
+    contributors: List[int] = []
+
+    rate_offs = ((72, 672), (76, 676), (80, 680), (84, 684), (480, 688))
+    flat_offs = (88, 92, 96, 100, 484)
+    stat_offs = (802, 803, 804, 805, 806)
+
+    hp_pct: Optional[float] = None
+    if hp_max is not None and hp_max > 0 and hp is not None:
+        hp_pct = 100.0 * float(hp) / float(hp_max)
+
+    valid_nodes: List[Tuple[int, bytes, float, float, bool]] = []
+    active_state_infos: Set[int] = set()
+
+    for param_id, sp_raw, rem, dur, flags in entries:
+        if (flags & 0x800C0003) != 0 or param_id <= 0 or not sp_raw or len(sp_raw) < 816:
+            continue
+        is_finite = math.isfinite(dur) and dur > 0.0
+        if is_finite and (not math.isfinite(rem) or rem <= 0.01):
+            continue
+
+        cond_hp = struct.unpack_from("<f", sp_raw, 4)[0]
+        cond_hp_rate = struct.unpack_from("<f", sp_raw, 496)[0]
+        hp_ok = True
+        need_hp = (math.isfinite(cond_hp) and cond_hp > 0.0) or (
+            math.isfinite(cond_hp_rate) and cond_hp_rate > 0.0
+        )
+        if need_hp:
+            if hp_pct is None:
+                hp_ok = False
+            else:
+                if math.isfinite(cond_hp) and cond_hp > 0.0 and hp_pct > cond_hp + 0.5:
+                    hp_ok = False
+                if math.isfinite(cond_hp_rate) and cond_hp_rate > 0.0 and hp_pct < cond_hp_rate - 0.5:
+                    hp_ok = False
+
+        valid_nodes.append((int(param_id), sp_raw, float(rem), float(dur), hp_ok))
+        if hp_ok:
+            inv = struct.unpack_from("<3H", sp_raw, 696)
+            if inv == (0, 0, 0):
+                si = struct.unpack_from("<H", sp_raw, 342)[0]
+                if si > 0:
+                    active_state_infos.add(si)
+
+    seen_params: Set[Tuple[int, int]] = set()
+    for param_id, sp_raw, _rem, dur, hp_ok in valid_nodes:
+        wep_change = sp_raw[344]
+        pk = (param_id, wep_change)
+        if pk in seen_params:
+            continue
+        seen_params.add(pk)
+
+        if not hp_ok or (sp_raw[352] & 0x02) != 0:
+            continue
+        inv = struct.unpack_from("<3H", sp_raw, 696)
+        if any(v > 0 and v not in active_state_infos for v in inv):
+            continue
+
+        contributed = False
+        if wep_change == 0:
+            for i, soff in enumerate(stat_offs):
+                sb = struct.unpack_from("<b", sp_raw, soff)[0]
+                if -50 <= sb <= 99 and sb != 0:
+                    stat_bonus[i] += sb
+                    contributed = True
+
+        ar_eligible = wep_change in (0, 1, 2)
+        if ar_eligible:
+            throw_chg = (sp_raw[356] & 0x08) != 0
+            msc_chg = sp_raw[314] != 0 or sp_raw[315] != 0 or sp_raw[808] != 0
+            atk_attr = sp_raw[340]
+            if throw_chg or msc_chg or atk_attr != 254:
+                ar_eligible = False
+            elif wep_change == 0:
+                sp_attr = sp_raw[341]
+                state_info = struct.unpack_from("<H", sp_raw, 342)[0]
+                icon_id = struct.unpack_from("<i", sp_raw, 0)[0]
+                is_finite = math.isfinite(dur) and dur > 0.0
+                if (
+                    sp_attr != 254
+                    or (700 <= state_info <= 725)
+                    or (icon_id <= 0 and not is_finite)
+                ):
+                    ar_eligible = False
+
+        if ar_eligible:
+            if wep_change == 1:
+                t_mult, t_flat = rh_mult, rh_flat
+            elif wep_change == 2:
+                t_mult, t_flat = lh_mult, lh_flat
+            else:
+                t_mult, t_flat = g_mult, g_flat
+
+            for i, (o1, o2) in enumerate(rate_offs):
+                r1 = struct.unpack_from("<f", sp_raw, o1)[0]
+                r2 = struct.unpack_from("<f", sp_raw, o2)[0]
+                if math.isfinite(r1) and 0.05 <= r1 <= 10.0 and abs(r1 - 1.0) > 1e-6:
+                    t_mult[i] *= r1
+                    contributed = True
+                if math.isfinite(r2) and 0.05 <= r2 <= 10.0 and abs(r2 - 1.0) > 1e-6:
+                    t_mult[i] *= r2
+                    contributed = True
+            for i, foff in enumerate(flat_offs):
+                fv = struct.unpack_from("<i", sp_raw, foff)[0]
+                if fv != 0 and -2000 <= fv <= 2000:
+                    t_flat[i] += fv
+                    contributed = True
+
+        if contributed:
+            active_cnt += 1
+            if len(contributors) < 24:
+                contributors.append(param_id)
+
+    return {
+        "statBonus": stat_bonus,
+        "globalMult": [round(x, 6) for x in g_mult],
+        "globalFlat": g_flat,
+        "rhMult": [round(x, 6) for x in rh_mult],
+        "rhFlat": rh_flat,
+        "lhMult": [round(x, 6) for x in lh_mult],
+        "lhFlat": lh_flat,
+        "activeCount": active_cnt,
+        "contributors": contributors,
+    }
+
+
 class EldenRingMemoryReader:
     """Strictly read-only Win32 RPM reader for live offline eldenring.exe state."""
 
@@ -602,22 +745,51 @@ class EldenRingMemoryReader:
         if not name:
             return None
 
-        equipped = []
-        seen_raw = set()
-        for off in range(0x398, 0x3B0, 4):
-            raw_id = struct.unpack_from("<I", buf, off)[0]
-            if raw_id in (0, 0xFFFFFFFF, 110000) or raw_id in seen_raw:
-                continue
+        def _decode_hand_slot(raw_id: int) -> Optional[Dict[str, int]]:
+            if raw_id in (0, 0xFFFFFFFF, 110000):
+                return None
             lv = raw_id % 100
             base_w = (raw_id // 100) * 100
             if lv <= 25 and (not known_weapon_ids or base_w in known_weapon_ids):
-                seen_raw.add(raw_id)
-                equipped.append({"rawId": raw_id, "weaponId": base_w, "level": lv})
+                return {"rawId": raw_id, "weaponId": base_w, "level": lv}
+            return None
+
+        # ChrAsm inside PlayerGameData stores armStyle, lhSlot, rhSlot at +0x324..+0x32C
+        arm_style_raw, lh_slot_raw, rh_slot_raw = struct.unpack_from("<3I", buf, 0x324)
+        arm_style = arm_style_raw if arm_style_raw in (0, 1, 2, 3) else 1
+        lh_slot = lh_slot_raw if lh_slot_raw in (0, 1, 2) else 0
+        rh_slot = rh_slot_raw if rh_slot_raw in (0, 1, 2) else 0
+        # Prefer live CSChrAsm (PlayerIns + 0x638 -> +0x08) for frame-accurate 1H/2H grip detection
+        pin = self._get_player_ins()
+        if pin >= 0x10000:
+            chr_asm = self._ru64(pin + 0x638)
+            if chr_asm >= 0x10000:
+                asm_hdr = self._read_bytes(chr_asm + 0x08, 12)
+                if asm_hdr and len(asm_hdr) == 12:
+                    la, ll, lr = struct.unpack_from("<3I", asm_hdr, 0)
+                    if la in (0, 1, 2, 3) and ll in (0, 1, 2) and lr in (0, 1, 2):
+                        arm_style, lh_slot, rh_slot = la, ll, lr
+
+        # ChrAsm stores the 6 hand-weapon slots interleaved (L1,R1,L2,R2,L3,R3) at +0x398..+0x3AC
+        left_hand = [
+            _decode_hand_slot(struct.unpack_from("<I", buf, off)[0])
+            for off in (0x398, 0x3A0, 0x3A8)
+        ]
+        right_hand = [
+            _decode_hand_slot(struct.unpack_from("<I", buf, off)[0])
+            for off in (0x39C, 0x3A4, 0x3AC)
+        ]
+        equipped = []
+        seen_raw = set()
+        for ent in right_hand + left_hand:
+            if ent and ent["rawId"] not in seen_raw:
+                seen_raw.add(ent["rawId"])
+                equipped.append(ent)
 
         armor = []
         for off in range(0x3C8, 0x3D8, 4):
             aid = struct.unpack_from("<I", buf, off)[0]
-            if aid in (0, 0xFFFFFFFF) or (known_armor_ids and aid not in known_armor_ids):
+            if aid in (0, 0xFFFFFFFF) or aid <= 10300 or (known_armor_ids and aid not in known_armor_ids):
                 armor.append(None)
             else:
                 armor.append(aid)
@@ -629,6 +801,16 @@ class EldenRingMemoryReader:
                 talismans.append(None)
             else:
                 talismans.append(tid)
+
+        arrows = []
+        for off in (0x3B0, 0x3B8):
+            aid = struct.unpack_from("<I", buf, off)[0]
+            arrows.append(aid if aid not in (0, 0xFFFFFFFF) else None)
+
+        bolts = []
+        for off in (0x3B4, 0x3BC):
+            bid = struct.unpack_from("<I", buf, off)[0]
+            bolts.append(bid if bid not in (0, 0xFFFFFFFF) else None)
 
         return {
             "name": name,
@@ -644,6 +826,13 @@ class EldenRingMemoryReader:
                 "arc": arc,
             },
             "equipped": equipped,
+            "rightHand": right_hand,
+            "leftHand": left_hand,
+            "armStyle": arm_style,
+            "activeRhSlot": rh_slot,
+            "activeLhSlot": lh_slot,
+            "arrows": arrows,
+            "bolts": bolts,
             "armor": armor,
             "talismans": talismans,
             "source": "ram",
@@ -1025,6 +1214,62 @@ class EldenRingMemoryReader:
 
         return _parse_player_sp_effects(nodes)
 
+    def read_player_live_ar_buffs(self) -> Optional[Dict[str, Any]]:
+        """Read all active player SpecialEffects in RAM and aggregate stat/AR modifiers.
+
+        Separates global buffs/talismans (wepParamChange == 0) from Right-Hand weapon
+        enchants/greases (1) and Left-Hand buffs (2) using verified SpEffectParam offsets.
+        """
+        if not self._wcm_addr or _is_eac_running():
+            return None
+        pin = self._get_player_ins()
+        if pin < 0x10000:
+            return None
+        sp_mgr = self._ru64(pin + 0x178)
+        if sp_mgr < 0x10000:
+            return None
+        node = self._ru64(sp_mgr + 0x08)
+        if node < 0x10000:
+            return _aggregate_live_ar_speffects([])
+
+        hp: Optional[int] = None
+        hp_max: Optional[int] = None
+        mod_bag = self._ru64(pin + 0x190)
+        if mod_bag >= 0x10000:
+            stat_mod = self._ru64(mod_bag)
+            if stat_mod >= 0x10000:
+                hp_raw = self._read_bytes(stat_mod + 0x138, 8)
+                if hp_raw and len(hp_raw) == 8:
+                    hp, hp_max = struct.unpack("<2i", hp_raw)
+
+        entries: List[Tuple[int, bytes, float, float, int]] = []
+        seen_nodes: Set[int] = set()
+        sp_cache: Dict[int, Optional[bytes]] = {}
+        for _ in range(160):
+            if node < 0x10000 or node in seen_nodes:
+                break
+            seen_nodes.add(node)
+            raw = self._read_bytes(node, 0x68)
+            if not raw or len(raw) < 0x64:
+                break
+            pdata = struct.unpack_from("<Q", raw, 0x00)[0]
+            param_id = struct.unpack_from("<i", raw, 0x08)[0]
+            nxt = struct.unpack_from("<Q", raw, 0x30)[0]
+            rem = struct.unpack_from("<f", raw, 0x40)[0]
+            dur = struct.unpack_from("<f", raw, 0x48)[0]
+            flags = struct.unpack_from("<I", raw, 0x60)[0]
+
+            if (flags & 0x800C0003) == 0 and param_id > 0 and pdata >= 0x10000:
+                sp_raw = sp_cache.get(pdata)
+                if pdata not in sp_cache:
+                    sp_raw = self._read_bytes(pdata, 816)
+                    sp_cache[pdata] = sp_raw
+                if sp_raw and len(sp_raw) >= 816:
+                    entries.append((param_id, sp_raw, rem, dur, flags))
+            node = nxt
+
+        return _aggregate_live_ar_speffects(entries, hp=hp, hp_max=hp_max)
+
 
 def _get_process_image_path(pid: int) -> Optional[str]:
     h = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
@@ -1157,6 +1402,11 @@ def detect_running_game_regulation() -> Dict[str, Any]:
             if not parent or parent == cur:
                 break
             cur = parent
+        if loader_tag == "modengine3":
+            local_app = os.environ.get("LOCALAPPDATA", "")
+            me3_prof_root = os.path.join(local_app, "garyttierney", "me3", "profiles")
+            if os.path.isdir(me3_prof_root):
+                search_roots.append(me3_prof_root)
 
         for root in search_roots:
             try:

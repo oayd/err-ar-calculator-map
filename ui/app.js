@@ -21,6 +21,34 @@
     { key: "sleep", idx: 4, title: "Sleep", color: "#a982e8", svg: '<path fill="currentColor" d="M14.5 3a8.8 8.8 0 1 0 6.5 14.7A7.2 7.2 0 0 1 14.5 3z"/>' },
     { key: "mad", idx: 5, title: "Madness", color: "#e8a838", svg: '<path fill="currentColor" d="M12 4.5C6.5 4.5 2.2 8.2 1 12c1.2 3.8 5.5 7.5 11 7.5s9.8-3.7 11-7.5c-1.2-3.8-5.5-7.5-11-7.5zm0 11.5a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>' },
   ];
+  const STATUS_ASSET_MAP = {
+    poison: "st_poison",
+    rot: "st_rot",
+    bleed: "st_bleed",
+    frost: "st_frost",
+    sleep: "st_sleep",
+    mad: "st_mad",
+    madness: "st_mad",
+    death: "st_death",
+  };
+  function getStatusIconHtml(key, cls = "er-st-img", title = "") {
+    const a = window.__ER_MENU_ASSETS || {};
+    const ak = STATUS_ASSET_MAP[key];
+    const uri = ak ? a[ak] : "";
+    if (uri) {
+      const altTxt = title || key;
+      return `<img class="${cls}" src="${uri}" alt="${altTxt}" />`;
+    }
+    if (STATUS_SVGS[key]) return STATUS_SVGS[key];
+    const spec = STATUS_COL_SPECS.find((s) => s.key === key);
+    return spec ? `<svg class="${cls}" viewBox="0 0 24 24" style="color:${spec.color}">${spec.svg}</svg>` : "";
+  }
+  function getErInlineIconHtml(assetKey, alt = "", cls = "er-inline-ic") {
+    const a = window.__ER_MENU_ASSETS || {};
+    const uri = a[assetKey];
+    if (!uri) return "";
+    return `<img class="${cls}" src="${uri}" alt="${alt}" />`;
+  }
 
   // Two-column Affinity sidebar matching ERR v2.3.9.1 & tclark.io layout
   const AFFINITY_LEFT = [
@@ -65,7 +93,33 @@
     Unique: "#9c8f7d",
   };
 
+  function getItemIconUri(kind, idOrObj) {
+    const icPack = state.erUiIcons;
+    if (!icPack || !icPack.icons) return "";
+    let iid = 0;
+    if (kind === "wep" && idOrObj) {
+      const bid = String(idOrObj.baseId || idOrObj.id || idOrObj);
+      iid = (icPack.wep && icPack.wep[bid]) || 0;
+    } else if (kind === "arm" && idOrObj) {
+      iid = (icPack.arm && icPack.arm[String(idOrObj)]) || 0;
+    } else if (kind === "tal" && idOrObj) {
+      iid = (icPack.tal && icPack.tal[String(idOrObj)]) || 0;
+    } else if (kind === "good" && idOrObj != null) {
+      iid = (icPack.good && icPack.good[String(idOrObj)]) || Number(idOrObj) || 0;
+    } else if (kind === "ammo" && idOrObj != null) {
+      iid = (icPack.ammo && icPack.ammo[String(idOrObj)]) || 0;
+    } else if (kind === "spell" && idOrObj != null) {
+      iid = (icPack.spell && icPack.spell[String(idOrObj)]) || 0;
+    }
+    return iid ? (icPack.icons[String(iid)] || "") : "";
+  }
+
   function affIconSvg(aff) {
+    const a = window.__ER_MENU_ASSETS || {};
+    const real = a[`aff_${aff}`];
+    if (real) {
+      return `<img class="er-aff-ic" src="${real}" alt="" aria-hidden="true" />`;
+    }
     const col = AFF_COLOR[aff] || "#b8afa2";
     let glyph = '<path fill="currentColor" d="M12 3l6 4v5c0 4.2-2.6 7.4-6 9-3.4-1.6-6-4.8-6-9V7l6-4z"/>';
     if (["Fire", "Magma", "Fell", "Frenzied"].includes(aff)) {
@@ -330,14 +384,37 @@
           if (gst[k] > 0) statuses[k] += gst[k];
         }
       }
+      if (buffs.handMult) {
+        for (let el = 0; el < 5; el++) {
+          elemAr[el] *= (Number(buffs.handMult[el]) || 1);
+        }
+      }
+      if (buffs.handFlat || buffs.liveFlat) {
+        const hf = buffs.handFlat || buffs.liveFlat;
+        for (let el = 0; el < 5; el++) {
+          elemAr[el] = Math.max(0, elemAr[el] + (hf[el] || 0));
+        }
+      }
       if (buffs.elemMult) {
         for (let el = 0; el < 5; el++) {
           elemAr[el] *= buffs.elemMult[el];
         }
       }
+      if (buffs.globalFlat) {
+        for (let el = 0; el < 5; el++) {
+          elemAr[el] = Math.max(0, elemAr[el] + (buffs.globalFlat[el] || 0));
+        }
+      }
     }
     const stanceMult = (buffs && buffs.stanceMult) ? buffs.stanceMult : 1.0;
     const effStance = (weapon.stance || 0) * stanceMult;
+    const rawGuard = Array.isArray(weapon.guard) ? weapon.guard : [0, 0, 0, 0, 0, 0];
+    const gr = reinf ? reinf.slice(13, 19) : [];
+    const guardOut = [0, 1, 2, 3, 4].map((i) => {
+      const rate = gr[i] != null ? gr[i] : 1.0;
+      return Math.min(100, Math.max(0, Math.round((Number(rawGuard[i]) || 0) * rate * 10) / 10));
+    });
+    guardOut.push(Math.max(0, Math.round((Number(rawGuard[5]) || 0) * (gr[5] != null ? gr[5] : 1.0))));
 
     const totalAr = elemAr[0] + elemAr[1] + elemAr[2] + elemAr[3] + elemAr[4];
     const eff = calcEffectiveDamage(elemAr, enemyPreset, enemyPresets);
@@ -355,6 +432,7 @@
       grades,
       corr: effCorr,
       stance: effStance,
+      guard: guardOut,
       met: metAll,
       metList,
     };
@@ -388,6 +466,14 @@
     savedSnapshot: null,
     savedGear: { armor: [null, null, null, null], talismans: [null, null, null, null] },
     equippedMap: new Map(),
+    equippedSlots: { rh: [null, null, null], lh: [null, null, null] },
+    savedEquipSlots: { rh: [null, null, null], lh: [null, null, null] },
+    equipSelectedSlot: { kind: "rh", idx: 0 },
+    arrowIds: [null, null],
+    boltIds: [null, null],
+    savedAmmo: { arrows: [null, null], bolts: [null, null] },
+    spellIds: [],
+    equipPreviewWid: null,
 
     stats: { str: 20, dex: 20, int: 10, fai: 10, arc: 10 },
     regLv: 25,
@@ -437,6 +523,9 @@
 
     flatItems: [],
     inspectedRes: null,
+    equipSelectedWid: null,
+    equipCenterTab: 0,
+    equipPickerTarget: null,
     compareIds: [],
     activeTab: "details",
     activeView: "calc",
@@ -444,6 +533,10 @@
     liveWatch: true,
     ramLive: false,
     ramChar: null,
+    armStyle: 1,
+    activeRhSlot: 0,
+    activeLhSlot: 0,
+    ramLiveArBuffs: null,
     ramPos: null,
     ramBosses: [],
     buffIcons: null,
@@ -451,7 +544,14 @@
     ramBuffsStamp: 0,
     buffRafId: 0,
     buffDomKeys: { stats: "", map: "" },
+    buffHideLooping: true,
+    suppressedLoopBuffIds: new Set(),
+    _buffLoopTrack: new Map(),
     pipMode: "off",
+    pipCorner: "bottom-right",
+    pipBossPlacement: "inside",
+    pipGripPlacement: "weapon",
+    pvPreviewMode: "hud",
     pipOpacity: 1.0,
     pipClickThrough: false,
     pipBossHud: true,
@@ -470,9 +570,17 @@
     hotkeyErrors: {},
     recordingKeybindAction: null,
     bannerDismissed: false,
-    modSource: null,
     lastRenderedKey: "",
     domColsSpec: [],
+    erUiIcons: null,
+    modSource: null,
+    promptMode: "auto",
+    activePromptDevice: "kbm",
+    equipPickSlot: null,
+    equipSelectedSlotIdx: 0,
+    sysSubTab: "mod",
+    sysCursorIdx: 0,
+    armoryPadRowIdx: 0,
   };
 
   const MAP_CAT_META = {
@@ -614,6 +722,8 @@
     firstOpenDone: false,
     mapExtractBannerDismissed: false,
   };
+  const isMapPipMode = () => state.pipMode === "map" || state.pipMode === "hud";
+  const isMapVisible = () => state.activeView === "map" || isMapPipMode();
 
   const ROW_HEIGHT = 31;
   const OVERSCAN = 14;
@@ -792,9 +902,18 @@
         cCb.type = "checkbox";
         cCb.checked = true;
         cCb.dataset.wtList = node.wtList.join(",");
+        cLbl.appendChild(cCb);
+        const wtImgSrc = (window.__ER_MENU_ASSETS || {})[`wt_${node.label}`];
+        if (wtImgSrc) {
+          const wtImg = document.createElement("img");
+          wtImg.className = "er-wt-ic";
+          wtImg.src = wtImgSrc;
+          wtImg.alt = "";
+          wtImg.setAttribute("aria-hidden", "true");
+          cLbl.appendChild(wtImg);
+        }
         const cSpan = document.createElement("span");
         cSpan.textContent = node.label;
-        cLbl.appendChild(cCb);
         cLbl.appendChild(cSpan);
 
         cCb.addEventListener("change", () => {
@@ -1069,11 +1188,11 @@
   // Table Columns Definition & Header Builder (exact 2-row grouped tclark.io header + Extra Columns)
   function getExtraColDefs() {
     const extras = [];
-    if (state.colCrit) extras.push({ id: "crit", label: "Crit", width: "52px", numeric: true });
-    if (state.colDType) extras.push({ id: "ptype", label: "Dmg Type", width: "92px", numeric: false });
-    if (state.colBuff) extras.push({ id: "buff", label: "Buff", width: "44px", numeric: true });
-    if (state.colStam) extras.push({ id: "r1stam", label: "Stam", width: "52px", numeric: true });
-    if (state.colStance) extras.push({ id: "stance", label: "Stance", width: "56px", numeric: true });
+    if (state.colCrit) extras.push({ id: "crit", label: "Crit", width: "42px", numeric: true });
+    if (state.colDType) extras.push({ id: "ptype", label: "Dmg Type", width: "82px", numeric: false });
+    if (state.colBuff) extras.push({ id: "buff", label: "Buff", width: "40px", numeric: true });
+    if (state.colStam) extras.push({ id: "r1stam", label: "Stam", width: "48px", numeric: true });
+    if (state.colStance) extras.push({ id: "stance", label: "Stance", width: "52px", numeric: true });
     return extras;
   }
 
@@ -1084,11 +1203,11 @@
 
   function getColumnsSpec() {
     const showEff = state.enemyPreset !== "Raw AR (No Defense)";
-    const cols = [{ id: "name", width: "225px", align: "left", numeric: false }];
+    const cols = [{ id: "name", width: "206px", align: "left", numeric: false }];
 
     if (!state.showDamageSplit) {
-      cols.push({ id: "total", width: "76px", numeric: true, arStyle: true });
-      if (showEff) cols.push({ id: "eff", width: "68px", numeric: true, effStyle: true });
+      cols.push({ id: "total", width: "74px", numeric: true, arStyle: true });
+      if (showEff) cols.push({ id: "eff", width: "66px", numeric: true, effStyle: true });
     } else {
       cols.push({ id: "phys", width: "52px", numeric: true });
       cols.push({ id: "mag", width: "50px", numeric: true });
@@ -1101,13 +1220,13 @@
     }
 
     for (const st of STATUS_COL_SPECS) {
-      cols.push({ id: st.key, width: "34px", numeric: true });
+      cols.push({ id: st.key, width: "33px", numeric: true });
     }
     for (let i = 0; i < 5; i++) {
-      cols.push({ id: `sc_${i}`, width: "36px", numeric: state.numericScaling });
+      cols.push({ id: `sc_${i}`, width: "34px", numeric: state.numericScaling });
     }
     for (let i = 0; i < 5; i++) {
-      cols.push({ id: `rq_${i}`, width: "34px", numeric: true });
+      cols.push({ id: `rq_${i}`, width: "32px", numeric: true });
     }
     for (const ex of getExtraColDefs()) {
       cols.push(ex);
@@ -1149,8 +1268,18 @@
       row2 += `<th class="sortable ${state.sortCol === "total" ? "sorted" : ""}" data-sort="total">Raw${sortIndicator("total")}</th>`;
       row2 += `<th class="sortable ${state.sortCol === "eff" ? "sorted" : ""}" data-sort="eff">Eff${sortIndicator("eff")}</th>`;
     } else if (split) {
-      for (const [cid, lbl] of [["phys", "Phys"], ["mag", "Mag"], ["fire", "Fire"], ["thun", "Ltng"], ["holy", "Holy"], ["spell", "Spell"], ["total", "Total"]]) {
-        row2 += `<th class="sortable ${state.sortCol === cid ? "sorted" : ""}" data-sort="${cid}">${lbl}${sortIndicator(cid)}</th>`;
+      const splitMeta = [
+        ["phys", "Phys", "ap_phys"],
+        ["mag", "Mag", "ap_mag"],
+        ["fire", "Fire", "ap_fire"],
+        ["thun", "Ltng", "ap_ltng"],
+        ["holy", "Holy", "ap_holy"],
+        ["spell", "Spell", ""],
+        ["total", "Total", ""],
+      ];
+      for (const [cid, lbl, apKey] of splitMeta) {
+        const ic = apKey ? getErInlineIconHtml(apKey, "", "th-ap-img") : "";
+        row2 += `<th class="sortable ${state.sortCol === cid ? "sorted" : ""}" data-sort="${cid}">${ic}${lbl}${sortIndicator(cid)}</th>`;
       }
       if (showEff) {
         row2 += `<th class="sortable ${state.sortCol === "eff" ? "sorted" : ""}" data-sort="eff">Eff${sortIndicator("eff")}</th>`;
@@ -1158,7 +1287,7 @@
     }
 
     for (const st of STATUS_COL_SPECS) {
-      row2 += `<th class="sortable ${state.sortCol === st.key ? "sorted" : ""}" data-sort="${st.key}" title="${st.title}"><svg class="th-icon" viewBox="0 0 24 24" style="color:${st.color}">${st.svg}</svg>${sortIndicator(st.key)}</th>`;
+      row2 += `<th class="sortable ${state.sortCol === st.key ? "sorted" : ""}" data-sort="${st.key}" title="${st.title}">${getStatusIconHtml(st.key, "th-status-img", st.title)}${sortIndicator(st.key)}</th>`;
     }
     const statShort = ["Str", "Dex", "Int", "Fai", "Arc"];
     for (let i = 0; i < 5; i++) {
@@ -1299,12 +1428,26 @@
 
     let computed = [];
     if (state.equippedOnly) {
-      for (const [wid, eqLv] of state.equippedMap.entries()) {
-        const w = state.byId.get(wid);
+      const slotList = [
+        ...((state.equippedSlots && state.equippedSlots.rh) || []),
+        ...((state.equippedSlots && state.equippedSlots.lh) || []),
+      ];
+      for (const s of slotList) {
+        if (!s || !s.weaponId) continue;
+        const w = state.byId.get(s.weaponId);
         if (!w || !matchesPreFilter(w, tokens)) continue;
-        const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, eqLv, ep, buffs);
+        const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, s.level, ep, buffs);
         if (effOnly && !r.met) continue;
         computed.push(r);
+      }
+      if (!slotList.some(Boolean) && state.equippedMap.size) {
+        for (const [wid, eqLv] of state.equippedMap.entries()) {
+          const w = state.byId.get(wid);
+          if (!w || !matchesPreFilter(w, tokens)) continue;
+          const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, eqLv, ep, buffs);
+          if (effOnly && !r.met) continue;
+          computed.push(r);
+        }
       }
     } else if (bestOnly) {
       const bestByBase = new Map();
@@ -1360,7 +1503,8 @@
       }
     }
     refreshCompareTray();
-    if (state.pipMode === "stats") renderPipStats();
+    if (state.activeView === "equip") renderEquipView();
+    if (state.pipMode === "stats" || state.pipMode === "hud") renderPipStats();
   }
 
   function formatCellNum(v, dashZero = true) {
@@ -1741,8 +1885,9 @@
     const lines = [];
     for (let i = 0; i < 5; i++) {
       if (res.base[i] > 0 || res.ar[i] > 0) {
-        const sign = res.scale[i] >= 0 ? "+" : "";
-        lines.push(`${elemNames[i]}: ${res.ar[i].toFixed(1).padStart(6)}  (Base ${res.base[i].toFixed(1).padStart(5)} ${sign}${res.scale[i].toFixed(1).padStart(5)}) -> Eff ${res.effElems[i].toFixed(1)}`);
+        const postScale = res.ar[i] - res.base[i];
+        const sign = postScale >= 0 ? "+" : "-";
+        lines.push(`${elemNames[i]}: ${res.ar[i].toFixed(1).padStart(6)}  (Base ${res.base[i].toFixed(1).padStart(5)} ${sign}${Math.abs(postScale).toFixed(1).padStart(5)}) -> Eff ${res.effElems[i].toFixed(1)}`);
       }
     }
     if (stItems.length) lines.push(`Status  : ${stItems.join(", ")}`);
@@ -1895,19 +2040,21 @@
     recalculateAndRender();
   }
 
-  function pinWeaponId(wid) {
+  function pinWeaponId(wid, openCalcDrawer = true) {
     if (!state.byId.has(wid)) return;
     if (!state.compareIds.includes(wid)) {
       if (state.compareIds.length >= 6) state.compareIds.shift();
       state.compareIds.push(wid);
     }
     refreshCompareTray();
-    openDrawer("compare");
+    if (openCalcDrawer) openDrawer("compare");
+    else if (state.activeView === "equip") renderEquipCenterDetail(getEquipSelectedWeaponResult());
   }
 
   function refreshCompareTray() {
     const n = state.compareIds.length;
-    $("topCompareBtn").textContent = `Compare (${n})`;
+    if ($("topCompareBtn")) $("topCompareBtn").textContent = `Compare (${n})`;
+    if ($("eqCmpCnt")) $("eqCmpCnt").textContent = String(n);
     $("compareTabBtn").textContent = `Compare Tray (${n}/6)`;
     const tbody = $("cmpTableBody");
     if (!n) {
@@ -1978,6 +2125,66 @@
     return true;
   }
 
+  function cloneEquipSlots(slots) {
+    const cp = (arr) => [0, 1, 2].map((i) => {
+      const e = arr && arr[i];
+      return e && e.weaponId ? { weaponId: Number(e.weaponId), level: Number(e.level) || 0 } : null;
+    });
+    return { rh: cp(slots && slots.rh), lh: cp(slots && slots.lh) };
+  }
+
+  function rebuildEquippedMapFromSlots() {
+    state.equippedMap = new Map();
+    for (const arr of [state.equippedSlots.rh, state.equippedSlots.lh]) {
+      for (const s of arr) {
+        if (!s || !s.weaponId) continue;
+        const prev = state.equippedMap.get(s.weaponId);
+        state.equippedMap.set(s.weaponId, prev === undefined ? s.level : Math.max(prev, s.level));
+      }
+    }
+  }
+
+  function loadEquipSlotsFromChar(ch) {
+    const norm = (e) => (e && e.weaponId ? { weaponId: Number(e.weaponId), level: Number(e.level) || 0 } : null);
+    const rh = [null, null, null];
+    const lh = [null, null, null];
+    if (ch && (Array.isArray(ch.rightHand) || Array.isArray(ch.leftHand))) {
+      for (let i = 0; i < 3; i++) {
+        rh[i] = Array.isArray(ch.rightHand) ? norm(ch.rightHand[i]) : null;
+        lh[i] = Array.isArray(ch.leftHand) ? norm(ch.leftHand[i]) : null;
+      }
+    } else if (ch && Array.isArray(ch.equipped)) {
+      for (let i = 0; i < 3; i++) {
+        rh[i] = norm(ch.equipped[i]);
+        lh[i] = norm(ch.equipped[i + 3]);
+      }
+    }
+    state.savedEquipSlots = cloneEquipSlots({ rh, lh });
+    state.equippedSlots = cloneEquipSlots({ rh, lh });
+    const normAmmo = (arr) => [arr && arr[0] ? Number(arr[0]) : null, arr && arr[1] ? Number(arr[1]) : null];
+    const arrows = normAmmo(ch && ch.arrows);
+    const bolts = normAmmo(ch && ch.bolts);
+    state.savedAmmo = { arrows: arrows.slice(), bolts: bolts.slice() };
+    state.arrowIds = arrows;
+    state.boltIds = bolts;
+    state.spellIds = Array.isArray(ch && ch.spells) ? ch.spells.slice() : [];
+    state.armStyle = (ch && typeof ch.armStyle === "number" && ch.armStyle >= 0 && ch.armStyle <= 3) ? ch.armStyle : 1;
+    state.activeRhSlot = (ch && typeof ch.activeRhSlot === "number" && ch.activeRhSlot >= 0 && ch.activeRhSlot <= 2) ? ch.activeRhSlot : 0;
+    state.activeLhSlot = (ch && typeof ch.activeLhSlot === "number" && ch.activeLhSlot >= 0 && ch.activeLhSlot <= 2) ? ch.activeLhSlot : 0;
+    state.equipPreviewWid = null;
+    rebuildEquippedMapFromSlots();
+    let sel = { kind: "rh", idx: 0 };
+    const rIdx = rh.findIndex(Boolean);
+    if (rIdx >= 0) sel = { kind: "rh", idx: rIdx };
+    else {
+      const lIdx = lh.findIndex(Boolean);
+      if (lIdx >= 0) sel = { kind: "lh", idx: lIdx };
+    }
+    state.equipSelectedSlot = sel;
+    const selEnt = state.equippedSlots[sel.kind][sel.idx];
+    state.equipSelectedWid = selEnt ? selEnt.weaponId : null;
+  }
+
   function applyCharacter(ch) {
     state.activeSlot = ch.slot;
     state.savedSnapshot = {
@@ -1988,10 +2195,9 @@
       arc: ch.stats.arc,
     };
     state.stats = Object.assign({}, state.savedSnapshot);
-    state.equippedMap = new Map();
-    for (const eq of ch.equipped || []) {
-      state.equippedMap.set(eq.weaponId, eq.level);
-    }
+    loadEquipSlotsFromChar(ch);
+    state.equipPickerTarget = null;
+    if ($("eqSlotPicker")) $("eqSlotPicker").classList.add("hidden");
     const ar = ch.armor || [null, null, null, null];
     const tl = ch.talismans || [null, null, null, null];
     state.savedGear = {
@@ -2008,12 +2214,18 @@
     $("charMetaText").textContent = `${ch.name} Lv.${ch.level} · Vig ${ch.stats.vig} Mnd ${ch.stats.mnd} End ${ch.stats.end}`;
     $("saveAcceptedIcon").classList.add("active");
     const saveName = state.savePath ? state.savePath.split(/[/\\]/).pop() : "save";
+    const modName = (state.data && state.data.mod) || (state.modSource && state.modSource.modLabel) || "Regulation Data";
     $("infoBannerText").innerHTML =
-      `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
+      `Using regulation data from <strong>${escHtml(modName)}</strong> &middot; Loaded <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>${escHtml(saveName)}</strong>`;
     if (ch.playerPos && mapState.loaded) maybeAutoSwitchPlayerLayer(ch.playerPos);
-    if (state.activeView === "map") {
+    if (isMapVisible()) {
+      const cntEl = $("cnt-pins");
+      if (cntEl) cntEl.textContent = String(getActiveWorldPins().length);
       updateMapSearchList();
+      updateMapPlayerReadout();
       renderMapCanvas();
+    } else if (state.activeView === "pip") {
+      renderPipViewerWorkspace();
     }
   }
 
@@ -2062,12 +2274,17 @@
       liveWatch: state.liveWatch,
       bannerDismissed: state.bannerDismissed,
       pipOpacity: state.pipOpacity,
+      pipCorner: state.pipCorner,
+      pipBossPlacement: state.pipBossPlacement,
+      pipGripPlacement: state.pipGripPlacement,
+      pvPreviewMode: state.pvPreviewMode,
       pipBossHud: state.pipBossHud,
       pipMapBossHud: state.pipMapBossHud,
       pipBossDesign: state.pipBossDesign,
       pipBuffHud: state.pipBuffHud,
       pipMapBuffHud: state.pipMapBuffHud,
       buffExpFlash: state.buffExpFlash,
+      buffHideLooping: state.buffHideLooping,
       buffSweepOpacity: state.buffSweepOpacity,
       buffTextOpacity: state.buffTextOpacity,
       enemyShowStatuses: state.enemyShowStatuses,
@@ -2087,6 +2304,7 @@
       mapAutoDetect: mapState.autoDetect,
       mapCompletedMode: mapState.completedMode,
       manualCompleted: mapState.manualCompleted,
+      promptMode: state.promptMode,
     });
   }
 
@@ -2096,12 +2314,14 @@
       setTimeout(() => renderVirtualViewport(true), 200);
     });
 
-    $("topReloadBtn").addEventListener("click", async () => {
-      const res = await window.pywebview.api.reload_save(true);
-      if (applySavePayload(res, true)) recalculateAndRender();
-    });
+    if ($("topReloadBtn")) {
+      $("topReloadBtn").addEventListener("click", async () => {
+        const res = await window.pywebview.api.reload_save(false);
+        if (applySavePayload(res, true)) recalculateAndRender();
+      });
+    }
     $("sideReloadBtn").addEventListener("click", async () => {
-      const res = await window.pywebview.api.reload_save(true);
+      const res = await window.pywebview.api.reload_save(false);
       if (applySavePayload(res, true)) recalculateAndRender();
     });
     $("sideBrowseBtn").addEventListener("click", async () => {
@@ -2151,11 +2371,18 @@
       state.byId.clear();
       state.byBase.clear();
       buildSearchTags(state.data);
+      buildAffinitySidebar();
+      buildWeaponTypeTree();
       populateGearDropdowns();
+      if (res.save) applySavePayload(res.save, false);
       syncGearDropdownValues();
       recalculateAndRender();
       if (res.modSource) state.modSource = res.modSource;
       const srcTxt = res.source ? String(res.source) : "regulation data";
+      const modLbl = state.data.mod || (state.modSource && state.modSource.modLabel) || srcTxt;
+      if ($("hdrModTag") && modLbl) $("hdrModTag").textContent = modLbl;
+      if ($("erFtrTag") && modLbl) $("erFtrTag").textContent = String(modLbl).toUpperCase();
+      if ($("erFtrArmoryCount")) $("erFtrArmoryCount").textContent = state.data.weapons.length.toLocaleString();
       const chName = (state.characters.find((c) => c.slot === state.activeSlot) || {}).name;
       $("infoBannerText").innerHTML = chName
         ? `Refreshed <strong>${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons</strong> from <strong>${escHtml(srcTxt)}</strong> &middot; Character: <strong>${escHtml(chName)}</strong>`
@@ -2164,15 +2391,19 @@
         statusEl.className = "mod-source-status ok";
         statusEl.textContent = `Loaded ${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons from ${srcTxt}`;
       }
-      if ($("modRegPathDisplay")) syncModSourceUi();
+      syncModSourceUi(false);
+      if (state.activeView === "equip") renderEquipView();
+      else if (state.activeView === "pip") renderPipViewerWorkspace();
       return true;
     };
 
     const runModRefresh = async (mode = "auto", customPath = null, statusEl = null) => {
-      const btn = $("topRefreshModBtn");
-      const prevTxt = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "Extracting...";
+      const btn = $("topRefreshModBtn") || $("modRefreshNowBtn");
+      const prevTxt = btn ? btn.textContent : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Extracting...";
+      }
       if (statusEl) {
         statusEl.className = "mod-source-status";
         statusEl.textContent = mode === "game" ? "Reading active game / regulation data..." : "Extracting regulation data...";
@@ -2206,8 +2437,10 @@
           }
         }
       } finally {
-        btn.disabled = false;
-        btn.textContent = prevTxt;
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevTxt;
+        }
       }
     };
 
@@ -2217,36 +2450,64 @@
           state.modSource = await window.pywebview.api.get_mod_source_info();
         } catch (_) {}
       }
-      const disp = $("modRegPathDisplay");
-      if (!disp) return;
       const ms = state.modSource || {};
-      if (ms.regulationPath) {
-        disp.textContent = ms.regulationPath;
-      } else if (ms.runningGame && ms.runningGame.running) {
-        const rg = ms.runningGame;
-        disp.textContent = rg.regulationPath
-          ? `Auto (Running Game): ${rg.regulationPath}`
-          : `Auto (Running Game PID ${rg.pid}${rg.eac ? " - EAC Active" : " - Offline RAM Ready"})`;
-      } else {
-        disp.textContent = `Bundled (${ms.modLabel || "ERR v2.3.10.1"}) — auto-detects running game or browse regulation.bin`;
+      const disp = $("modRegPathDisplay");
+      if (disp) {
+        disp.textContent = ms.regulationPath || `Bundled (${ms.modLabel || "ERR v2.3.10.1"})`;
+      }
+      if ($("hdrModTag") && ms.modLabel) $("hdrModTag").textContent = ms.modLabel;
+      const rg = ms.runningGame || {};
+      const liveOk = Boolean(state.ramLive || rg.running);
+      const mark = liveOk ? '<span class="ok-mark">&#10003;</span>' : '<span class="err-mark">&#10005;</span>';
+      if ($("ramHeaderBadge")) {
+        $("ramHeaderBadge").innerHTML = mark;
+        $("ramHeaderBadge").title = liveOk ? "Game / Live RAM Detected" : "Game Not Running";
+      }
+      if ($("sysGameStatusBadge")) {
+        $("sysGameStatusBadge").className = liveOk ? "ok-mark" : "err-mark";
+        $("sysGameStatusBadge").title = rg.source || (liveOk ? "Running" : "Not running");
+        $("sysGameStatusBadge").innerHTML = liveOk ? "&#10003;" : "&#10005;";
+      }
+      if ($("mapPlayerStatusTag")) {
+        $("mapPlayerStatusTag").className = liveOk ? "ok-mark" : "err-mark";
+        $("mapPlayerStatusTag").innerHTML = liveOk ? "&#10003;" : "&#10005;";
+        $("mapPlayerStatusTag").title = liveOk ? "Live RAM synced" : "Game offline (save position)";
+      }
+      if ($("sysDiagRamMark")) {
+        $("sysDiagRamMark").className = liveOk ? "ok-mark" : "err-mark";
+        $("sysDiagRamMark").innerHTML = liveOk ? "&#10003;" : "&#10005;";
+      }
+      if ($("sysDiagProc")) {
+        $("sysDiagProc").textContent = rg.running ? `eldenring.exe (${rg.source || "Active"})` : "Not Running";
+      }
+      if ($("sysDiagWeapons") && state.data) {
+        $("sysDiagWeapons").textContent = state.data.weapons.length.toLocaleString();
+      }
+      if ($("sysDiagIcons")) {
+        const cnt = state.erUiIcons && state.erUiIcons.count ? state.erUiIcons.count : 0;
+        $("sysDiagIcons").textContent = `${cnt.toLocaleString()} icons`;
+        if ($("sysIconsCountTag")) $("sysIconsCountTag").textContent = `${cnt.toLocaleString()} Cached`;
+      }
+      if ($("sysDiagEac")) {
+        $("sysDiagEac").textContent = rg.eac ? "EAC Active" : "Offline Safe";
       }
     };
     window.__syncModSourceUi = syncModSourceUi;
 
-    $("topRefreshModBtn").addEventListener("click", () => runModRefresh("auto", null, null));
-    if ($("modBrowseRegBtn")) {
-      $("modBrowseRegBtn").addEventListener("click", async () => {
-        const stEl = $("modSourceStatus");
-        const picked = await window.pywebview.api.browse_regulation();
-        if (!picked || picked.cancelled) return;
-        if (picked.ok && picked.regulationPath) {
-          await runModRefresh("file", picked.regulationPath, stEl);
-        } else if (stEl) {
-          stEl.className = "mod-source-status err";
-          stEl.textContent = (picked && picked.message) || "Failed to select regulation.bin.";
-        }
-      });
-    }
+    if ($("topRefreshModBtn")) $("topRefreshModBtn").addEventListener("click", () => runModRefresh("auto", null, null));
+    const triggerBrowseReg = async () => {
+      const stEl = $("modSourceStatus");
+      const picked = await window.pywebview.api.browse_regulation();
+      if (!picked || picked.cancelled) return;
+      if (picked.ok && picked.regulationPath) {
+        await runModRefresh("file", picked.regulationPath, stEl);
+      } else if (stEl) {
+        stEl.className = "mod-source-status err";
+        stEl.textContent = (picked && picked.message) || "Failed to select regulation.bin.";
+      }
+    };
+    if ($("modBrowseRegBtn")) $("modBrowseRegBtn").addEventListener("click", triggerBrowseReg);
+    if ($("modRegRow")) $("modRegRow").addEventListener("click", triggerBrowseReg);
     if ($("modReadGameBtn")) {
       $("modReadGameBtn").addEventListener("click", () => runModRefresh("game", null, $("modSourceStatus")));
     }
@@ -2256,13 +2517,74 @@
     if ($("modClearRegBtn")) {
       $("modClearRegBtn").addEventListener("click", async () => {
         const res = await window.pywebview.api.clear_regulation_path();
-        if (res && res.modSource) state.modSource = res.modSource;
-        await syncModSourceUi(true);
-        if ($("modSourceStatus")) {
-          $("modSourceStatus").className = "mod-source-status";
-          $("modSourceStatus").textContent = "Cleared saved regulation.bin path.";
+        if (res && res.ok && res.data) {
+          applyRefreshedPayload(res, $("modSourceStatus"));
+        } else {
+          if (res && res.modSource) state.modSource = res.modSource;
+          await syncModSourceUi(true);
+          if ($("modSourceStatus")) {
+            $("modSourceStatus").className = "mod-source-status ok";
+            $("modSourceStatus").textContent = "Cleared custom path. Using running game / bundled data.";
+          }
         }
       });
+    }
+    if ($("sysReextractIconsBtn")) {
+      $("sysReextractIconsBtn").addEventListener("click", async () => {
+        const st = $("modSourceStatus");
+        if (st) { st.className = "mod-source-status"; st.textContent = "Extracting game icons..."; }
+        const r = await window.pywebview.api.reextract_er_ui_icons();
+        if (r && r.ok && r.erUiIcons) {
+          state.erUiIcons = r.erUiIcons;
+          if (r.erMenuAssets) {
+            window.__ER_MENU_ASSETS = r.erMenuAssets;
+            hydrateErMenuAssets();
+            buildAffinitySidebar();
+            buildWeaponTypeTree();
+          }
+          if (st) { st.className = "mod-source-status ok"; st.textContent = `Extracted ${r.count} item icons, ${r.affCount} affinities, ${r.wtCount} weapon classes.`; }
+          syncModSourceUi(false);
+          if (state.activeView === "equip") renderEquipView();
+          else if (state.activeView === "pip") renderPipViewerWorkspace();
+        } else if (st) {
+          st.className = "mod-source-status err";
+          st.textContent = (r && r.message) || "Failed to extract game icons.";
+        }
+      });
+    }
+    if ($("sysPromptModeRow")) {
+      $("sysPromptModeRow").addEventListener("click", () => {
+        const order = ["auto", "kbm", "xbox", "ps5"];
+        state.promptMode = order[(order.indexOf(state.promptMode) + 1) % order.length];
+        persistSettings();
+        renderFooterPrompts();
+      });
+    }
+    const switchSysSubTab = (tab) => {
+      const next = ["hotkeys", "advanced"].includes(tab) ? tab : "mod";
+      state.sysSubTab = next;
+      document.querySelectorAll("#sysSubTabs .subtab").forEach((b) => {
+        b.classList.toggle("active", b.dataset.systab === next);
+      });
+      if ($("sysPaneMod")) $("sysPaneMod").classList.toggle("hidden", next !== "mod");
+      if ($("sysPaneHotkeys")) $("sysPaneHotkeys").classList.toggle("hidden", next !== "hotkeys");
+      if ($("sysPaneAdvanced")) $("sysPaneAdvanced").classList.toggle("hidden", next !== "advanced");
+      if (next === "hotkeys" || next === "advanced") {
+        if (window.__renderKeybindsUi) window.__renderKeybindsUi();
+        if (window.__syncTogUi) window.__syncTogUi();
+      } else {
+        state.recordingKeybindAction = null;
+      }
+    };
+    window.__switchSysSubTab = switchSysSubTab;
+    document.querySelectorAll("#sysSubTabs .subtab").forEach((btn) => {
+      btn.addEventListener("click", () => switchSysSubTab(btn.dataset.systab));
+    });
+    if ($("sysOpenSettingsModalBtn")) {
+      $("sysOpenSettingsModalBtn").addEventListener("click", () => switchSysSubTab("hotkeys"));
+    }
+    if ($("ramHeaderBadge")) {
+      $("ramHeaderBadge").addEventListener("click", () => { switchMainView("system"); switchSysSubTab("mod"); });
     }
     $("topGearBtn").addEventListener("click", () => {
       $("gearPanel").classList.toggle("hidden");
@@ -2329,6 +2651,11 @@
       });
     });
     $("gearResetBtn").addEventListener("click", () => {
+      state.equippedSlots = cloneEquipSlots(state.savedEquipSlots);
+      state.arrowIds = (state.savedAmmo && state.savedAmmo.arrows ? state.savedAmmo.arrows : [null, null]).slice();
+      state.boltIds = (state.savedAmmo && state.savedAmmo.bolts ? state.savedAmmo.bolts : [null, null]).slice();
+      state.equipPreviewWid = null;
+      rebuildEquippedMapFromSlots();
       state.armorIds = state.savedGear.armor.slice();
       state.talismanIds = state.savedGear.talismans.slice();
       syncGearDropdownValues();
@@ -2355,12 +2682,14 @@
       if (line) line.style.display = "none";
       $("curveTooltip").classList.add("hidden");
     });
-    $("topSearchFocusBtn").addEventListener("click", () => {
-      $("sidebar").classList.remove("collapsed");
-      const inp = $("searchInput");
-      inp.focus();
-      inp.select();
-    });
+    if ($("topSearchFocusBtn")) {
+      $("topSearchFocusBtn").addEventListener("click", () => {
+        $("sidebar").classList.remove("collapsed");
+        const inp = $("searchInput");
+        inp.focus();
+        inp.select();
+      });
+    }
 
     for (const [id, key] of [["strInput", "str"], ["dexInput", "dex"], ["intInput", "int"], ["faiInput", "fai"], ["arcInput", "arc"]]) {
       $(id).addEventListener("input", (e) => {
@@ -2390,6 +2719,7 @@
     $("twoHandCb").addEventListener("change", (e) => {
       state.twoHand = e.target.checked;
       update2hHint();
+      updateContextualFooterPrompts();
       persistSettings();
       recalculateAndRender();
     });
@@ -2487,12 +2817,33 @@
     $("tableScroll").addEventListener("scroll", () => {
       renderVirtualViewport(false);
     });
+    if ($("equipPickCancelBtn")) {
+      $("equipPickCancelBtn").addEventListener("click", () => {
+        state.equipPickSlot = null;
+        if ($("equipPickBanner")) $("equipPickBanner").classList.add("hidden");
+        switchMainView("equip");
+      });
+    }
     $("tableBody").addEventListener("click", (e) => {
       const tr = e.target.closest("tr.w-row");
       if (!tr) return;
       const wid = Number(tr.dataset.wid);
       const item = state.flatItems.find((x) => x.kind === "row" && x.res.weapon.id === wid);
       if (!item) return;
+      if (state.equipPickSlot) {
+        const pick = state.equipPickSlot;
+        const kind = pick.kind === "lh" ? "lh" : "rh";
+        const idx = Math.max(0, Math.min(2, Number(pick.index) || 0));
+        state.equippedSlots[kind][idx] = { weaponId: wid, level: item.res.lv };
+        rebuildEquippedMapFromSlots();
+        state.equipSelectedSlot = { kind, idx };
+        state.equipSelectedWid = wid;
+        state.equipPickSlot = null;
+        if ($("equipPickBanner")) $("equipPickBanner").classList.add("hidden");
+        recalculateAndRender();
+        switchMainView("equip");
+        return;
+      }
       renderInspectorDetails(item.res, true);
       openDrawer();
       renderVirtualViewport(true);
@@ -2549,11 +2900,12 @@
       }
     });
 
-    // Settings & Keybinds Modal + Elden Ring Toggleables
+    // Settings & System Sub-Tabs + Elden Ring Toggleables
     const TOG_VALUE_GETTERS = {
       pipBuffHud: () => state.pipBuffHud,
       pipMapBuffHud: () => state.pipMapBuffHud,
       buffExpFlash: () => state.buffExpFlash,
+      buffHideLooping: () => state.buffHideLooping,
       pipBossHud: () => state.pipBossHud,
       pipMapBossHud: () => state.pipMapBossHud,
       enemyShowStatuses: () => state.enemyShowStatuses,
@@ -2592,7 +2944,7 @@
     };
 
     const refreshTogUiNow = () => {
-      document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").forEach((row) => {
+      document.querySelectorAll("#systemWorkspace .er-opt-row[data-tog]").forEach((row) => {
         const k = row.dataset.tog;
         const fn = TOG_VALUE_GETTERS[k];
         const on = fn ? Boolean(fn()) : true;
@@ -2616,22 +2968,11 @@
         b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
       });
       if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+      updateHiddenLoopBuffsUi();
       renderLabelCatsGrid();
     };
     window.__syncTogUi = refreshTogUiNow;
 
-    const openSettingsModal = (open) => {
-      const mod = $("settingsModal");
-      if (!mod) return;
-      if (!open) {
-        state.recordingKeybindAction = null;
-        hideErHoverTip();
-      } else {
-        renderKeybindsUi();
-        if (window.__syncModSourceUi) window.__syncModSourceUi(true);
-      }
-      mod.classList.toggle("hidden", !open);
-    };
     const renderKeybindsUi = () => {
       const box = $("keybindsList");
       if (!box) return;
@@ -2677,12 +3018,10 @@
       persistSettings();
     };
     window.__renderKeybindsUi = renderKeybindsUi;
-    if ($("topSettingsBtn")) $("topSettingsBtn").addEventListener("click", () => openSettingsModal(true));
-    if ($("settingsCloseBtn")) $("settingsCloseBtn").addEventListener("click", () => openSettingsModal(false));
-    if ($("settingsDoneBtn")) $("settingsDoneBtn").addEventListener("click", () => openSettingsModal(false));
-    if ($("settingsModal")) {
-      $("settingsModal").addEventListener("mousedown", (e) => {
-        if (e.target === $("settingsModal")) openSettingsModal(false);
+    if ($("topSettingsBtn")) {
+      $("topSettingsBtn").addEventListener("click", async () => {
+        await switchMainView("system");
+        if (window.__switchSysSubTab) window.__switchSysSubTab("hotkeys");
       });
     }
     if ($("keybindResetBtn")) {
@@ -2704,6 +3043,8 @@
         state.buffExpFlash = v;
         renderPipBuffBoxes();
         persistSettings();
+      } else if (key === "buffHideLooping") {
+        setBuffHideLooping(v, true);
       } else if (key === "pipBossHud") {
         setPipBossHud(v, true);
       } else if (key === "pipMapBossHud") {
@@ -2762,7 +3103,7 @@
       refreshTogUiNow();
     };
 
-    document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").forEach((row) => {
+    document.querySelectorAll("#systemWorkspace .er-opt-row[data-tog]").forEach((row) => {
       row.addEventListener("click", () => {
         const key = row.dataset.tog;
         const getter = TOG_VALUE_GETTERS[key];
@@ -2771,7 +3112,7 @@
       });
     });
 
-    document.querySelectorAll("#settingsToggleables .er-q").forEach((q) => {
+    document.querySelectorAll("#systemWorkspace .er-q").forEach((q) => {
       q.addEventListener("click", (e) => e.stopPropagation());
       q.addEventListener("mouseenter", () => showErHelpTip(q));
       q.addEventListener("mouseleave", hideErHoverTip);
@@ -2853,8 +3194,22 @@
         mapState.pipNearbyLabelsOnly = true;
         applyPipLabelRadius(95, false, false);
         mapState.labelCats = defaultMapLabelCats();
+        state.buffHideLooping = true;
+        state.suppressedLoopBuffIds.clear();
+        state._buffLoopTrack.clear();
+        state.pipCorner = "bottom-right";
+        state.pipBossPlacement = "inside";
+        state.pipGripPlacement = "weapon";
+        if ($("pvGripPlaceSel")) $("pvGripPlaceSel").value = "weapon";
+        applyBossPlacementClass();
+        setPipBossDesign("1", false);
+        mapState.completedMode = "dim";
+        if ($("setCompletedModeSel")) $("setCompletedModeSel").value = "dim";
+        if ($("mapCompletedModeSel")) $("mapCompletedModeSel").value = "dim";
+        updateHiddenLoopBuffsUi();
         renderPipBuffBoxes();
         renderPipBossBoxes();
+        if (state.activeView === "pip") renderPipViewerWorkspace();
         updateMapSearchList();
         renderMapCanvas();
         refreshTogUiNow();
@@ -2922,19 +3277,36 @@
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        if (state.pipMode === "map") {
+        if (isMapPipMode()) {
           setPipSearchPopover(true);
+        } else if (state.activeView === "map") {
+          if ($("mapSearchInput")) { $("mapSearchInput").focus(); $("mapSearchInput").select(); }
         } else {
           $("sidebar").classList.remove("collapsed");
           $("searchInput").focus();
           $("searchInput").select();
         }
       } else if (e.key === "Escape") {
-        const sMod = $("settingsModal");
         const sPop = $("pipSearchPopover");
         const opPop = $("pipOpacityPopover");
-        if (sMod && !sMod.classList.contains("hidden")) {
-          openSettingsModal(false);
+        const eqPicker = $("eqSlotPicker");
+        const pinCard = $("mapPinCard");
+        const colsMenu = $("extraColsMenu");
+        const gearPnl = $("gearPanel");
+        if (eqPicker && !eqPicker.classList.contains("hidden")) {
+          eqPicker.classList.add("hidden");
+          state.equipPickerTarget = null;
+          if (state.activeView === "equip") renderEquipView();
+        } else if (pinCard && !pinCard.classList.contains("hidden")) {
+          showMapPinCard(null);
+        } else if (colsMenu && !colsMenu.classList.contains("hidden")) {
+          colsMenu.classList.add("hidden");
+        } else if (state.equipPickSlot) {
+          state.equipPickSlot = null;
+          if ($("equipPickBanner")) $("equipPickBanner").classList.add("hidden");
+          switchMainView("equip");
+        } else if (gearPnl && !gearPnl.classList.contains("hidden")) {
+          gearPnl.classList.add("hidden");
         } else if (sPop && !sPop.classList.contains("hidden")) {
           setPipSearchPopover(false);
         } else if (opPop && !opPop.classList.contains("hidden")) {
@@ -2951,26 +3323,152 @@
         }
       } else if (e.key === "F5") {
         e.preventDefault();
-        window.pywebview.api.reload_save(true).then((res) => {
+        window.pywebview.api.reload_save(false).then((res) => {
           if (applySavePayload(res, true)) recalculateAndRender();
         });
       } else if (e.key.toLowerCase() === "p" && !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) {
-        if (state.inspectedRes) pinWeaponId(state.inspectedRes.weapon.id);
+        if (state.activeView === "equip") {
+          const curRes = getEquipSelectedWeaponResult();
+          if (curRes) pinWeaponId(curRes.weapon.id, false);
+        } else if (state.inspectedRes) {
+          pinWeaponId(state.inspectedRes.weapon.id);
+        }
+      } else if (
+        !e.ctrlKey && !e.altKey && !e.metaKey &&
+        state.pipMode === "off" &&
+        !["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)
+      ) {
+        const k = e.key.toLowerCase();
+        if (e.key === "Tab") {
+          e.preventDefault();
+          switchMainView(state.activeView === "calc" ? "equip" : "calc");
+        } else if (k === "q" || k === "e") {
+          const order = ["equip", "calc", "map", "pip", "system"];
+          const idx = Math.max(0, order.indexOf(state.activeView));
+          const next = order[(idx + (k === "e" ? 1 : -1) + order.length) % order.length];
+          switchMainView(next);
+        } else if (k === "f") {
+          if (state.activeView === "equip") {
+            state.equipCenterTab = (state.equipCenterTab + 1) % 4;
+            renderEquipView();
+          } else if (state.activeView === "calc") {
+            $("twoHandCb").checked = !$("twoHandCb").checked;
+            $("twoHandCb").dispatchEvent(new Event("change"));
+          }
+        } else if (k === "r") {
+          if (state.activeView === "equip") {
+            $("erFtrPromptX")?.click();
+          } else if (state.activeView === "map") {
+            const layers = ["m00", "m01", "m10"];
+            const nextLayer = layers[(layers.indexOf(mapState.layer) + 1) % layers.length];
+            const btn = document.querySelector(`.map-layer-btn[data-layer="${nextLayer}"]`);
+            if (btn) btn.click();
+          }
+        } else if (k === "m") {
+          switchMainView(state.activeView === "system" ? "equip" : "system");
+        }
       }
     });
 
+    $("tabEquipBtn")?.addEventListener("click", () => switchMainView("equip"));
     $("tabCalcBtn").addEventListener("click", () => switchMainView("calc"));
     $("tabMapBtn").addEventListener("click", () => switchMainView("map"));
+    $("tabPipBtn")?.addEventListener("click", () => switchMainView("pip"));
+    $("tabSysBtn")?.addEventListener("click", () => switchMainView("system"));
+    const VIEW_ORDER = ["equip", "calc", "map", "pip", "system"];
+    if ($("erKeyQ")) {
+      $("erKeyQ").addEventListener("click", () => {
+        const idx = Math.max(0, VIEW_ORDER.indexOf(state.activeView));
+        switchMainView(VIEW_ORDER[(idx + VIEW_ORDER.length - 1) % VIEW_ORDER.length]);
+      });
+    }
+    if ($("erKeyE")) {
+      $("erKeyE").addEventListener("click", () => {
+        const idx = Math.max(0, VIEW_ORDER.indexOf(state.activeView));
+        switchMainView(VIEW_ORDER[(idx + 1) % VIEW_ORDER.length]);
+      });
+    }
+    $("sysResetLoopBuffsBtn")?.addEventListener("click", () => resetHiddenLoopBuffs(true));
+    $("erFtrPromptA")?.addEventListener("click", () => triggerActiveConfirm());
+    $("erFtrPromptB")?.addEventListener("click", () => {
+      if ($("eqSlotPicker") && !$("eqSlotPicker").classList.contains("hidden")) {
+        $("eqSlotPicker").classList.add("hidden");
+        state.equipPickerTarget = null;
+        if (state.activeView === "equip") renderEquipView();
+      } else if ($("mapPinCard") && !$("mapPinCard").classList.contains("hidden")) {
+        showMapPinCard(null);
+      } else if ($("extraColsMenu") && !$("extraColsMenu").classList.contains("hidden")) {
+        $("extraColsMenu").classList.add("hidden");
+      } else if (state.equipPickSlot) {
+        state.equipPickSlot = null;
+        if ($("equipPickBanner")) $("equipPickBanner").classList.add("hidden");
+        switchMainView("equip");
+      } else if ($("gearPanel") && !$("gearPanel").classList.contains("hidden")) {
+        $("gearPanel").classList.add("hidden");
+      } else if (!$("inspectorDrawer").classList.contains("hidden")) {
+        closeDrawer();
+      } else if (state.activeView !== "equip") {
+        switchMainView("equip");
+      }
+    });
+    $("erFtrPromptX")?.addEventListener("click", () => {
+      if (state.activeView === "equip") {
+        const curRes = getEquipSelectedWeaponResult();
+        if (curRes) pinWeaponId(curRes.weapon.id, false);
+      } else if (state.activeView === "calc") {
+        if (state.inspectedRes) pinWeaponId(state.inspectedRes.weapon.id);
+        else $("topCompareBtn")?.click();
+      }
+    });
+    $("erFtrPromptY")?.addEventListener("click", () => {
+      if (state.activeView === "equip") {
+        state.equipCenterTab = (state.equipCenterTab + 1) % 4;
+        renderEquipView();
+      } else if (state.activeView === "calc") {
+        $("twoHandCb").checked = !$("twoHandCb").checked;
+        $("twoHandCb").dispatchEvent(new Event("change"));
+      }
+    });
+    $("erFtrPromptR3")?.addEventListener("click", () => switchMainView(state.activeView === "calc" ? "equip" : "calc"));
+    $("erFtrPromptMenu")?.addEventListener("click", () => switchMainView(state.activeView === "system" ? "equip" : "system"));
+    $("erFtrF5Btn")?.addEventListener("click", () => {
+      window.pywebview.api.reload_save(false).then((res) => {
+        if (applySavePayload(res, true)) recalculateAndRender();
+      });
+    });
+
+    // Auto-switch input device prompts on keyboard/mouse vs Gamepad
+    window.addEventListener("keydown", () => {
+      if (state.promptMode === "auto" && state.activePromptDevice !== "kbm") {
+        state.activePromptDevice = "kbm";
+        renderFooterPrompts();
+      }
+    });
+    window.addEventListener("mousedown", () => {
+      if (state.promptMode === "auto" && state.activePromptDevice !== "kbm") {
+        state.activePromptDevice = "kbm";
+        renderFooterPrompts();
+      }
+    });
+    window.addEventListener("gamepadconnected", (e) => {
+      if (state.promptMode === "auto") {
+        const gid = ((e.gamepad && e.gamepad.id) || "").toLowerCase();
+        state.activePromptDevice = (gid.includes("dualsense") || gid.includes("dualshock") || gid.includes("054c") || gid.includes("sony")) ? "ps5" : "xbox";
+        renderFooterPrompts();
+      }
+    });
+    startGamepadLoop();
     $("showOnMapBtn").addEventListener("click", () => {
       if (state.inspectedRes) locateWeaponOnMap(state.inspectedRes.weapon);
     });
 
     window.addEventListener("resize", () => {
+      syncPipBarHeightVar();
       renderVirtualViewport(true);
       if (state.activeTab === "curve" && !$("inspectorDrawer").classList.contains("hidden")) {
         renderScalingCurve();
       }
-      if (state.activeView === "map") renderMapCanvas();
+      if (isMapVisible()) renderMapCanvas();
     });
   }
 
@@ -2990,7 +3488,7 @@
       pulseSavePill();
       const ch = getActiveSaveChar();
       if (ch && ch.playerPos) maybeAutoSwitchPlayerLayer(ch.playerPos);
-      if (state.activeView === "map") {
+      if (isMapVisible()) {
         const cntEl = $("cnt-pins");
         if (cntEl) cntEl.textContent = String(getActiveWorldPins().length);
         updateMapSearchList();
@@ -3018,7 +3516,7 @@
     const chNow = getActiveSaveChar();
     if (chNow && chNow.playerPos) maybeAutoSwitchPlayerLayer(chNow.playerPos);
     updateMapPlayerReadout();
-    if (state.activeView === "map") renderMapCanvas();
+    if (isMapVisible()) renderMapCanvas();
   }
 
   function applyLiveRamCharacter(ch) {
@@ -3033,10 +3531,7 @@
       arc: ch.stats.arc,
     };
     state.stats = Object.assign({}, state.savedSnapshot);
-    state.equippedMap = new Map();
-    for (const eq of ch.equipped || []) {
-      state.equippedMap.set(eq.weaponId, eq.level);
-    }
+    loadEquipSlotsFromChar(ch);
     const ar = ch.armor || [null, null, null, null];
     const tl = ch.talismans || [null, null, null, null];
     state.savedGear = {
@@ -3050,12 +3545,14 @@
 
     matchEquippedLevels(false);
     updateStatInputsDom();
-    $("charMetaText").textContent = `LIVE RAM · ${ch.name} Lv.${ch.level} · Vig ${ch.stats.vig} Mnd ${ch.stats.mnd} End ${ch.stats.end}`;
+    $("charMetaText").textContent = `\u2713 \u00B7 ${ch.name} Lv.${ch.level} \u00B7 Vig ${ch.stats.vig} Mnd ${ch.stats.mnd} End ${ch.stats.end}`;
     $("saveAcceptedIcon").classList.add("active");
     $("saveStatusPill").classList.add("ram-live");
+    const modName = (state.data && state.data.mod) || (state.modSource && state.modSource.modLabel) || "Regulation Data";
     $("infoBannerText").innerHTML =
-      `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> from <strong>LIVE RAM</strong>`;
+      `Using regulation data from <strong>${escHtml(modName)}</strong> &middot; Syncing <strong>${escHtml(ch.name)} (Lv.${ch.level})</strong> (<strong>&#10003;</strong>)`;
     recalculateAndRender();
+    if (window.__syncModSourceUi) window.__syncModSourceUi(false);
     renderPipRamBadges();
     pulseSavePill();
     updateMapPlayerReadout();
@@ -3176,9 +3673,10 @@
       renderPipRamBadges();
       renderPipBossBoxes();
     }
+    if (!wasLive && window.__syncModSourceUi) window.__syncModSourceUi(false);
     updateMapPlayerReadout();
     maybeAutoSwitchPlayerLayer(pos);
-    if (state.activeView === "map") {
+    if (isMapVisible()) {
       if (mapState.followPlayer) {
         const lp = resolvePlayerToMapLayer(pos);
         if (lp) {
@@ -3202,6 +3700,7 @@
     if (!state.ramLive) return;
     state.ramLive = false;
     state.ramChar = null;
+    state.ramLiveArBuffs = null;
     state.ramPos = null;
     state.ramBosses = [];
     state.ramBuffs = [];
@@ -3218,18 +3717,20 @@
     } else {
       $("charMetaText").textContent = "Manual stats";
       $("saveAcceptedIcon").classList.remove("active");
+      const modName = (state.data && state.data.mod) || (state.modSource && state.modSource.modLabel) || "Regulation Data";
       $("infoBannerText").innerHTML =
-        `Using regulation data from <strong>ELDEN RING Reforged v2.3.10.1</strong>`;
+        `Using regulation data from <strong>${escHtml(modName)}</strong>`;
       recalculateAndRender();
     }
-    if (state.pipMode === "stats") renderPipStats();
+    if (state.pipMode === "stats" || state.pipMode === "hud") renderPipStats();
     else {
       renderPipRamBadges();
       renderPipBossBoxes();
       renderPipBuffBoxes();
     }
+    if (window.__syncModSourceUi) window.__syncModSourceUi(false);
     updateMapPlayerReadout();
-    if (state.activeView === "map") {
+    if (isMapVisible()) {
       updateMapSearchList();
       renderMapCanvas();
     }
@@ -3240,10 +3741,18 @@
     renderPipBossBoxes();
   }
 
-  function applyLiveRamBuffs(buffs) {
+  function applyLiveRamBuffs(buffs, nowMs = null) {
     state.ramBuffs = Array.isArray(buffs) ? buffs : [];
     state.ramBuffsStamp = performance.now();
+    ingestPlayerBuffLoopCheck(state.ramBuffs, typeof nowMs === "number" ? nowMs : state.ramBuffsStamp);
     renderPipBuffBoxes();
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+  }
+
+  function applyLiveRamArBuffs(arBuffs) {
+    state.ramLiveArBuffs = (arBuffs && typeof arBuffs === "object") ? arBuffs : null;
+    if (state.pipMode === "stats" || state.pipMode === "hud") renderPipStats();
+    if (state.activeView === "pip") renderPipViewerWorkspace();
   }
 
   function applyLiveRamPins(pins) {
@@ -3251,14 +3760,14 @@
     mapState.ramPins = pins;
     const cntEl = $("cnt-pins");
     if (cntEl) cntEl.textContent = String(pins.length);
-    if (state.activeView === "map") renderMapCanvas();
+    if (isMapVisible()) renderMapCanvas();
   }
 
   function applyLiveRamProgress(prog) {
     if (!prog || typeof prog !== "object") return;
     if (prog.owned) mapState.ramOwned = prog.owned;
     if (Array.isArray(prog.setFlags)) mapState.ramFlags = prog.setFlags;
-    if (state.activeView === "map") {
+    if (isMapVisible()) {
       updateMapSearchList();
       renderMapCanvas();
     }
@@ -3281,7 +3790,7 @@
     } else if (action === "toggleFollow") {
       await setMapFollow(!mapState.followPlayer);
     } else if (action === "focusPipSearch") {
-      if (state.pipMode === "map") {
+      if (isMapPipMode()) {
         setPipSearchPopover(true);
       } else {
         await switchMainView("map");
@@ -3309,6 +3818,7 @@
   window.__onLiveRamProgress = applyLiveRamProgress;
   window.__onLiveRamBosses = applyLiveRamBosses;
   window.__onLiveRamBuffs = applyLiveRamBuffs;
+  window.__onLiveRamArBuffs = applyLiveRamArBuffs;
   window.__onGlobalHotkey = handleGlobalHotkey;
 
   function resolvePlayerToMapLayer(pp) {
@@ -3372,7 +3882,7 @@
         ? mapState.data.layers[resolved.layer].title
         : `m${pos.area}`;
       const hz = mapState.followPlayer ? " 30Hz" : "";
-      el.textContent = `LIVE${hz}: ${chName} · ${layerName} (${Math.round(pos.x)}, ${Math.round(pos.z)}) ${yawToCompass(pos.yaw)}`;
+      el.textContent = `\u2713${hz}: ${chName} \u00B7 ${layerName} (${Math.round(pos.x)}, ${Math.round(pos.z)}) ${yawToCompass(pos.yaw)}`;
       return;
     }
     const ch = state.characters.find((c) => c.slot === state.activeSlot);
@@ -3490,7 +4000,7 @@
             mapState.tiles.delete(oldestKey);
           }
           mapState.tiles.set(key, img);
-          if (state.activeView === "map" && mapState.layer === layer) renderMapCanvas();
+          if (isMapVisible() && mapState.layer === layer) renderMapCanvas();
         }
       } finally {
         mapState.tileInFlight = Math.max(0, mapState.tileInFlight - 1);
@@ -3840,7 +4350,7 @@
   }
 
   function renderMapCanvas() {
-    if (state.activeView !== "map") return;
+    if (!isMapVisible()) return;
     const canvas = $("mapCanvas");
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -3908,7 +4418,7 @@
     const hasPlayerOnLayer = Boolean(lp && lp.layer === mapState.layer);
     const playerX = hasPlayerOnLayer ? ox + lp.u * scale : 0;
     const playerY = hasPlayerOnLayer ? oy + lp.v * scale : 0;
-    const pipSearchProx = state.pipMode === "map" && isSearching && hasPlayerOnLayer;
+    const pipSearchProx = isMapPipMode() && isSearching && hasPlayerOnLayer;
     let nearestSearchDist = Infinity;
 
     const drawPinWithProx = (m, sx, sy, basePinPx, isSel, isHov) => {
@@ -4017,7 +4527,7 @@
       ctx.font = "600 11px Segoe UI, sans-serif";
       ctx.textBaseline = "middle";
       const lblOff = iconPx * 0.52 + 4;
-      const usePipNearby = state.pipMode === "map" && mapState.pipNearbyLabelsOnly && !isSearching;
+      const usePipNearby = isMapPipMode() && mapState.pipNearbyLabelsOnly && !isSearching;
       const anchorX = hasPlayerOnLayer ? playerX : w * 0.5;
       const anchorY = hasPlayerOnLayer ? playerY : h * 0.5;
       const radiusPx = mapState.pipNearbyLabelRadius || 95;
@@ -4088,10 +4598,10 @@
       ctx.translate(playerX, playerY);
       ctx.beginPath();
       ctx.arc(0, 0, 12 * pScale, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(77, 240, 136, 0.11)";
+      ctx.fillStyle = "rgba(77, 240, 136, 0.03)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(77, 240, 136, 0.50)";
-      ctx.lineWidth = Math.max(1.2, 2 * pScale);
+      ctx.strokeStyle = "rgba(77, 240, 136, 0.06)";
+      ctx.lineWidth = Math.max(0.8, 1.0 * pScale);
       ctx.stroke();
 
       ctx.rotate(lp.yaw + Math.PI);
@@ -4119,7 +4629,7 @@
 
     // Nearest off-screen target arrow + distance in PiP Map Mode (single nearest match only)
     mapState.offscreenTarget = null;
-    if (mapState.showOffscreenArrow && state.pipMode === "map" && isSearching && vis.length > 0) {
+    if (mapState.showOffscreenArrow && isMapPipMode() && isSearching && vis.length > 0) {
       const cal = (mapState.data && mapState.data.layers && mapState.data.layers[mapState.layer]) || { span: 10496.0 };
       const span = cal.span || 10496.0;
       const refU = hasPlayerOnLayer ? lp.u : (w * 0.5 - ox) / scale;
@@ -4224,6 +4734,7 @@
         const d2 = (sx - mx) ** 2 + (sy - my) ** 2;
         if (d2 <= bestDist2) {
           bestDist2 = d2;
+          const cal = (mapState.data && mapState.data.layers && mapState.data.layers[pin.layer]) || { ox: 7040, oz: 16512, span: 10496 };
           best = {
             id: `pin:${pin.kind}:${pin.slot ?? pin.stampType}:${pin.u}`,
             cat: "poi",
@@ -4233,8 +4744,8 @@
             layer: pin.layer,
             u: pin.u,
             v: pin.v,
-            wx: Math.round(pin.u * 10496 + 7040),
-            wz: Math.round(16512 - pin.v * 10496),
+            wx: Math.round(pin.u * cal.span + cal.ox),
+            wz: Math.round(cal.oz - pin.v * cal.span),
           };
         }
       }
@@ -4387,7 +4898,10 @@
 
   function notifyStreamMode() {
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_live_stream_mode) {
-      window.pywebview.api.set_live_stream_mode(state.activeView, mapState.followPlayer).catch(() => {});
+      const streamView = (state.pipMode === "map" || state.pipMode === "hud" || state.activeView === "map")
+        ? "map"
+        : state.activeView;
+      window.pywebview.api.set_live_stream_mode(streamView, mapState.followPlayer).catch(() => {});
     }
   }
 
@@ -4400,6 +4914,7 @@
     syncSettingsToggleablesUi();
     updateMapPlayerReadout();
     notifyStreamMode();
+    persistSettings();
     if (mapState.followPlayer) {
       const lp = getActiveLivePlayerPos();
       if (lp) {
@@ -4445,7 +4960,7 @@
     if (design === "2") {
       return `<div class="er-row-2">${list.map((s) => {
         const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
-        const ic = STATUS_SVGS[s.key] || "";
+        const ic = getStatusIconHtml(s.key, "er-st-img", s.label);
         return `<div class="er-med-2 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}">
           <div class="er-med-2-fill" style="height:${pct.toFixed(1)}%"></div>
           <div class="er-med-2-in">
@@ -4458,7 +4973,7 @@
     if (design === "3") {
       return `<div class="er-stack-3">${list.map((s) => {
         const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
-        const ic = STATUS_SVGS[s.key] || "";
+        const ic = getStatusIconHtml(s.key, "er-st-img", s.label);
         return `<div class="er-bar-3 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}">
           <div class="er-bar-3-fill" style="width:${pct.toFixed(1)}%"></div>
           <div class="er-bar-3-in">
@@ -4471,7 +4986,7 @@
     const cols3 = (list.length === 3 || list.length >= 5) ? " cols-3" : "";
     return `<div class="er-grid-1${cols3}">${list.map((s) => {
       const pct = Math.max(0, Math.min(100, ((Number(s.cur) || 0) / Number(s.max)) * 100));
-      const ic = STATUS_SVGS[s.key] || "";
+      const ic = getStatusIconHtml(s.key, "er-st-img", s.label);
       const showLbl = list.length <= 2 ? `<span>${escHtml(s.label)}</span>` : "";
       return `<div class="er-pill-1 c-${escHtml(s.key)}${pct >= 80 ? " hot" : ""}" title="${escHtml(s.label)}: ${Math.round(s.cur)}/${Math.round(s.max)}">
         <div class="er-pill-1-fill" style="width:${pct.toFixed(1)}%"></div>
@@ -4527,25 +5042,132 @@
     }).join("");
   }
 
+  function measurePipBossExtPx(bossBox) {
+    if (!bossBox || bossBox.classList.contains("hidden")) return 0;
+    const extCss = Math.ceil(bossBox.getBoundingClientRect().height || bossBox.offsetHeight || 0);
+    const dpr = window.devicePixelRatio || 1;
+    return extCss > 0 ? Math.max(0, Math.min(420, Math.ceil(extCss * dpr))) : 0;
+  }
+
+  function lockPipMapHeight() {
+    if (state.pipMode !== "hud" && state.pipMode !== "map") return 0;
+    const mapWs = $("mapWorkspace");
+    if (!mapWs) return 0;
+    if (state._pipMapLockedH > 0) return state._pipMapLockedH;
+    const h = Math.round(mapWs.getBoundingClientRect().height || 0);
+    if (h >= 100) {
+      mapWs.style.flex = `0 0 ${h}px`;
+      state._pipMapLockedH = h;
+      return h;
+    }
+    return 0;
+  }
+
+  function unlockPipMapHeight() {
+    const mapWs = $("mapWorkspace");
+    if (mapWs) {
+      mapWs.style.flex = "";
+    }
+    state._pipMapLockedH = 0;
+  }
+
   function renderPipBossBoxes() {
     const bossBtn = $("pipBossBtn");
-    const activeEnabled = state.pipMode === "map" ? state.pipMapBossHud : state.pipBossHud;
+    const activeEnabled = (state.pipMode === "map" || state.pipMode === "hud") ? state.pipMapBossHud : state.pipBossHud;
     if (bossBtn) bossBtn.classList.toggle("active", Boolean(activeEnabled));
     const hasData = Boolean(state.ramLive && Array.isArray(state.ramBosses) && state.ramBosses.length > 0);
-
-    const statsBox = $("pipBossBox");
-    if (statsBox) {
-      const showStats = hasData && state.pipBossHud && state.pipMode === "stats";
-      statsBox.classList.toggle("hidden", !showStats);
-      statsBox.innerHTML = showStats ? buildBossCardsHtml(state.ramBosses, state.ramBosses.length > 1) : "";
-    }
-
     const mapBox = $("pipMapBossBox");
+    const useMapSlot = (state.pipMode === "map" || state.pipMode === "hud")
+      && state.pipMapBossHud && state.pipBossPlacement !== "below";
     if (mapBox) {
-      const showMap = hasData && state.pipMapBossHud && state.pipMode === "map";
+      const showMap = hasData && useMapSlot;
       mapBox.classList.toggle("hidden", !showMap);
       mapBox.innerHTML = showMap ? buildBossCardsHtml(state.ramBosses, true) : "";
     }
+
+    const statsBox = $("pipBossBox");
+    if (!statsBox) return;
+
+    const useStatsBottom = (state.pipMode === "stats" && state.pipBossHud)
+      || ((state.pipMode === "hud" || state.pipMode === "map") && state.pipMapBossHud && state.pipBossPlacement === "below");
+    const showStats = hasData && useStatsBottom && state.pipMode !== "off";
+    const wasVisible = !statsBox.classList.contains("hidden") && !statsBox.classList.contains("pip-boss-measuring");
+    const multiBoss = state.ramBosses.length > 1 || state.pipMode !== "stats";
+    const deferExt = Boolean(state._pipModeSwitching && !state._selfTest);
+
+    if (!showStats) {
+      if (!wasVisible && statsBox.classList.contains("hidden") && (state._lastPipBossExtPx || 0) === 0) {
+        return;
+      }
+      if (!deferExt) lockPipMapHeight();
+      statsBox.classList.add("hidden");
+      statsBox.classList.remove("pip-boss-measuring");
+      statsBox.innerHTML = "";
+      const seq = (state._bossExtSeq = (state._bossExtSeq || 0) + 1);
+      state._lastPipBossExtPx = 0;
+      state._lastBossExtReturned = 0;
+      if (!deferExt && !state._selfTest && window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_extension) {
+        Promise.resolve(window.pywebview.api.set_pip_boss_extension(0)).then(() => {
+          if (seq === state._bossExtSeq) {
+            requestAnimationFrame(() => unlockPipMapHeight());
+          }
+        }).catch(() => unlockPipMapHeight());
+      } else if (!deferExt) {
+        unlockPipMapHeight();
+      }
+      return;
+    }
+
+    const html = buildBossCardsHtml(state.ramBosses, multiBoss);
+    if (deferExt) {
+      statsBox.classList.remove("hidden", "pip-boss-measuring");
+      statsBox.innerHTML = html;
+      return;
+    }
+    if (wasVisible) {
+      statsBox.innerHTML = html;
+      const extPx = measurePipBossExtPx(statsBox);
+      state._lastBossExtReturned = extPx;
+      if (extPx !== (state._lastPipBossExtPx || 0)) {
+        lockPipMapHeight();
+        state._lastPipBossExtPx = extPx;
+        if (!state._selfTest && window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_extension) {
+          window.pywebview.api.set_pip_boss_extension(extPx);
+        }
+      }
+      return;
+    }
+
+    lockPipMapHeight();
+    const seq = (state._bossExtSeq = (state._bossExtSeq || 0) + 1);
+    statsBox.classList.add("pip-boss-measuring");
+    statsBox.classList.remove("hidden");
+    statsBox.innerHTML = html;
+    const extPx = measurePipBossExtPx(statsBox);
+    state._lastBossExtReturned = extPx;
+    state._lastPipBossExtPx = extPx;
+    if (!state._selfTest && window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_extension) {
+      Promise.resolve(window.pywebview.api.set_pip_boss_extension(extPx)).then(() => {
+        if (seq !== state._bossExtSeq) return;
+        statsBox.classList.remove("pip-boss-measuring");
+      }).catch(() => {
+        if (seq === state._bossExtSeq) statsBox.classList.remove("pip-boss-measuring");
+      });
+    } else {
+      statsBox.classList.remove("pip-boss-measuring");
+    }
+  }
+
+  function syncPipBossExtension() {
+    const bossBox = $("pipBossBox");
+    const isShown = state.pipMode !== "off" && Boolean(bossBox && !bossBox.classList.contains("hidden"));
+    const extPx = isShown ? measurePipBossExtPx(bossBox) : 0;
+    state._lastBossExtReturned = extPx;
+    state._lastPipBossExtPx = extPx;
+    if (!state._selfTest && window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_boss_extension) {
+      window.pywebview.api.set_pip_boss_extension(extPx);
+    }
+    return extPx;
   }
 
   let _hoveredBuffState = null;
@@ -4700,6 +5322,117 @@
     return state.pipMapBuffHud;
   }
 
+  function ingestPlayerBuffLoopCheck(buffs, nowMs = performance.now()) {
+    const activeIds = new Set();
+    for (const b of (buffs || [])) {
+      if (!b || b.id == null) continue;
+      const id = Number(b.id);
+      const rem = Number(b.rem || 0);
+      const dur = Number(b.dur || 0);
+      activeIds.add(id);
+      let rec = state._buffLoopTrack.get(id);
+      if (!rec) {
+        rec = { active: false, lastRem: rem, lastDur: dur, hits: [], lastSeen: nowMs };
+        state._buffLoopTrack.set(id, rec);
+      }
+      const jumpedUp = rec.active && rem > rec.lastRem + 0.15;
+      const reappeared = !rec.active;
+      if (reappeared || jumpedUp) {
+        rec.hits.push(nowMs);
+        rec.hits = rec.hits.filter((t) => nowMs - t <= 10000);
+        if (rec.hits.length > 3) {
+          state.suppressedLoopBuffIds.add(id);
+        }
+      }
+      rec.active = true;
+      rec.lastRem = rem;
+      rec.lastDur = dur;
+      rec.lastSeen = nowMs;
+    }
+    for (const [id, rec] of state._buffLoopTrack.entries()) {
+      if (!activeIds.has(id)) {
+        rec.active = false;
+        if (nowMs - (rec.lastSeen || 0) > 30000 && !state.suppressedLoopBuffIds.has(id)) {
+          state._buffLoopTrack.delete(id);
+        }
+      }
+    }
+    updateHiddenLoopBuffsUi();
+  }
+
+  function getVisiblePlayerBuffs() {
+    const raw = Array.isArray(state.ramBuffs) ? state.ramBuffs : [];
+    if (!state.buffHideLooping || !state.suppressedLoopBuffIds.size) return raw;
+    return raw.filter((b) => !state.suppressedLoopBuffIds.has(Number(b.id)));
+  }
+
+  function updateHiddenLoopBuffsUi() {
+    const cnt = state.suppressedLoopBuffIds.size;
+    if ($("pvHideLoopBuffsCb")) $("pvHideLoopBuffsCb").checked = Boolean(state.buffHideLooping);
+    if ($("pvResetLoopBuffsBtn")) $("pvResetLoopBuffsBtn").textContent = `Hidden: ${cnt}`;
+    if ($("sysResetLoopBuffsBtn")) $("sysResetLoopBuffsBtn").textContent = `Reset Hidden (${cnt})`;
+  }
+
+  function setBuffHideLooping(enabled, persist = true) {
+    state.buffHideLooping = Boolean(enabled);
+    updateHiddenLoopBuffsUi();
+    syncSettingsToggleablesUi();
+    renderPipBuffBoxes();
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+    if (persist) persistSettings();
+    return state.buffHideLooping;
+  }
+
+  function resetHiddenLoopBuffs(rerender = true) {
+    state.suppressedLoopBuffIds.clear();
+    state._buffLoopTrack.clear();
+    updateHiddenLoopBuffsUi();
+    if (rerender) {
+      renderPipBuffBoxes();
+      if (state.activeView === "pip") renderPipViewerWorkspace();
+    }
+  }
+
+  function applyBossPlacementClass() {
+    document.body.classList.toggle("pip-boss-below", state.pipBossPlacement === "below");
+  }
+
+  function setPipBossPlacement(place, persist = true) {
+    state.pipBossPlacement = place === "below" ? "below" : "inside";
+    applyBossPlacementClass();
+    renderPipBossBoxes();
+    if ($("pvBossPlaceSel")) $("pvBossPlaceSel").value = state.pipBossPlacement;
+    if (state.pipMode === "map" || state.pipMode === "hud") {
+      setTimeout(() => renderMapCanvas(), 40);
+    }
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+    if (persist) persistSettings();
+    return state.pipBossPlacement;
+  }
+
+  function setPipGripPlacement(place, persist = true) {
+    state.pipGripPlacement = ["weapon", "header", "map"].includes(place) ? place : "weapon";
+    if ($("pvGripPlaceSel")) $("pvGripPlaceSel").value = state.pipGripPlacement;
+    if (state.pipMode !== "off") renderPipStats();
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+    if (persist) persistSettings();
+    return state.pipGripPlacement;
+  }
+
+  function setPipCorner(corner, persist = true, snapBackend = true) {
+    const valid = ["bottom-right", "top-right", "bottom-left", "top-left"];
+    state.pipCorner = valid.includes(corner) ? corner : "bottom-right";
+    if ($("pvCornerSel")) $("pvCornerSel").value = state.pipCorner;
+    if (snapBackend && window.pywebview && window.pywebview.api && window.pywebview.api.snap_pip_corner) {
+      for (const m of ["hud", "map", "stats"]) {
+        window.pywebview.api.snap_pip_corner(m, state.pipCorner).catch(() => {});
+      }
+    }
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+    if (persist) persistSettings();
+    return state.pipCorner;
+  }
+
   function applyTileVisualState(tile, b, debuff) {
     const dur = Math.max(0.1, Number(b.dur || 1));
     const rem = getInterpolatedBuffRem(b);
@@ -4737,7 +5470,8 @@
       el.querySelectorAll(".buff-tile").forEach((tile) => {
         tile.addEventListener("mouseenter", () => {
           const i = Number(tile.dataset.bidx);
-          if (state.ramBuffs[i]) showErBuffTip(tile, state.ramBuffs[i]);
+          const vis = getVisiblePlayerBuffs();
+          if (vis[i]) showErBuffTip(tile, vis[i]);
         });
         tile.addEventListener("mouseleave", hideErHoverTip);
       });
@@ -4754,19 +5488,29 @@
 
   function tickPlayerBuffs() {
     state.buffRafId = 0;
-    const hasData = Boolean(state.ramLive && Array.isArray(state.ramBuffs) && state.ramBuffs.length > 0);
-    const activeBox = state.pipMode === "stats" && state.pipBuffHud
-      ? $("pipStatsBuffBox")
-      : (state.pipMode === "map" && state.pipMapBuffHud ? $("pipMapBuffBox") : null);
-    if (!hasData || !activeBox || activeBox.classList.contains("hidden")) return;
+    const vis = getVisiblePlayerBuffs();
+    const hasData = Boolean(state.ramLive && vis.length > 0);
+    if (!hasData) return;
+    const boxes = [];
+    if (state.pipMode === "stats" && state.pipBuffHud) {
+      const sb = $("pipStatsBuffBox");
+      if (sb && !sb.classList.contains("hidden")) boxes.push(sb);
+    }
+    if ((state.pipMode === "map" || state.pipMode === "hud") && state.pipMapBuffHud) {
+      const mb = $("pipMapBuffBox");
+      if (mb && !mb.classList.contains("hidden")) boxes.push(mb);
+    }
+    if (!boxes.length) return;
 
-    activeBox.querySelectorAll(".buff-tile").forEach((tile) => {
-      const i = Number(tile.dataset.bidx);
-      const b = state.ramBuffs[i];
-      if (!b) return;
-      const meta = resolveBuffMeta(b);
-      applyTileVisualState(tile, b, meta.debuff);
-    });
+    for (const box of boxes) {
+      box.querySelectorAll(".buff-tile").forEach((tile) => {
+        const i = Number(tile.dataset.bidx);
+        const b = vis[i];
+        if (!b) return;
+        const meta = resolveBuffMeta(b);
+        applyTileVisualState(tile, b, meta.debuff);
+      });
+    }
     if (_hoveredBuffState && $("erHoverTip") && $("erHoverTip").classList.contains("show")) {
       const tm = $("erTipTime");
       if (tm) {
@@ -4779,11 +5523,12 @@
   }
 
   function renderPipBuffBoxes() {
-    const hasData = Boolean(state.ramLive && Array.isArray(state.ramBuffs) && state.ramBuffs.length > 0);
+    const vis = getVisiblePlayerBuffs();
+    const hasData = Boolean(state.ramLive && vis.length > 0);
     const showStats = hasData && state.pipBuffHud && state.pipMode === "stats";
-    const showMap = hasData && state.pipMapBuffHud && state.pipMode === "map";
-    const anyStats = renderBuffContainer($("pipStatsBuffBox"), "stats", showStats ? state.ramBuffs : null, 34);
-    const anyMap = renderBuffContainer($("pipMapBuffBox"), "map", showMap ? state.ramBuffs : null, 30);
+    const showMap = hasData && state.pipMapBuffHud && (state.pipMode === "map" || state.pipMode === "hud");
+    const anyStats = renderBuffContainer($("pipStatsBuffBox"), "stats", showStats ? vis : null, 34);
+    const anyMap = renderBuffContainer($("pipMapBuffBox"), "map", showMap ? vis : null, 30);
     if ((anyStats || anyMap) && !state.buffRafId) {
       state.buffRafId = requestAnimationFrame(tickPlayerBuffs);
     } else if (!anyStats && !anyMap && state.buffRafId) {
@@ -4793,6 +5538,114 @@
     if (!anyStats && !anyMap && _hoveredBuffState) {
       hideErHoverTip();
     }
+  }
+
+  function buildPipStanceBadgeHtml(armStyle) {
+    const is2hR = armStyle === 3;
+    const is2hL = armStyle === 2;
+    const is2h = is2hR || is2hL;
+    if (is2hR) {
+      return `<span class="pip-grip-badge two-h" title="Detected stance: Two-Handing Right Hand"><span class="pip-grip-num">2</span><span>(RH)</span></span>`;
+    }
+    if (is2hL) {
+      return `<span class="pip-grip-badge two-h" title="Detected stance: Two-Handing Left Hand"><span class="pip-grip-num">2</span><span>(LH)</span></span>`;
+    }
+    return `<span class="pip-grip-badge one-h" title="Detected stance: One-Handed"><span class="pip-grip-num">1</span></span>`;
+  }
+
+  function buildPipGripTileHtml(armStyle, showCornerTag = false) {
+    const a = getErMenuAssets();
+    const is2hR = armStyle === 3;
+    const is2hL = armStyle === 2;
+    const is2h = is2hR || is2hL;
+    const ic = is2h ? (a.grip_2h || a.ic_weapon || "") : (a.grip_1h || a.ic_weapon || "");
+    const cornerLbl = is2h ? "2H" : "1H";
+    const tip = is2hR ? "Two-Handing Right Hand" : (is2hL ? "Two-Handing Left Hand" : "One-Handed");
+    return `<div class="pip-grip-tile ${is2h ? "two-h" : "one-h"}" title="${tip}">${ic ? `<img src="${ic}" alt="${cornerLbl}" />` : ""}${showCornerTag ? `<span class="pip-grip-corner">${cornerLbl}</span>` : ""}</div>`;
+  }
+
+  function buildPipWeaponRows(maxRows, showEff, gripPlacement = "weapon") {
+    const armStyle = typeof state.armStyle === "number" ? state.armStyle : 1;
+    const rhSlots = (state.equippedSlots && state.equippedSlots.rh) || [];
+    const lhSlots = (state.equippedSlots && state.equippedSlots.lh) || [];
+    const la = (state.ramLive && state.ramLiveArBuffs) ? state.ramLiveArBuffs : null;
+    const makeSlotBuffs = (hand, isActive) => {
+      if (!la) return state.activeBuffs;
+      const gMult = la.globalMult || [1, 1, 1, 1, 1];
+      const gFlat = la.globalFlat || [0, 0, 0, 0, 0];
+      const hMult = isActive ? (hand === "lh" ? (la.lhMult || [1, 1, 1, 1, 1]) : (la.rhMult || [1, 1, 1, 1, 1])) : [1, 1, 1, 1, 1];
+      const hFlat = isActive ? (hand === "lh" ? (la.lhFlat || [0, 0, 0, 0, 0]) : (la.rhFlat || [0, 0, 0, 0, 0])) : [0, 0, 0, 0, 0];
+      return {
+        statBonus: la.statBonus || [0, 0, 0, 0, 0],
+        handMult: [0, 1, 2, 3, 4].map((i) => Number(hMult[i]) || 1),
+        handFlat: [0, 1, 2, 3, 4].map((i) => Number(hFlat[i]) || 0),
+        elemMult: [0, 1, 2, 3, 4].map((i) => Number(gMult[i]) || 1),
+        globalFlat: [0, 1, 2, 3, 4].map((i) => Number(gFlat[i]) || 0),
+        stanceMult: 1.0,
+        grease: null,
+      };
+    };
+
+    const entries = [];
+    for (const [hand, arr] of [["rh", rhSlots], ["lh", lhSlots]]) {
+      for (let idx = 0; idx < arr.length; idx++) {
+        const s = arr[idx];
+        if (!s || !s.weaponId) continue;
+        const w = state.byId.get(s.weaponId);
+        if (!w) continue;
+        const isActive = (hand === "rh" && idx === state.activeRhSlot) || (hand === "lh" && idx === state.activeLhSlot);
+        const slotTwoHand = (armStyle === 3 && hand === "rh" && idx === state.activeRhSlot)
+          || (armStyle === 2 && hand === "lh" && idx === state.activeLhSlot);
+        const heldNow = armStyle === 3
+          ? (hand === "rh" && idx === state.activeRhSlot)
+          : (armStyle === 2 ? (hand === "lh" && idx === state.activeLhSlot) : isActive);
+        const res = computeWeapon(
+          w, state.data, state.enemyPresets, state.stats,
+          state.regLv, state.somberLv, slotTwoHand, s.level,
+          state.enemyPreset, makeSlotBuffs(hand, isActive)
+        );
+        entries.push({ res, heldNow, slotTwoHand, isActive, handLabel: hand === "rh" ? "RH" : "LH" });
+      }
+    }
+    if (!entries.length && state.equippedMap.size) {
+      for (const [wid, eqLv] of state.equippedMap.entries()) {
+        const w = state.byId.get(wid);
+        if (!w) continue;
+        const res = computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, armStyle === 3, eqLv, state.enemyPreset, makeSlotBuffs("rh", true));
+        entries.push({ res, heldNow: true, slotTwoHand: armStyle === 3, isActive: true, handLabel: "RH" });
+      }
+    }
+    entries.sort((x, y) => {
+      if (x.heldNow !== y.heldNow) return x.heldNow ? -1 : 1;
+      if (x.isActive !== y.isActive) return x.isActive ? -1 : 1;
+      return showEff ? (y.res.eff - x.res.eff) : (y.res.total - x.res.total);
+    });
+    if (!entries.length) {
+      return `<div class="pip-wep-row"><span class="pip-wep-name" style="color:var(--text-muted)">No equipped weapons detected</span></div>`;
+    }
+    let featuredUsed = false;
+    return entries.slice(0, maxRows).map(({ res: r, heldNow, slotTwoHand, handLabel }) => {
+      const w = r.weapon;
+      const effHtml = showEff ? `<span class="pip-wep-eff">(${Math.round(r.eff)})</span>` : "";
+      if (gripPlacement === "weapon" && heldNow && !featuredUsed) {
+        featuredUsed = true;
+        const stTxt = `${escHtml(w.aff)} \u00B7 Active ${handLabel} (${slotTwoHand ? "2H" : "1H"})`;
+        return `<div class="pip-wep-row active-held featured-grip" data-held="1">
+          ${buildPipGripTileHtml(slotTwoHand ? (handLabel === "LH" ? 2 : 3) : 1, false)}
+          <span class="pip-wep-info">
+            <span class="pip-wep-name">${escHtml(w.baseName)} +${r.lv}</span>
+            <span class="pip-wep-sub">${stTxt}</span>
+          </span>
+          <span class="pip-wep-ar${r.met ? "" : " ar-unmet"}">${Math.round(r.total)}</span>
+          ${effHtml}
+        </div>`;
+      }
+      return `<div class="pip-wep-row${heldNow ? " active-held" : ""}" data-held="${heldNow ? 1 : 0}">
+        <span class="pip-wep-name">${escHtml(w.baseName)} +${r.lv} <span class="pip-wep-aff">${escHtml(w.aff)}</span></span>
+        <span class="pip-wep-ar${r.met ? "" : " ar-unmet"}">${Math.round(r.total)}</span>
+        ${effHtml}
+      </div>`;
+    }).join("");
   }
 
   function renderPipStats() {
@@ -4805,6 +5658,29 @@
     const chName = ch ? `${ch.name} (Lv.${ch.level})` : "Manual Stats";
     $("pipCharName").textContent = chName;
 
+    const place = ["weapon", "header", "map"].includes(state.pipGripPlacement) ? state.pipGripPlacement : "weapon";
+    const showMapCorner = place === "map" && (state.pipMode === "hud" || state.pipMode === "map");
+    const listEl = $("pipWeaponsList");
+    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+    const arSrcLbl = (state.ramLive && state.ramLiveArBuffs) ? "AR" : (showEff ? escHtml(state.enemyPreset) : "Raw AR");
+    $("pipPresetTag").innerHTML = `${buildPipStanceBadgeHtml(state.armStyle)}<span>${arSrcLbl}</span>`;
+
+    if (listEl) listEl.innerHTML = buildPipWeaponRows(state.pipMode === "hud" ? 3 : 6, showEff, place);
+    const weaponFeaturedVisible = Boolean(place === "weapon" && listEl && listEl.querySelector(".pip-wep-row.featured-grip"));
+    const showHeaderTile = place === "header"
+      || (place === "map" && state.pipMode === "stats")
+      || (place === "weapon" && !weaponFeaturedVisible);
+    const hdrGrip = $("pipHdrGripSlot");
+    if (hdrGrip) {
+      hdrGrip.classList.toggle("hidden", !showHeaderTile);
+      hdrGrip.innerHTML = showHeaderTile ? buildPipGripTileHtml(state.armStyle, true) : "";
+    }
+    const mapGrip = $("pipMapGripBox");
+    if (mapGrip) {
+      mapGrip.classList.toggle("hidden", !showMapCorner);
+      mapGrip.innerHTML = showMapCorner ? buildPipGripTileHtml(state.armStyle, true) : "";
+    }
+
     const vig = ch && ch.stats ? ch.stats.vig : "-";
     const mnd = ch && ch.stats ? ch.stats.mnd : "-";
     const end = ch && ch.stats ? ch.stats.end : "-";
@@ -4815,33 +5691,6 @@
     $("pipStatsGrid").innerHTML = entries.map(([k, v]) =>
       `<div class="pip-stat-cell"><span class="pip-stat-lbl">${k}</span><span class="pip-stat-val">${escHtml(String(v))}</span></div>`
     ).join("");
-
-    const showEff = state.enemyPreset !== "Raw AR (No Defense)";
-    $("pipPresetTag").textContent = `${state.twoHand ? "2H · " : "1H · "}${showEff ? state.enemyPreset : "Raw AR"}`;
-    const thBtn = $("pipTwoHandBtn");
-    if (thBtn) thBtn.classList.toggle("active", state.twoHand);
-
-    const weps = [];
-    for (const [wid, eqLv] of state.equippedMap.entries()) {
-      const w = state.byId.get(wid);
-      if (!w) continue;
-      weps.push(computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, eqLv, state.enemyPreset, state.activeBuffs));
-    }
-    weps.sort((a, b) => (showEff ? b.eff - a.eff : b.total - a.total));
-    const listEl = $("pipWeaponsList");
-    if (!weps.length) {
-      listEl.innerHTML = `<div class="pip-wep-row"><span class="pip-wep-name" style="color:var(--text-muted)">No equipped weapons detected</span></div>`;
-    } else {
-      listEl.innerHTML = weps.slice(0, 6).map((r) => {
-        const w = r.weapon;
-        const effHtml = showEff ? `<span class="pip-wep-eff">(${Math.round(r.eff)})</span>` : "";
-        return `<div class="pip-wep-row">
-          <span class="pip-wep-name">${escHtml(w.baseName)} +${r.lv} <span class="pip-wep-aff">${escHtml(w.aff)}</span></span>
-          <span class="pip-wep-ar${r.met ? "" : " ar-unmet"}">${Math.round(r.total)}</span>
-          ${effHtml}
-        </div>`;
-      }).join("");
-    }
 
     const armNames = (state.armorIds || []).map((id) => (id && state.data.armors && state.data.armors[String(id)] ? state.data.armors[String(id)].n : null)).filter(Boolean);
     const talNames = (state.talismanIds || []).map((id) => (id && state.data.talismans && state.data.talismans[String(id)] ? state.data.talismans[String(id)].n : null)).filter(Boolean);
@@ -4869,7 +5718,7 @@
   function setPipSearchPopover(open) {
     const pop = $("pipSearchPopover");
     if (!pop) return;
-    const next = Boolean(open) && state.pipMode === "map";
+    const next = Boolean(open) && isMapPipMode();
     if (next && $("pipOpacityPopover")) $("pipOpacityPopover").classList.add("hidden");
     pop.classList.toggle("hidden", !next);
     syncPipPopoverOpenClass();
@@ -4948,13 +5797,23 @@
     return setPipBossDesign(next, persist);
   }
 
+  function syncPipBarHeightVar() {
+    const bar = $("pipBar");
+    if (!bar) return;
+    const h = bar.offsetHeight || 28;
+    document.documentElement.style.setProperty("--pip-bar-h", `${Math.max(26, h) + 10}px`);
+  }
+
   async function setPipMode(mode) {
-    const next = (mode === "map" || mode === "stats") ? mode : "off";
+    const next = (mode === "map" || mode === "stats" || mode === "hud") ? mode : "off";
     state.pipMode = next;
     document.body.classList.toggle("pip-active", next !== "off");
     document.body.classList.toggle("pip-map", next === "map");
     document.body.classList.toggle("pip-stats", next === "stats");
-    if (next !== "map") {
+    document.body.classList.toggle("pip-hud", next === "hud");
+    applyBossPlacementClass();
+    syncPipBarHeightVar();
+    if (next !== "map" && next !== "hud") {
       setPipSearchPopover(false);
     }
     if (next === "off") {
@@ -4965,50 +5824,1362 @@
       document.body.classList.remove("pip-hover");
       setPipOpacityPopover(false);
     }
-    $("pipModeMapBtn").classList.toggle("active", next === "map");
-    $("pipModeStatsBtn").classList.toggle("active", next === "stats");
-    if ($("pipModeSwapBtn")) $("pipModeSwapBtn").textContent = next === "stats" ? "Stats" : "Map";
+    if ($("pipModeMapBtn")) $("pipModeMapBtn").classList.toggle("active", next === "map");
+    if ($("pipModeHudBtn")) $("pipModeHudBtn").classList.toggle("active", next === "hud");
+    if ($("pipModeStatsBtn")) $("pipModeStatsBtn").classList.toggle("active", next === "stats");
+    if ($("pipModeSwapBtn")) {
+      $("pipModeSwapBtn").textContent = next === "hud" ? "HUD" : (next === "stats" ? "Stats" : "Map");
+    }
     renderPipRamBadges();
+    state._bossExtSeq = (state._bossExtSeq || 0) + 1;
+    state._lastPipBossExtPx = 0;
+    unlockPipMapHeight();
+    state._pipModeSwitching = next !== "off";
     renderPipBossBoxes();
     renderPipBuffBoxes();
     hideErHoverTip();
-    if (next === "stats") renderPipStats();
-
-    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
-      await window.pywebview.api.set_pip_mode(next, state.pipOpacity);
-    }
+    if (next === "stats" || next === "hud") renderPipStats();
 
     if (next === "map") {
       await switchMainView("map");
+    } else if (next === "hud") {
+      await ensureMapLoaded();
+    }
+
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
+      await window.pywebview.api.set_pip_mode(next, state.pipOpacity, state.pipCorner);
+    }
+    state._pipModeSwitching = false;
+    if (next !== "off") {
+      syncPipBarHeightVar();
+      if (next === "stats" || next === "hud") renderPipStats();
+      renderPipBossBoxes();
+    }
+
+    if (next === "map" || next === "hud") {
+      renderPipStats();
+      syncPipBarHeightVar();
+      notifyStreamMode();
       if (getActiveLivePlayerPos() && !mapState.followPlayer) {
         await setMapFollow(true);
       } else {
-        setTimeout(() => renderMapCanvas(), 60);
+        setTimeout(() => { syncPipBarHeightVar(); renderMapCanvas(); }, 60);
       }
     } else if (next === "stats") {
       renderPipStats();
+      syncPipBarHeightVar();
       notifyStreamMode();
     } else {
+      const mg = $("pipMapGripBox");
+      if (mg) { mg.classList.add("hidden"); mg.innerHTML = ""; }
       notifyStreamMode();
       setTimeout(() => {
-        if (state.activeView === "map") renderMapCanvas();
+        if (isMapVisible()) renderMapCanvas();
+        else if (state.activeView === "pip") renderPipViewerWorkspace();
         else renderVirtualViewport(true);
       }, 60);
     }
   }
 
+  function getErMenuAssets() {
+    return window.__ER_MENU_ASSETS || {};
+  }
+
+  function getActivePromptDevice() {
+    return state.promptMode === "auto" ? state.activePromptDevice : state.promptMode;
+  }
+
+  function updateContextualFooterPrompts() {
+    const view = state.activeView;
+    const xBtn = $("erFtrPromptX");
+    const yBtn = $("erFtrPromptY");
+    const yLbl = $("erFtrSwitchLbl");
+    const isEquip = view === "equip";
+    const isCalc = view === "calc";
+    if (xBtn) xBtn.classList.toggle("hidden", !(isEquip || isCalc));
+    if (yBtn) {
+      yBtn.classList.toggle("hidden", !(isEquip || isCalc));
+      if (yLbl) {
+        if (isEquip) yLbl.textContent = ":Switch view (right)";
+        else if (isCalc) yLbl.textContent = state.twoHand ? ":Switch (One-Handed)" : ":Switch (Two-Handed)";
+      }
+    }
+  }
+
+  function renderFooterPrompts() {
+    const a = getErMenuAssets();
+    const dev = getActivePromptDevice();
+    const sets = {
+      xbox: { a: "xbox_a", b: "xbox_b", x: "xbox_x", y: "xbox_y", r3: "xbox_r3", st: "xbox_start", q: "xbox_lb", e: "xbox_rb", lbl: "Xbox Controller", pin: "(X)", f5: "Refresh" },
+      ps5: { a: "ps5_a", b: "ps5_b", x: "ps5_x", y: "ps5_y", r3: "ps5_r3", st: "ps5_start", q: "ps5_lb", e: "ps5_rb", lbl: "PlayStation Controller", pin: "(\u25A1)", f5: "Refresh" },
+      kbm: { a: "kbm_ok", b: "kbm_back", x: "kbm_x", y: "kbm_y", r3: "kbm_r3", st: "kbm_start", q: "kbm_lb", e: "kbm_rb", lbl: "Keyboard & Mouse", pin: "(P)", f5: "F5" },
+    };
+    const m = sets[dev] || sets.kbm;
+    const setImg = (id, key, fb) => {
+      const el = $(id);
+      if (el && (a[key] || a[fb])) el.src = a[key] || a[fb];
+    };
+    setImg("erFtrKeyA", m.a, "kbm_ok");
+    setImg("erFtrKeyEsc", m.b, "key_esc");
+    setImg("erFtrKeyP", m.x, "key_p");
+    setImg("erFtrKeyF", m.y, "key_f");
+    setImg("erFtrKeyR", m.r3, "key_r");
+    setImg("erFtrKeyQ", m.st, "key_q");
+    setImg("erKeyQ", m.q, "key_q");
+    setImg("erKeyE", m.e, "key_e");
+    setImg("erKeyFCenter", m.y, "key_f");
+    if ($("erFtrF5Chip")) $("erFtrF5Chip").textContent = m.f5;
+    if ($("eqPinBtn")) $("eqPinBtn").textContent = `+ Pin Compare ${m.pin}`;
+    if ($("erFtrArmoryCount") && state.data && state.data.weapons) {
+      $("erFtrArmoryCount").textContent = state.data.weapons.length.toLocaleString();
+    }
+    if ($("erFtrTag")) {
+      const modLbl = (state.data && state.data.mod) || (state.modSource && state.modSource.modLabel) || "ELDEN RING Reforged";
+      $("erFtrTag").textContent = String(modLbl).toUpperCase();
+    }
+    if ($("sysPromptModeLbl")) {
+      $("sysPromptModeLbl").textContent = state.promptMode === "auto" ? `Auto (${m.lbl})` : m.lbl;
+    }
+    if ($("sysDiagPromptDev")) {
+      $("sysDiagPromptDev").textContent = m.lbl;
+    }
+    updateContextualFooterPrompts();
+  }
+
+  function openArmoryForSlot(kind, index, oldWid, label) {
+    state.equipPickSlot = { kind, index, oldWid, label };
+    if ($("equipPickBanner")) $("equipPickBanner").classList.remove("hidden");
+    if ($("equipPickBannerText")) {
+      $("equipPickBannerText").innerHTML = `Selecting <strong>${escHtml(label || "Armament")}</strong> &mdash; Click any weapon row to equip &amp; return`;
+    }
+    switchMainView("calc");
+  }
+
+  function getEquipPadGroups() {
+    const pick = (sel) => Array.from(document.querySelectorAll(sel));
+    return [
+      pick("#eqRhRow .waku, #eqArrowRow .waku"),
+      pick("#eqLhRow .waku, #eqBoltRow .waku"),
+      pick("#eqArmRow .waku"),
+      pick("#eqTalRow .waku"),
+      pick("#eqBuffRow .waku"),
+    ].filter((g) => g.length > 0);
+  }
+
+  function triggerActiveConfirm() {
+    if ($("eqSlotPicker") && !$("eqSlotPicker").classList.contains("hidden")) {
+      const sel = $("eqPickerSel");
+      if (sel) sel.focus();
+      return;
+    }
+    if (state.activeView === "equip") {
+      const focused = document.querySelector("#equipWorkspace .waku.pad-focus");
+      if (focused) { focused.click(); return; }
+      const sel = document.querySelector("#equipWorkspace .waku.active");
+      if (sel && sel.dataset.eqOpenCalc) {
+        sel.click();
+      } else if ($("eqChangeSlotBtn")) {
+        $("eqChangeSlotBtn").click();
+      }
+    } else if (state.activeView === "calc") {
+      const drwOpen = $("inspectorDrawer") && !$("inspectorDrawer").classList.contains("hidden");
+      if (drwOpen) return;
+      const focused = document.querySelector("#tableBody tr.w-row.pad-focus");
+      if (focused) { focused.click(); return; }
+      const rows = document.querySelectorAll("#tableBody tr.w-row");
+      const r = rows[state.armoryPadRowIdx] || rows[0];
+      if (r) r.click();
+    } else if (state.activeView === "system") {
+      const rows = document.querySelectorAll("#sysList .sys-row");
+      const r = rows[state.sysCursorIdx] || rows[0];
+      if (r) r.click();
+    }
+  }
+
+  function movePadSelection(dx, dy) {
+    if ($("eqSlotPicker") && !$("eqSlotPicker").classList.contains("hidden")) return;
+    if ($("inspectorDrawer") && !$("inspectorDrawer").classList.contains("hidden")) return;
+    if (state.activeView === "equip") {
+      const groups = getEquipPadGroups();
+      if (!groups.length) return;
+      let r = Number(state.equipPadRow || 0);
+      let c = Number(state.equipPadCol || 0);
+      r = Math.max(0, Math.min(groups.length - 1, r));
+      c = Math.max(0, Math.min(groups[r].length - 1, c));
+      if (dy !== 0) {
+        r = (r + (dy > 0 ? 1 : -1) + groups.length) % groups.length;
+        c = Math.min(c, groups[r].length - 1);
+      }
+      if (dx !== 0) {
+        const rowLen = groups[r].length;
+        c = (c + (dx > 0 ? 1 : -1) + rowLen) % rowLen;
+      }
+      state.equipPadRow = r;
+      state.equipPadCol = c;
+      const target = groups[r][c];
+      if (target && target.dataset.slotKind) {
+        state.equipPreviewWid = null;
+        state.equipSelectedSlot = { kind: target.dataset.slotKind === "lh" ? "lh" : "rh", idx: Number(target.dataset.slotIdx) || 0 };
+        state.equipSelectedWid = target.dataset.eqWid ? Number(target.dataset.eqWid) : null;
+        renderEquipView();
+      }
+      const freshGroups = getEquipPadGroups();
+      const ft = (freshGroups[r] && freshGroups[r][c]) || null;
+      document.querySelectorAll("#equipWorkspace .waku.pad-focus").forEach((el) => el.classList.remove("pad-focus"));
+      if (ft) {
+        ft.classList.add("pad-focus");
+        ft.scrollIntoView({ block: "nearest" });
+      }
+    } else if (state.activeView === "calc" && dy !== 0) {
+      const flat = state.flatItems || [];
+      const rowIndices = [];
+      for (let i = 0; i < flat.length; i++) {
+        if (flat[i] && flat[i].kind === "row") rowIndices.push(i);
+      }
+      if (!rowIndices.length) return;
+      let pos = rowIndices.indexOf(state.armoryPadFlatIdx);
+      if (pos < 0) pos = dy > 0 ? 0 : rowIndices.length - 1;
+      else pos = Math.max(0, Math.min(rowIndices.length - 1, pos + (dy > 0 ? 1 : -1)));
+      const flatIdx = rowIndices[pos];
+      state.armoryPadFlatIdx = flatIdx;
+      state.armoryPadRowIdx = pos;
+      const scroller = $("tableScroll");
+      if (scroller) {
+        const topY = flatIdx * ROW_HEIGHT;
+        const headH = ($("tableHead") && $("tableHead").offsetHeight) || 56;
+        const viewH = Math.max(200, scroller.clientHeight - headH);
+        if (topY < scroller.scrollTop) scroller.scrollTop = topY;
+        else if (topY + ROW_HEIGHT > scroller.scrollTop + viewH) scroller.scrollTop = Math.max(0, topY + ROW_HEIGHT - viewH);
+        renderVirtualViewport(true);
+      }
+      const targetWid = flat[flatIdx] && flat[flatIdx].res ? flat[flatIdx].res.weapon.id : 0;
+      const domRows = Array.from(document.querySelectorAll("#tableBody tr.w-row"));
+      domRows.forEach((tr) => tr.classList.toggle("pad-focus", Number(tr.dataset.wid) === targetWid));
+    } else if (state.activeView === "system" && dy !== 0) {
+      const rows = Array.from(document.querySelectorAll("#sysList .sys-row"));
+      if (!rows.length) return;
+      state.sysCursorIdx = (state.sysCursorIdx + dy + rows.length) % rows.length;
+      rows.forEach((r, i) => {
+        r.classList.toggle("active", i === state.sysCursorIdx);
+        r.classList.toggle("pad-focus", i === state.sysCursorIdx);
+      });
+    }
+  }
+
+  function startGamepadLoop() {
+    if (!navigator.getGamepads) return;
+    let prevBtns = [];
+    let lastAxisMove = 0;
+    const VIEW_ORDER = ["equip", "calc", "map", "pip", "system"];
+    const tick = () => {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      const pad = pads && Array.from(pads).find((p) => p && p.connected);
+      if (pad) {
+        const gid = (pad.id || "").toLowerCase();
+        const isPs = gid.includes("dualsense") || gid.includes("dualshock") || gid.includes("054c") || gid.includes("sony");
+        const pressed = pad.buttons.map((b) => Boolean(b && b.pressed));
+        const justPressed = (idx) => pressed[idx] && !prevBtns[idx];
+        const anyInput = pressed.some((p, i) => p && !prevBtns[i]) || Math.abs(pad.axes[0] || 0) > 0.45 || Math.abs(pad.axes[1] || 0) > 0.45;
+        if (anyInput && state.promptMode === "auto") {
+          const want = isPs ? "ps5" : "xbox";
+          if (state.activePromptDevice !== want) {
+            state.activePromptDevice = want;
+            renderFooterPrompts();
+          }
+        }
+        const now = performance.now();
+        if (justPressed(12)) movePadSelection(0, -1);
+        else if (justPressed(13)) movePadSelection(0, 1);
+        else if (justPressed(14)) movePadSelection(-1, 0);
+        else if (justPressed(15)) movePadSelection(1, 0);
+        else if (now - lastAxisMove > 180) {
+          const ax = pad.axes[0] || 0;
+          const ay = pad.axes[1] || 0;
+          if (Math.abs(ay) > 0.55) { movePadSelection(0, ay > 0 ? 1 : -1); lastAxisMove = now; }
+          else if (Math.abs(ax) > 0.55) { movePadSelection(ax > 0 ? 1 : -1, 0); lastAxisMove = now; }
+        }
+        if (justPressed(0)) triggerActiveConfirm();
+        else if (justPressed(1)) $("erFtrPromptB")?.click();
+        else if (justPressed(2)) $("erFtrPromptX")?.click();
+        else if (justPressed(3)) $("erFtrPromptY")?.click();
+        else if (justPressed(4)) {
+          const idx = Math.max(0, VIEW_ORDER.indexOf(state.activeView));
+          switchMainView(VIEW_ORDER[(idx + VIEW_ORDER.length - 1) % VIEW_ORDER.length]);
+        } else if (justPressed(5)) {
+          const idx = Math.max(0, VIEW_ORDER.indexOf(state.activeView));
+          switchMainView(VIEW_ORDER[(idx + 1) % VIEW_ORDER.length]);
+        } else if (justPressed(11)) $("erFtrPromptR3")?.click();
+        else if (justPressed(9)) $("erFtrPromptMenu")?.click();
+        prevBtns = pressed;
+      } else {
+        prevBtns = [];
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function hydrateErMenuAssets() {
+    const a = getErMenuAssets();
+    const cssVarMap = {
+      base_main: "--er-base-main",
+      base_panel: "--er-base-panel",
+      line_h: "--er-line-h",
+      line_v: "--er-line-v",
+      line_v_full: "--er-line-v-full",
+      equip_waku: "--er-equip-waku",
+      equip_deco: "--er-equip-deco",
+      slot_base: "--er-slot-base",
+      arts_waku: "--er-arts-waku",
+      sl_cursor: "--er-sl-cursor",
+      bright_waku: "--er-bright-waku",
+      cursor_wide: "--er-cursor-wide",
+      cursor_half: "--er-cursor-half",
+      cursor_top: "--er-cursor-top",
+      cond_waku: "--er-cond-waku",
+      arrow: "--er-arrow",
+      hp_base: "--er-hp-base",
+      boss_bar_deco: "--er-boss-deco",
+      boss_bar_deco_l: "--er-boss-deco-l",
+      boss_bar_hp: "--er-boss-hp-bar",
+      boss_bar_cond: "--er-boss-cond-bar",
+      boss_name_base: "--er-boss-name-base",
+      cb_empty: "--er-cb-empty",
+      cb_full: "--er-cb-full",
+      ic_completed: "--er-ic-completed",
+      ic_cross: "--er-ic-cross",
+    };
+    const rootStyle = document.documentElement.style;
+    for (const [k, cssVar] of Object.entries(cssVarMap)) {
+      if (a[k]) rootStyle.setProperty(cssVar, `url("${a[k]}")`);
+    }
+    document.body.classList.toggle("er-cb-assets", Boolean(a.cb_empty && a.cb_full));
+    document.body.classList.toggle("er-boss-assets", Boolean(a.boss_bar_deco_l || a.boss_bar_deco));
+    const setSrc = (id, key) => {
+      const el = $(id);
+      if (el && a[key]) el.src = a[key];
+    };
+    setSrc("erHdrMedallion", "ic_equip");
+    setSrc("erNavIcEquip", "ic_equip");
+    setSrc("erNavIcCalc", "ic_weapon");
+    setSrc("erNavIcMap", a.ic_map ? "ic_map" : "ic_grace");
+    setSrc("erNavIcPip", "ic_stat_mini");
+    setSrc("erNavIcSys", "ic_option");
+    setSrc("pvCtrlIc", "ic_option");
+    setSrc("sysSecIc", "ic_option");
+    setSrc("sysInfoIc", "ic_chara");
+    setSrc("eqDetAshSil", "sl_arts");
+    setSrc("erSettingsMedallion", "ic_option");
+    setSrc("eqIcStatMini", "ic_chara");
+    setSrc("eqIcAtkMini", "ic_attack");
+    setSrc("eqIcCutMini", "ic_guard");
+    if (a.ic_lockon) {
+      const lockHost = document.querySelector("#pipBossBtn .pip-ico");
+      if (lockHost) lockHost.innerHTML = `<img class="pip-er-ico" src="${a.ic_lockon}" alt="" />`;
+    }
+    if (a.ic_zoom_in && $("mapZoomInBtn")) {
+      $("mapZoomInBtn").innerHTML = `<img class="map-zoom-ic" src="${a.ic_zoom_in}" alt="+" />`;
+    }
+    if (a.ic_zoom_out && $("mapZoomOutBtn")) {
+      $("mapZoomOutBtn").innerHTML = `<img class="map-zoom-ic" src="${a.ic_zoom_out}" alt="-" />`;
+    }
+    if (a.cursor_top) {
+      document.querySelectorAll(".er-nav-cur").forEach((img) => {
+        img.src = a.cursor_top;
+      });
+    }
+    renderFooterPrompts();
+    if (state.data) {
+      renderTableHeader();
+      renderPipBossBoxes();
+      if (state.activeView === "equip") renderEquipView();
+      if (state.activeView === "pip") renderPipViewerWorkspace();
+    }
+  }
+
+  function getErAffGem(aff) {
+    const a = getErMenuAssets();
+    if (!aff) return "";
+    if (a[`aff_${aff}`]) return a[`aff_${aff}`];
+    if (["Fire", "Magma"].includes(aff)) return a.aff_magma || a.aff_fell || "";
+    if (["Fell", "Bloody", "Fated", "Rotten", "Frenzied"].includes(aff)) return a.aff_fell || a.aff_magma || "";
+    if (["Lightning", "Bolt", "Sacred", "Blessed"].includes(aff)) return a.aff_bolt || "";
+    if (["Magic", "Cold", "Night", "Soporific", "Gravitational", "Cursed"].includes(aff)) return a.aff_night || "";
+    return "";
+  }
+
+  function getEquipSelectedWeaponResult() {
+    if (!state.data || !state.data.weapons || !state.data.weapons.length) return null;
+    const sel = state.equipSelectedSlot || { kind: "rh", idx: 0 };
+    const slotList = state.equippedSlots && state.equippedSlots[sel.kind];
+    const slotEnt = slotList ? slotList[sel.idx] : null;
+    let wid = slotEnt && state.byId.has(slotEnt.weaponId) ? slotEnt.weaponId : null;
+    let overrideLv = slotEnt && state.byId.has(slotEnt.weaponId) ? slotEnt.level : -1;
+    if (state.equipPreviewWid && state.byId.has(state.equipPreviewWid)) {
+      wid = state.equipPreviewWid;
+      if (overrideLv < 0 && state.equippedMap.has(wid)) {
+        overrideLv = state.equippedMap.get(wid);
+      }
+    } else if (!wid) {
+      if (state.equipSelectedWid && state.byId.has(state.equipSelectedWid)) {
+        wid = state.equipSelectedWid;
+        overrideLv = state.equippedMap.has(wid) ? state.equippedMap.get(wid) : -1;
+      } else {
+        const firstRh = (state.equippedSlots?.rh || []).find((e) => e && state.byId.has(e.weaponId));
+        const firstLh = (state.equippedSlots?.lh || []).find((e) => e && state.byId.has(e.weaponId));
+        const fb = firstRh || firstLh;
+        if (fb) {
+          wid = fb.weaponId;
+          overrideLv = fb.level;
+        } else if (state.equippedMap.size) {
+          wid = Array.from(state.equippedMap.keys())[0];
+          overrideLv = state.equippedMap.get(wid);
+        } else if (state.inspectedRes) {
+          wid = state.inspectedRes.weapon.id;
+        } else if (lastComputedList.length) {
+          wid = lastComputedList[0].weapon.id;
+        } else {
+          wid = state.data.weapons[0].id;
+        }
+      }
+    }
+    state.equipSelectedWid = wid;
+    const w = state.byId.get(wid);
+    if (!w) return null;
+    return computeWeapon(
+      w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv,
+      state.twoHand, overrideLv, state.enemyPreset, state.activeBuffs
+    );
+  }
+
+  function openEquipSlotPicker(type, slot) {
+    const picker = $("eqSlotPicker");
+    const sel = $("eqPickerSel");
+    const title = $("eqPickerTitle");
+    if (!picker || !sel || !title) return;
+    if (
+      state.equipPickerTarget &&
+      state.equipPickerTarget.type === type &&
+      state.equipPickerTarget.slot === slot &&
+      !picker.classList.contains("hidden")
+    ) {
+      picker.classList.add("hidden");
+      state.equipPickerTarget = null;
+      renderEquipView();
+      return;
+    }
+    state.equipPickerTarget = { type, slot };
+    const slotNames = ["Head", "Chest", "Arms", "Legs"];
+    const srcSel = type === "armor"
+      ? $(["armorHeadSel", "armorChestSel", "armorArmsSel", "armorLegsSel"][slot])
+      : $(`tal${slot}Sel`);
+    if (!srcSel) return;
+    title.textContent = type === "armor" ? `Select ${slotNames[slot]} Armor` : `Select Talisman Slot ${slot + 1}`;
+    sel.innerHTML = srcSel.innerHTML;
+    sel.value = srcSel.value;
+    picker.classList.remove("hidden");
+    renderEquipView();
+    sel.focus();
+  }
+
+  function renderEquipCenterDetail(res) {
+    const titleEl = $("eqDetTitle");
+    const subEl = $("eqDetSub");
+    const skillEl = $("eqDetSkill");
+    const bigImg = $("eqDetBigImg");
+    const bigBadge = $("eqDetBigBadge");
+    const gemImg = $("eqDetAffGem");
+    const bodyEl = $("eqDetBody");
+    const cmpCnt = $("eqCmpCnt");
+    if (cmpCnt) cmpCnt.textContent = String(state.compareIds.length);
+    document.querySelectorAll("#eqSubTabs .subtab").forEach((b) => {
+      b.classList.toggle("active", Number(b.dataset.eqtab) === state.equipCenterTab);
+    });
+    if (!res || !bodyEl) return;
+
+    const w = res.weapon;
+    const assets = getErMenuAssets();
+    const wtName = state.data.weaponTypes[String(w.wt)] || "";
+    if (titleEl) titleEl.textContent = `${w.name} +${res.lv}`;
+    if (subEl) subEl.textContent = `${wtName} \u00B7 ${w.aff}${w.physTypes ? " \u00B7 " + w.physTypes : ""}`;
+    if (skillEl) skillEl.textContent = w.skill || "-";
+    if ($("eqDetWeight")) $("eqDetWeight").textContent = (w.weight != null ? Number(w.weight).toFixed(1) : "-");
+    if ($("eqDetStance")) $("eqDetStance").textContent = (res.stance != null ? Number(res.stance).toFixed(1) : (w.stance != null ? Number(w.stance).toFixed(1) : "-"));
+    if (bigImg) bigImg.src = getItemIconUri("wep", w) || assets.ic_weapon || "";
+    if (bigBadge) bigBadge.textContent = `+${res.lv}`;
+    if (gemImg) {
+      const g = getErAffGem(w.aff);
+      if (g) {
+        gemImg.src = g;
+        gemImg.classList.remove("hidden");
+        if ($("eqDetAshSil")) $("eqDetAshSil").style.opacity = "0.14";
+      } else {
+        gemImg.classList.add("hidden");
+        if ($("eqDetAshSil")) $("eqDetAshSil").style.opacity = "0.36";
+      }
+    }
+
+    const stNames = ["Str", "Dex", "Int", "Fai", "Arc"];
+    const apIcKeys = ["ap_phys", "ap_mag", "ap_fire", "ap_ltng", "ap_holy"];
+    const guardIcKeys = ["guard_phys", "guard_mag", "guard_fire", "guard_ltng", "guard_holy", "attr_stam"];
+    const attrIcKeys = ["attr_str", "attr_dex", "attr_int", "attr_fai", "attr_arc"];
+    if (state.equipCenterTab === 0) {
+      const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+      const effCls = !res.met ? "er-red" : (showEff ? "er-blue" : "");
+      const statusItems = STATUS_KEYS
+        .map((k, i) => (res.status[i] > 0.05 ? { key: k, label: k[0].toUpperCase() + k.slice(1), val: Math.round(res.status[i]) } : null))
+        .filter(Boolean);
+      const apSplitRow = (lbl, idx) => {
+        const hasVal = res.base[idx] > 0.05 || res.ar[idx] > 0.05;
+        const postArR = Math.round(res.ar[idx]);
+        const bR = Math.round(res.base[idx]);
+        const scR = postArR - bR;
+        const bTxt = hasVal ? String(bR) : "0";
+        const opTxt = hasVal ? (scR >= 0 ? "+" : "-") : "";
+        const sTxt = hasVal ? String(Math.abs(scR)) : "";
+        const ic = getErInlineIconHtml(apIcKeys[idx], lbl);
+        return `<div class="eq-ap-row"><span class="muted">${ic}${lbl}</span><span class="er-num" style="text-align:right">${bTxt}</span><span class="muted" style="text-align:center">${opTxt}</span><span class="er-num" style="text-align:right">${sTxt}</span></div>`;
+      };
+      const rawGuard = (res.guard && res.guard.length >= 6) ? res.guard : (Array.isArray(w.guard) && w.guard.length >= 6 ? w.guard : [0, 0, 0, 0, 0, 0]);
+      const guardVals = [0, 1, 2, 3, 4].map((gi) => Number(rawGuard[gi] || 0).toFixed(1));
+      guardVals.push(String(Math.round(Number(rawGuard[5] || 0))));
+      const guardLbls = ["Physical", "Magic", "Fire", "Lightning", "Holy", "Guard Boost"];
+      bodyEl.innerHTML = `
+        <div class="stat-2col">
+          <div>
+            <div class="er-sec"><img src="${assets.ic_attack || ""}" alt="" /><span>Attack Power</span></div>
+            <div class="eq-sec-indent">
+              ${apSplitRow("Physical", 0)}
+              ${apSplitRow("Magic", 1)}
+              ${apSplitRow("Fire", 2)}
+              ${apSplitRow("Lightning", 3)}
+              ${apSplitRow("Holy", 4)}
+              <div class="eq-ap-row"><span class="muted">Critical</span><span class="er-num" style="text-align:right">${w.crit || 100}</span><span></span><span></span></div>
+              <div class="eq-kv eq-kv-line"><span>Total AR${w.cat ? " / Spell" : ""}</span><span class="er-num ${res.met ? "" : "er-red"}">${Math.round(res.total)}${w.cat ? ` / ${Math.round(res.spell)}` : ""}</span></div>
+              <div class="eq-kv"><span class="${effCls}">Eff vs Benchmark</span><span class="er-num ${effCls}"><b>${Math.round(res.eff)}</b></span></div>
+            </div>
+          </div>
+          <div>
+            <div class="er-sec"><img src="${assets.ic_guard || assets.ic_cut || ""}" alt="" /><span>Guarded Damage Negation</span></div>
+            <div class="eq-sec-indent">
+              ${guardLbls.map((gl, gi) => `<div class="eq-kv"><span class="muted">${getErInlineIconHtml(guardIcKeys[gi], gl)}${gl}</span><span class="er-num">${guardVals[gi]}</span></div>`).join("")}
+            </div>
+          </div>
+        </div>
+        <div class="stat-2col">
+          <div>
+            <div class="er-sec"><img src="${assets.ic_corr || ""}" alt="" /><span>Attribute Scaling</span></div>
+            <div class="eq-sec-indent">
+              ${[0, 1, 2, 3, 4].map((i) => `<div class="eq-kv"><span class="muted">${getErInlineIconHtml(attrIcKeys[i], stNames[i])}${stNames[i]}</span><span class="er-num">${escHtml(res.grades[i])}</span></div>`).join("")}
+            </div>
+          </div>
+          <div>
+            <div class="er-sec"><img src="${assets.ic_req || assets.ic_stat_mini || ""}" alt="" /><span>Attributes Required</span></div>
+            <div class="eq-sec-indent">
+              ${[0, 1, 2, 3, 4].map((i) => `<div class="eq-kv"><span class="muted">${getErInlineIconHtml(attrIcKeys[i], stNames[i])}${stNames[i]}</span><span class="er-num ${res.metList[i] ? "" : "er-red"}">${w.req[i]}${res.metList[i] ? "" : " !"}</span></div>`).join("")}
+            </div>
+          </div>
+        </div>
+        <div class="er-sec"><img src="${assets.ic_passive || assets.ic_attack || ""}" alt="" /><span>Passive Effects</span></div>
+        <div class="eq-sec-indent" style="font-size:12px;">
+          ${statusItems.length ? statusItems.map((sp) => `<div style="color:#e6c678;display:flex;align-items:center;gap:5px;">${getStatusIconHtml(sp.key, "er-inline-ic", sp.label)}<span>${escHtml(sp.label)} (${sp.val})</span></div>`).join("") : `<div class="muted">-</div><div class="muted">-</div>`}
+        </div>
+      `;
+    } else if (state.equipCenterTab === 1) {
+      const variants = (state.byBase.get(w.baseId) || [w]).map((vw) =>
+        computeWeapon(vw, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, res.lv, state.enemyPreset, state.activeBuffs)
+      );
+      variants.sort((a, b) => (state.enemyPreset !== "Raw AR (No Defense)" ? b.eff - a.eff : b.total - a.total) || b.total - a.total);
+      bodyEl.innerHTML = `<div style="max-height:360px;overflow-y:auto;">` + variants.map((v, i) => `
+        <div class="er-row ${v.weapon.id === w.id ? "active" : ""}" data-eq-aff-wid="${v.weapon.id}">
+          <span><span class="muted">${i + 1}.</span> <b style="color:${v.met ? "#e4dbc7" : "#ee6c65"};">${escHtml(v.weapon.aff)}</b></span>
+          <span class="er-num"><span class="muted">AR ${Math.round(v.total)} &middot;</span> <span class="er-blue">Eff ${Math.round(v.eff)}</span></span>
+        </div>
+      `).join("") + `</div>`;
+      bodyEl.querySelectorAll("[data-eq-aff-wid]").forEach((row) => {
+        row.addEventListener("click", () => {
+          const pickedWid = Number(row.dataset.eqAffWid);
+          state.equipPreviewWid = pickedWid;
+          state.equipSelectedWid = pickedWid;
+          renderEquipView();
+        });
+      });
+    } else if (state.equipCenterTab === 2) {
+      const gains = computeNextStatGains(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, 5, res.lv, state.enemyPreset, state.activeBuffs);
+      bodyEl.innerHTML = `<div class="muted" style="font-size:11.5px;margin-bottom:6px;">Projected gains for +5 investment into each attribute:</div>` +
+        STAT_KEYS.map((sk, idx) => {
+          const g = gains[sk];
+          const spl = w.cat && Math.abs(g.spell) > 0.05 ? ` · +${g.spell.toFixed(1)} Spell` : "";
+          return `<div class="er-row">
+            <span>+5 ${stNames[idx]} (${state.stats[sk]} &rarr; ${Math.min(199, state.stats[sk] + 5)})</span>
+            <span class="er-num"><span style="color:#e6c678;">+${g.ar.toFixed(1)} AR</span> <span class="er-blue">(+${g.eff.toFixed(1)} Eff${spl})</span></span>
+          </div>`;
+        }).join("") +
+        `<div style="margin-top:10px;"><button type="button" class="top-btn gold-outline" id="eqOpenOptBtn">Open Full Respec Optimizer &rarr;</button></div>`;
+      const optBtn = $("eqOpenOptBtn");
+      if (optBtn) {
+        optBtn.addEventListener("click", async () => {
+          await switchMainView("calc");
+          renderInspectorDetails(res, true);
+          openDrawer("optimizer");
+        });
+      }
+    } else {
+      const cmp = state.compareIds
+        .map((id) => state.byId.get(id))
+        .filter(Boolean)
+        .map((cw) => computeWeapon(cw, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, -1, state.enemyPreset, state.activeBuffs));
+      if (!cmp.length) {
+        bodyEl.innerHTML = `<div class="muted" style="padding:14px 4px;">No armaments pinned yet. Press <b>P</b> or click <b>+ Pin Compare</b> above to pin weapons.</div>`;
+      } else {
+        const base = cmp[0];
+        bodyEl.innerHTML = cmp.map((r, i) => {
+          const de = Math.round(r.eff - base.eff);
+          const dStr = i === 0 ? "Base" : (de >= 0 ? `+${de}` : `${de}`);
+          return `<div class="er-row ${r.weapon.id === w.id ? "active" : ""}" data-eq-cmp-wid="${r.weapon.id}">
+            <span>${escHtml(r.weapon.name)} +${r.lv}</span>
+            <span class="er-num">AR ${Math.round(r.total)} &middot; <span class="er-blue">Eff ${Math.round(r.eff)}</span> <span class="muted">(${dStr})</span></span>
+          </div>`;
+        }).join("");
+        bodyEl.querySelectorAll("[data-eq-cmp-wid]").forEach((row) => {
+          row.addEventListener("click", () => {
+            const pickedWid = Number(row.dataset.eqCmpWid);
+            state.equipPreviewWid = pickedWid;
+            state.equipSelectedWid = pickedWid;
+            renderEquipView();
+          });
+        });
+      }
+    }
+  }
+
+  function renderEquipView() {
+    if (!state.data || !$("equipWorkspace")) return;
+    const a = getErMenuAssets();
+
+    // Sync right-column dropdowns with main calculator controls
+    const syncSelect = (dstId, srcId) => {
+      const dst = $(dstId);
+      const src = $(srcId);
+      if (!dst || !src) return;
+      if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
+      dst.value = src.value;
+    };
+    syncSelect("eqCharSel", "charSelect");
+    syncSelect("eqLevelSel", "levelSelect");
+    syncSelect("eqGreaseSel", "greaseSel");
+    syncSelect("eqEnemySel", "enemySelect");
+
+    const condBtn = $("eqCondTogBtn");
+    if (condBtn) {
+      condBtn.classList.toggle("on", Boolean(state.condTalismans));
+      condBtn.textContent = state.condTalismans ? "\u25C6 Conditional Active" : "\u25C7 Conditional Off";
+    }
+    const twoHBtn = $("eqTwoHandBtn");
+    if (twoHBtn) {
+      twoHBtn.classList.toggle("on", Boolean(state.twoHand));
+      twoHBtn.innerHTML = state.twoHand ? "&#9670; Two-Handing (1.5&times; STR)" : "&#9671; One-Handing (1&times; STR)";
+    }
+    const saveLbl = $("eqSaveName");
+    if (saveLbl) {
+      saveLbl.textContent = state.ramLive ? "\u2713" : (state.savePath ? state.savePath.split(/[/\\]/).pop() : "Manual");
+    }
+
+    const selSlot = state.equipSelectedSlot || { kind: "rh", idx: 0 };
+    const selRes = getEquipSelectedWeaponResult();
+    if ($("eqActiveSlotCat")) {
+      const handLbl = `${selSlot.kind === "lh" ? "Left" : "Right"} Hand Armament ${selSlot.idx + 1}`;
+      $("eqActiveSlotCat").textContent = (state.equipPreviewWid && selRes && state.equipSelectedSlot) ? `${handLbl} (Preview)` : handLbl;
+    }
+    if ($("eqActiveSlotName")) {
+      $("eqActiveSlotName").textContent = selRes ? `${selRes.weapon.name} +${selRes.lv}` : "-";
+    }
+
+    // Populate RH (top row) and LH (bottom row) sockets accurately from equippedSlots
+    const rhSlots = (state.equippedSlots && state.equippedSlots.rh) || [null, null, null];
+    const lhSlots = (state.equippedSlots && state.equippedSlots.lh) || [null, null, null];
+    const renderWeaponSlots = (rowEl, slots, silKey, kind) => {
+      if (!rowEl) return;
+      let html = "";
+      for (let i = 0; i < 3; i++) {
+        const entry = slots[i];
+        const w = entry ? state.byId.get(entry.weaponId) : null;
+        const slotLbl = `${kind === "rh" ? "Right" : "Left"} Hand Armament ${i + 1}`;
+        const isActive = selSlot.kind === kind && selSlot.idx === i;
+        if (w) {
+          const lv = entry.level;
+          const gem = getErAffGem(w.aff);
+          const icUri = getItemIconUri("wep", w) || a.ic_weapon || "";
+          html += `<div class="waku ${isActive ? "active" : ""}" data-eq-wid="${w.id}" data-slot-kind="${kind}" data-slot-idx="${i}" data-slot-lbl="${slotLbl}" title="${escHtml(w.name)} +${lv} (${escHtml(w.aff)}) — click again to swap">
+            <div class="waku-glow"></div>
+            <span class="eq-badge">+${lv}</span>
+            ${gem ? `<img class="aff-gem" src="${gem}" alt="" />` : ""}
+            <img class="waku-ic" src="${icUri}" alt="" />
+            <div class="waku-cap">${escHtml(w.baseName || w.name)}</div>
+          </div>`;
+        } else {
+          html += `<div class="waku ${isActive ? "active" : ""}" data-eq-open-calc="1" data-slot-kind="${kind}" data-slot-idx="${i}" data-slot-lbl="${slotLbl}" title="${slotLbl} — click to equip from Armory">
+            <div class="waku-glow"></div>
+            <img class="waku-sil" src="${a[silKey] || ""}" alt="" />
+          </div>`;
+        }
+      }
+      rowEl.innerHTML = html;
+      rowEl.querySelectorAll("[data-eq-wid]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const clickedWid = Number(el.dataset.eqWid);
+          const clickedKind = el.dataset.slotKind === "lh" ? "lh" : "rh";
+          const clickedIdx = Number(el.dataset.slotIdx) || 0;
+          const alreadyActive =
+            state.equipSelectedSlot &&
+            state.equipSelectedSlot.kind === clickedKind &&
+            state.equipSelectedSlot.idx === clickedIdx &&
+            !state.equipPreviewWid;
+          if ($("eqActiveSlotCat")) $("eqActiveSlotCat").textContent = el.dataset.slotLbl || "Armament";
+          if (alreadyActive) {
+            openArmoryForSlot(clickedKind, clickedIdx, clickedWid, el.dataset.slotLbl);
+          } else {
+            state.equipPreviewWid = null;
+            state.equipSelectedSlot = { kind: clickedKind, idx: clickedIdx };
+            state.equipSelectedWid = clickedWid;
+            renderEquipView();
+          }
+        });
+      });
+      rowEl.querySelectorAll("[data-eq-open-calc]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const clickedKind = el.dataset.slotKind === "lh" ? "lh" : "rh";
+          const clickedIdx = Number(el.dataset.slotIdx) || 0;
+          state.equipPreviewWid = null;
+          state.equipSelectedSlot = { kind: clickedKind, idx: clickedIdx };
+          openArmoryForSlot(clickedKind, clickedIdx, 0, el.dataset.slotLbl);
+        });
+      });
+    };
+    renderWeaponSlots($("eqRhRow"), rhSlots, "sl_r_wep", "rh");
+    renderWeaponSlots($("eqLhRow"), lhSlots, "sl_l_wep", "lh");
+    const renderAmmoSlots = (rowEl, ids, silKey, labelPrefix) => {
+      if (!rowEl) return;
+      const ammoDb = (state.data && state.data.ammo) || {};
+      rowEl.innerHTML = [0, 1].map((idx) => {
+        const aid = ids && ids[idx];
+        const am = aid ? ammoDb[String(aid)] : null;
+        const ic = am ? (getItemIconUri("ammo", aid) || a[silKey] || "") : (a[silKey] || "");
+        const atk = am && Array.isArray(am.atk) ? am.atk.reduce((s, v) => s + (v || 0), 0) : 0;
+        const tip = am ? `${am.n}${atk ? ` (AR ${atk})` : ""}` : `${labelPrefix} ${idx + 1} (Empty)`;
+        return `<div class="waku" data-ammo-kind="${labelPrefix}" data-ammo-idx="${idx}" data-ammo-name="${escHtml(am ? am.n : "Empty")}" title="${escHtml(tip)}">
+          <div class="waku-glow"></div>
+          ${am && atk ? `<span class="eq-badge">${atk}</span>` : ""}
+          <img class="${am ? "waku-ic" : "waku-sil"}" src="${ic}" alt="" />
+          ${am ? `<div class="waku-cap">${escHtml(am.n)}</div>` : ""}
+        </div>`;
+      }).join("");
+      rowEl.querySelectorAll("[data-ammo-kind]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const idx = Number(el.dataset.ammoIdx) + 1;
+          if ($("eqActiveSlotCat")) $("eqActiveSlotCat").textContent = `${el.dataset.ammoKind} Slot ${idx}`;
+          if ($("eqActiveSlotName")) $("eqActiveSlotName").textContent = el.dataset.ammoName || "Empty";
+        });
+      });
+    };
+    renderAmmoSlots($("eqArrowRow"), state.arrowIds, "sl_arrow", "Arrow");
+    renderAmmoSlots($("eqBoltRow"), state.boltIds, "sl_bolt", "Bolt");
+
+    // Populate Armor sockets with real extracted armor icons
+    const armors = state.data.armors || {};
+    const armSilKeys = ["sl_head", "sl_body", "sl_hand", "sl_leg"];
+    const armNames = ["Head", "Chest", "Arms", "Legs"];
+    if ($("eqArmRow")) {
+      $("eqArmRow").innerHTML = [0, 1, 2, 3].map((slot) => {
+        const aid = state.armorIds[slot];
+        const arm = aid ? armors[String(aid)] : null;
+        const armUri = arm ? (getItemIconUri("arm", aid) || a.ic_armor || a[armSilKeys[slot]] || "") : (a[armSilKeys[slot]] || "");
+        const isEditing = state.equipPickerTarget && state.equipPickerTarget.type === "armor" && state.equipPickerTarget.slot === slot && !$("eqSlotPicker").classList.contains("hidden");
+        return `<div class="waku ${isEditing ? "active" : ""}" data-eq-armor-slot="${slot}" title="${arm ? escHtml(arm.n + formatGearBonusTag(arm)) : armNames[slot] + " (Click to change)"}">
+          <div class="waku-glow"></div>
+          ${arm ? '<span class="eq-badge">E</span>' : ""}
+          <img class="${arm ? "waku-ic" : "waku-sil"}" src="${armUri}" alt="" />
+          <div class="waku-cap">${arm ? escHtml(arm.n) : armNames[slot]}</div>
+        </div>`;
+      }).join("");
+      $("eqArmRow").querySelectorAll("[data-eq-armor-slot]").forEach((el) => {
+        el.addEventListener("click", () => {
+          if ($("eqActiveSlotCat")) $("eqActiveSlotCat").textContent = `${armNames[Number(el.dataset.eqArmorSlot)]} Armor`;
+          openEquipSlotPicker("armor", Number(el.dataset.eqArmorSlot));
+        });
+      });
+    }
+
+    // Populate Talisman sockets with real extracted talisman icons
+    const tals = state.data.talismans || {};
+    if ($("eqTalRow")) {
+      $("eqTalRow").innerHTML = [0, 1, 2, 3].map((slot) => {
+        const tid = state.talismanIds[slot];
+        const tal = tid ? tals[String(tid)] : null;
+        const talUri = tal ? (getItemIconUri("tal", tid) || a.ic_attack || a.sl_tal || "") : (a.sl_tal || "");
+        const isEditing = state.equipPickerTarget && state.equipPickerTarget.type === "talisman" && state.equipPickerTarget.slot === slot && !$("eqSlotPicker").classList.contains("hidden");
+        return `<div class="waku ${isEditing ? "active" : ""}" data-eq-tal-slot="${slot}" title="${tal ? escHtml(tal.n + formatGearBonusTag(tal)) : `Talisman ${slot + 1} (Click to change)`}">
+          <div class="waku-glow"></div>
+          ${tal ? '<span class="eq-badge">E</span>' : ""}
+          <img class="${tal ? "waku-ic" : "waku-sil"}" src="${talUri}" alt="" />
+          <div class="waku-cap">${tal ? escHtml(tal.n) : `Talisman ${slot + 1}`}</div>
+        </div>`;
+      }).join("");
+      $("eqTalRow").querySelectorAll("[data-eq-tal-slot]").forEach((el) => {
+        el.addEventListener("click", () => {
+          if ($("eqActiveSlotCat")) $("eqActiveSlotCat").textContent = `Talisman Pouch ${Number(el.dataset.eqTalSlot) + 1}`;
+          openEquipSlotPicker("talisman", Number(el.dataset.eqTalSlot));
+        });
+      });
+    }
+
+    // Core Character Vitals & Memory Slots (synced to active save or live RAM)
+    if ($("eqCoreVitals")) {
+      const ch = state.ramLive && state.ramChar ? state.ramChar : (state.characters.find((c) => c.slot === state.activeSlot) || null);
+      const cs = (ch && ch.stats) || {};
+      const vig = cs.vig || 15;
+      const mnd = cs.mnd || 10;
+      const end = cs.end || 11;
+      const lv = ch ? ch.level : Math.max(1, vig + mnd + end + state.stats.str + state.stats.dex + state.stats.int + state.stats.fai + state.stats.arc - 79);
+      $("eqCoreVitals").innerHTML = `
+        <div><span class="muted">Level</span> <b class="er-num">${lv}</b></div>
+        <div><span class="muted">VIG</span> <b class="er-num">${vig}</b></div>
+        <div><span class="muted">MND/END</span> <b class="er-num">${mnd}/${end}</b></div>
+      `;
+    }
+    if ($("eqMemTiles")) {
+      const spellDb = (state.data && state.data.spells) || {};
+      const sList = Array.isArray(state.spellIds) ? state.spellIds : [];
+      const tileCount = Math.max(4, Math.min(12, sList.length));
+      if ($("eqMemCountLbl")) $("eqMemCountLbl").textContent = sList.length ? `Memory Slots (${sList.length})` : "Memory Slots";
+      const tiles = [];
+      for (let i = 0; i < tileCount; i++) {
+        const sid = sList[i] || 0;
+        const sp = sid ? spellDb[String(sid)] : null;
+        const spIc = sid ? (getItemIconUri("spell", sid) || a.sl_mem || "") : (a.sl_mem || "");
+        const title = sp ? sp.n : `Memory Slot ${i + 1}`;
+        tiles.push(`<div class="mem-tile${sp ? " filled" : ""}" data-spell-idx="${i}" data-spell-name="${escHtml(sp ? sp.n : "Empty")}" title="${escHtml(title)}"><img src="${spIc}" alt="" /></div>`);
+      }
+      $("eqMemTiles").innerHTML = tiles.join("");
+      $("eqMemTiles").querySelectorAll("[data-spell-idx]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const idx = Number(el.dataset.spellIdx) + 1;
+          if ($("eqActiveSlotCat")) $("eqActiveSlotCat").textContent = `Memorized Spell ${idx}`;
+          if ($("eqActiveSlotName")) $("eqActiveSlotName").textContent = el.dataset.spellName || "Empty";
+        });
+      });
+    }
+
+    // Temporary Buff sockets synced with #buffPillsRow
+    const biMap = (state.buffIcons && state.buffIcons.icons) || {};
+    const fexUri = (fk) => (biMap[fk] ? `data:image/png;base64,${biMap[fk]}` : "");
+    const buffSpecs = [
+      ["goldenVow", "Golden Vow", "x1.15 All", getItemIconUri("spell", 6600) || fexUri("fex_27") || a.ic_attack || ""],
+      ["fgms", "FGMS", "x1.20 P/F", getItemIconUri("spell", 6050) || fexUri("fex_54") || a.aff_magma || a.ic_attack || ""],
+      ["howl", "Shabriri", "x1.25 All", getItemIconUri("spell", 7330) || fexUri("fex_63") || a.aff_fell || a.ic_attack || ""],
+      ["exultBleed", "Blood Exult.", "x1.20 All", fexUri("fex_54") || a.aff_bloody || a.ic_attack || ""],
+      ["exultPoison", "Rot Exult.", "x1.20 All", fexUri("fex_14") || fexUri("fex_63") || a.aff_poison || a.ic_corr || ""],
+      ["twoHandTal", "2H Talisman", "x1.15 (2H)", fexUri("fex_78") || a.ic_weapon || a.ic_attack || ""],
+    ];
+    if ($("eqBuffRow")) {
+      $("eqBuffRow").innerHTML = buffSpecs.map(([k, lbl, mult, ic]) => {
+        const on = Boolean(state.buffToggles[k]);
+        return `<div class="waku ${on ? "active" : ""}" data-eq-buff="${k}" title="${escHtml(lbl)} (${escHtml(mult)})">
+          <div class="waku-glow"></div>
+          ${on ? `<span class="eq-badge" style="font-size:8px;">ON</span>` : ""}
+          <img class="waku-ic" style="width:20px;height:20px;${on ? "" : "opacity:0.45;"}" src="${ic}" alt="" />
+          <div class="waku-cap">${escHtml(lbl)}</div>
+        </div>`;
+      }).join("");
+      $("eqBuffRow").querySelectorAll("[data-eq-buff]").forEach((el) => {
+        el.addEventListener("click", () => {
+          const btn = document.querySelector(`#buffPillsRow .buff-pill[data-buff="${el.dataset.eqBuff}"]`);
+          if (btn) btn.click();
+        });
+      });
+    }
+    if ($("eqBuffSummary") && $("gearBonusSummary")) {
+      $("eqBuffSummary").textContent = $("gearBonusSummary").textContent;
+    }
+
+    // Right column editable attribute rows synced with #strInput..#arcInput (preserve input focus)
+    const attrMeta = [
+      ["str", "Strength", "strInput", 0],
+      ["dex", "Dexterity", "dexInput", 1],
+      ["int", "Intelligence", "intInput", 2],
+      ["fai", "Faith", "faiInput", 3],
+      ["arc", "Arcane", "arcInput", 4],
+    ];
+    const sb = (state.activeBuffs && state.activeBuffs.statBonus) ? state.activeBuffs.statBonus : [0, 0, 0, 0, 0];
+    const attrHost = $("eqAttrList");
+    if (attrHost) {
+      if (!attrHost.querySelector("[data-eq-attr]")) {
+        attrHost.innerHTML = attrMeta.map(([k, label, srcId]) => `
+          <div class="eq-attr-row" data-eq-attr-row="${k}">
+            <span class="eq-attr-lbl" data-eq-attr-lbl="${k}">${label}</span>
+            <span class="eq-attr-ctrl">
+              <button type="button" class="arr-btn" data-eq-step="${srcId}:-1" title="-1 ${label}"></button>
+              <input type="number" min="1" max="199" class="eq-attr-input er-num" data-eq-attr="${srcId}" value="${state.stats[k]}" />
+              <button type="button" class="arr-btn arr-r" data-eq-step="${srcId}:1" title="+1 ${label}"></button>
+            </span>
+          </div>`).join("");
+        attrHost.querySelectorAll("[data-eq-step]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const [srcId, delta] = btn.dataset.eqStep.split(":");
+            const inp = $(srcId);
+            if (!inp) return;
+            const next = Math.max(1, Math.min(199, (parseInt(inp.value, 10) || 10) + Number(delta)));
+            inp.value = String(next);
+            inp.dispatchEvent(new Event("input"));
+          });
+        });
+        attrHost.querySelectorAll("[data-eq-attr]").forEach((inp) => {
+          inp.addEventListener("input", () => {
+            const src = $(inp.dataset.eqAttr);
+            if (!src) return;
+            src.value = inp.value;
+            src.dispatchEvent(new Event("input"));
+          });
+        });
+      }
+      for (const [k, label, srcId, idx] of attrMeta) {
+        const lblEl = attrHost.querySelector(`[data-eq-attr-lbl="${k}"]`);
+        if (lblEl) {
+          const ic = getErInlineIconHtml(`attr_${k}`, label);
+          const bonus = sb[idx] || 0;
+          const bTag = bonus !== 0 ? ` <span class="er-green">(${bonus > 0 ? "+" : ""}${bonus})</span>` : "";
+          const twoHTag = k === "str" && state.twoHand
+            ? ` <span class="er-blue" style="font-size:10.5px;">&rarr;${Math.trunc((state.stats.str + bonus) * 1.5)}</span>`
+            : "";
+          lblEl.innerHTML = `${ic}${label}${bTag}${twoHTag}`;
+        }
+        const inpEl = attrHost.querySelector(`[data-eq-attr="${srcId}"]`);
+        if (inpEl && document.activeElement !== inpEl) {
+          inpEl.value = String(state.stats[k]);
+        }
+      }
+    }
+
+    // Right column Equipped Attack Power clickable list
+    if ($("eqAtkSummary")) {
+      const slotItems = [];
+      for (const [kind, prefix, arr] of [["rh", "R", rhSlots], ["lh", "L", lhSlots]]) {
+        for (let i = 0; i < 3; i++) {
+          const ent = arr[i];
+          const w = ent ? state.byId.get(ent.weaponId) : null;
+          if (!w) continue;
+          const r = computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, ent.level, state.enemyPreset, state.activeBuffs);
+          slotItems.push({ kind, idx: i, tag: `${prefix}${i + 1}`, res: r });
+        }
+      }
+      if (!slotItems.length && selRes) {
+        slotItems.push({ kind: selSlot.kind, idx: selSlot.idx, tag: "R1", res: selRes });
+      }
+      $("eqAtkSummary").innerHTML = slotItems.map(({ kind, idx, tag, res: r }) => {
+        const active = selSlot.kind === kind && selSlot.idx === idx;
+        return `
+        <div class="er-row ${active ? "active" : ""}" data-eq-atk-wid="${r.weapon.id}" data-slot-kind="${kind}" data-slot-idx="${idx}" style="padding:3px 8px;font-size:12px;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:155px;"><span class="muted">${tag}</span> ${escHtml(r.weapon.name)} +${r.lv}</span>
+          <span class="er-num">${Math.round(r.total)} <span class="muted">/</span> <b class="er-blue">${Math.round(r.eff)}</b></span>
+        </div>
+      `;
+      }).join("");
+      $("eqAtkSummary").querySelectorAll("[data-eq-atk-wid]").forEach((row) => {
+        row.addEventListener("click", () => {
+          state.equipPreviewWid = null;
+          state.equipSelectedSlot = { kind: row.dataset.slotKind === "lh" ? "lh" : "rh", idx: Number(row.dataset.slotIdx) || 0 };
+          state.equipSelectedWid = Number(row.dataset.eqAtkWid);
+          renderEquipView();
+        });
+      });
+    }
+
+    renderEquipCenterDetail(selRes);
+  }
+
+  function bindEquipUiEvents() {
+    const mirrorChange = (eqId, srcId) => {
+      const eqEl = $(eqId);
+      const srcEl = $(srcId);
+      if (!eqEl || !srcEl) return;
+      eqEl.addEventListener("change", () => {
+        srcEl.value = eqEl.value;
+        srcEl.dispatchEvent(new Event("change"));
+      });
+    };
+    mirrorChange("eqCharSel", "charSelect");
+    mirrorChange("eqLevelSel", "levelSelect");
+    mirrorChange("eqGreaseSel", "greaseSel");
+    mirrorChange("eqEnemySel", "enemySelect");
+
+    const mirrorClick = (eqId, srcId) => {
+      const eqEl = $(eqId);
+      const srcEl = $(srcId);
+      if (eqEl && srcEl) eqEl.addEventListener("click", () => srcEl.click());
+    };
+    mirrorClick("eqReloadBtn", "sideReloadBtn");
+    mirrorClick("eqBrowseBtn", "sideBrowseBtn");
+    mirrorClick("eqMatchLvBtn", "topMatchEqBtn");
+    mirrorClick("eqMaxLvBtn", "maxUpgradeBtn");
+    mirrorClick("eqRevertBtn", "revertStatsBtn");
+    mirrorClick("eqGearResetBtn", "gearResetBtn");
+    mirrorClick("eqClearBuffsBtn", "gearClearBuffsBtn");
+
+    if ($("eqCondTogBtn")) {
+      $("eqCondTogBtn").addEventListener("click", () => {
+        $("condTalismansCb").checked = !$("condTalismansCb").checked;
+        $("condTalismansCb").dispatchEvent(new Event("change"));
+      });
+    }
+    if ($("eqTwoHandBtn")) {
+      $("eqTwoHandBtn").addEventListener("click", () => {
+        $("twoHandCb").checked = !$("twoHandCb").checked;
+        $("twoHandCb").dispatchEvent(new Event("change"));
+      });
+    }
+    if ($("eqPickerCloseBtn")) {
+      $("eqPickerCloseBtn").addEventListener("click", () => {
+        $("eqSlotPicker").classList.add("hidden");
+        state.equipPickerTarget = null;
+        renderEquipView();
+      });
+    }
+    if ($("eqPickerSel")) {
+      $("eqPickerSel").addEventListener("change", () => {
+        const tgt = state.equipPickerTarget;
+        if (!tgt) return;
+        const srcSel = tgt.type === "armor"
+          ? $(["armorHeadSel", "armorChestSel", "armorArmsSel", "armorLegsSel"][tgt.slot])
+          : $(`tal${tgt.slot}Sel`);
+        if (srcSel) {
+          srcSel.value = $("eqPickerSel").value;
+          srcSel.dispatchEvent(new Event("change"));
+        }
+      });
+    }
+
+    document.querySelectorAll("#eqSubTabs .subtab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.equipCenterTab = Number(btn.dataset.eqtab) || 0;
+        renderEquipView();
+      });
+    });
+    if ($("erKeyFCenter")) {
+      $("erKeyFCenter").addEventListener("click", () => {
+        state.equipCenterTab = (state.equipCenterTab + 1) % 4;
+        renderEquipView();
+      });
+    }
+    if ($("eqOpenCalcBtn")) {
+      $("eqOpenCalcBtn").addEventListener("click", async () => {
+        const wid = state.equipSelectedWid;
+        await switchMainView("calc");
+        if (wid && state.byId.has(wid)) {
+          const item = state.flatItems.find((x) => x.kind === "row" && x.res.weapon.id === wid);
+          const res = item ? item.res : getEquipSelectedWeaponResult();
+          if (res) {
+            renderInspectorDetails(res, true);
+            openDrawer("details");
+          }
+        }
+      });
+    }
+    if ($("eqDetBigBox")) {
+      $("eqDetBigBox").addEventListener("click", () => {
+        if ($("eqOpenCalcBtn")) $("eqOpenCalcBtn").click();
+      });
+    }
+    if ($("eqDetAshBox")) {
+      $("eqDetAshBox").addEventListener("click", () => {
+        const res = getEquipSelectedWeaponResult();
+        if (!res) return;
+        const list = (state.byBase.get(res.weapon.baseId) || []).slice().sort((a, b) => a.id - b.id);
+        if (list.length > 1) {
+          const idx = list.findIndex((x) => x.id === res.weapon.id);
+          const nextWid = list[(idx + 1) % list.length].id;
+          state.equipPreviewWid = nextWid;
+          state.equipSelectedWid = nextWid;
+          renderEquipView();
+        }
+      });
+    }
+    if ($("eqChangeSlotBtn")) {
+      $("eqChangeSlotBtn").addEventListener("click", () => {
+        const s = state.equipSelectedSlot || { kind: "rh", idx: 0 };
+        const lbl = `${s.kind === "lh" ? "Left" : "Right"} Hand Armament ${s.idx + 1}`;
+        const curEnt = state.equippedSlots && state.equippedSlots[s.kind] ? state.equippedSlots[s.kind][s.idx] : null;
+        openArmoryForSlot(s.kind, s.idx, curEnt ? curEnt.weaponId : (state.equipSelectedWid || 0), lbl);
+      });
+    }
+    if ($("eqShowMapBtn")) {
+      $("eqShowMapBtn").addEventListener("click", () => {
+        const res = getEquipSelectedWeaponResult();
+        if (res) locateWeaponOnMap(res.weapon);
+      });
+    }
+    if ($("eqPinBtn")) {
+      $("eqPinBtn").addEventListener("click", () => {
+        const res = getEquipSelectedWeaponResult();
+        if (res) pinWeaponId(res.weapon.id, false);
+      });
+    }
+  }
+
+  const PV_SAMPLE_BOSS = [
+    {
+      slot: 0,
+      name: "Crucible Knight Ordovis",
+      hp: 2840,
+      maxHp: 4412,
+      stance: 46.2,
+      maxStance: 80.0,
+      stanceReset: 3.8,
+      stanceBroken: false,
+      stanceKind: "stance",
+      statuses: [
+        { key: "bleed", label: "Bleed", cur: 135, max: 245 },
+        { key: "frost", label: "Frost", cur: 85, max: 260 },
+      ],
+    },
+  ];
+
+  function renderPipViewerWorkspace() {
+    const shell = $("pvOverlayShell");
+    const op = Math.max(0.15, Math.min(1.0, state.pipOpacity || 1.0));
+    const mode = ["hud", "map", "stats"].includes(state.pvPreviewMode) ? state.pvPreviewMode : "hud";
+    const corner = ["bottom-right", "top-right", "bottom-left", "top-left"].includes(state.pipCorner) ? state.pipCorner : "bottom-right";
+    const cCls = { "bottom-right": "corner-br", "top-right": "corner-tr", "bottom-left": "corner-bl", "top-left": "corner-tl" }[corner];
+    if (shell) {
+      shell.className = `pv-overlay-shell ${cCls} mode-${mode}`;
+      shell.style.opacity = String(op);
+    }
+
+    const bi = (state.buffIcons && state.buffIcons.icons) || {};
+    const visLiveBuffs = state.ramLive ? getVisiblePlayerBuffs() : [];
+    const renderPreviewBuffTiles = (szPx) => {
+      if (visLiveBuffs.length) {
+        return visLiveBuffs.map((b) => {
+          const meta = resolveBuffMeta(b);
+          const dur = Math.max(0.1, Number(b.dur || 1));
+          const rem = getInterpolatedBuffRem(b);
+          const deg = ((1 - Math.max(0, Math.min(1, rem / dur))) * 360).toFixed(1);
+          return `<div class="buff-tile${meta.debuff ? " debuff" : ""}${(state.buffExpFlash && !meta.debuff && rem <= 10) ? " expiring" : ""}" style="--sz:${szPx}px;--deg:${deg}deg">
+            ${meta.src ? `<img src="${meta.src}" alt="" />` : ""}
+            <div class="buff-sweep"></div>
+            <div class="buff-ring"></div>
+            <div class="buff-count">${formatBuffSec(rem)}</div>
+            ${meta.debuff ? '<div class="buff-debuff-tag">&#9660;</div>' : ""}
+          </div>`;
+        }).join("");
+      }
+      const sample = [
+        ["fex_54", "52", 125, false, false],
+        ["fex_27", "34", 195, false, false],
+        ["fex_134", "9", 285, false, Boolean(state.buffExpFlash)],
+        ["fex_53", "22", 160, true, false],
+      ];
+      return sample.map(([fk, sec, deg, deb, exp]) => {
+        const uri = bi[fk] ? `data:image/png;base64,${bi[fk]}` : "";
+        return `<div class="buff-tile${deb ? " debuff" : ""}${exp ? " expiring" : ""}" style="--sz:${szPx}px;--deg:${deg}deg">
+          ${uri ? `<img src="${uri}" alt="" />` : ""}
+          <div class="buff-sweep"></div>
+          <div class="buff-ring"></div>
+          <div class="buff-count">${sec}</div>
+          ${deb ? '<div class="buff-debuff-tag">&#9660;</div>' : ""}
+        </div>`;
+      }).join("");
+    };
+
+    if ($("pvMapBuffPreview")) {
+      $("pvMapBuffPreview").classList.toggle("hidden", !state.pipMapBuffHud);
+      $("pvMapBuffPreview").innerHTML = state.pipMapBuffHud ? renderPreviewBuffTiles(24) : "";
+    }
+    const pvGripPlace = ["weapon", "header", "map"].includes(state.pipGripPlacement) ? state.pipGripPlacement : "weapon";
+    const pvShowMapGrip = pvGripPlace === "map" && mode !== "stats";
+    if ($("pvMapGripPreview")) {
+      $("pvMapGripPreview").classList.toggle("hidden", !pvShowMapGrip);
+      $("pvMapGripPreview").innerHTML = pvShowMapGrip ? buildPipGripTileHtml(state.armStyle, true) : "";
+    }
+
+    const bossHost = $("pvEnemyBox");
+    const targetSlot = (mode !== "stats" && state.pipBossPlacement !== "below")
+      ? $("pvEnemyInsideSlot")
+      : $("pvEnemyBelowSlot");
+    if (bossHost && targetSlot && bossHost.parentElement !== targetSlot) {
+      targetSlot.appendChild(bossHost);
+    }
+    const bossData = (state.ramLive && Array.isArray(state.ramBosses) && state.ramBosses.length)
+      ? state.ramBosses
+      : PV_SAMPLE_BOSS;
+    if (bossHost) {
+      const showBossPreview = mode === "stats" ? Boolean(state.pipBossHud) : Boolean(state.pipMapBossHud);
+      bossHost.classList.toggle("hidden", !showBossPreview);
+      bossHost.innerHTML = showBossPreview ? buildBossCardsHtml(bossData, true) : "";
+    }
+
+    const statsBox = $("pvStatsBox");
+    if (statsBox) {
+      const ch = state.ramLive && state.ramChar
+        ? state.ramChar
+        : (state.characters.find((c) => c.slot === state.activeSlot) || null);
+      const chName = ch ? `${ch.name} (Lv.${ch.level})` : "Manual Stats";
+      const cs = (ch && ch.stats) || {};
+      const entries = [
+        ["VIG", cs.vig ?? "-"], ["MND", cs.mnd ?? "-"], ["END", cs.end ?? "-"], ["STR", state.stats.str],
+        ["DEX", state.stats.dex], ["INT", state.stats.int], ["FAI", state.stats.fai], ["ARC", state.stats.arc],
+      ];
+      const showEff = state.enemyPreset !== "Raw AR (No Defense)";
+      const wepLimit = mode === "hud" ? 3 : 5;
+      const wepHtml = buildPipWeaponRows(wepLimit, showEff, pvGripPlace);
+      const pvHasFeaturedWep = pvGripPlace === "weapon" && wepHtml.includes("featured-grip");
+      const pvShowHdrGrip = pvGripPlace === "header" || (pvGripPlace === "map" && mode === "stats") || (pvGripPlace === "weapon" && !pvHasFeaturedWep);
+      const arSrcLbl = (state.ramLive && state.ramLiveArBuffs) ? "AR" : (showEff ? escHtml(state.enemyPreset) : "Raw AR");
+      const statsBuffHtml = (mode === "stats" && state.pipBuffHud)
+        ? `<div class="pip-buff-row">${renderPreviewBuffTiles(28)}</div>`
+        : "";
+      const pvHdrTileHtml = pvShowHdrGrip
+        ? `<span class="pip-hdr-grip-slot">${buildPipGripTileHtml(state.armStyle, true)}</span>`
+        : "";
+      statsBox.innerHTML = `
+        <div class="pip-stats-hdr">
+          <span class="pip-char-name">${escHtml(chName)}</span>
+          <span class="pip-hdr-right">${pvHdrTileHtml}<span class="pip-ram-badge ${state.ramLive ? "on" : "off"}">${state.ramLive ? RAM_CHECK_SVG : RAM_CROSS_SVG}</span></span>
+        </div>
+        ${statsBuffHtml}
+        <div class="pip-stats-grid">${entries.map(([k, v]) => `<div class="pip-stat-cell"><span class="pip-stat-lbl">${k}</span><span class="pip-stat-val">${escHtml(String(v))}</span></div>`).join("")}</div>
+        <div class="pip-subhdr"><span>Equipped Weapons</span><span class="pip-preset-tag">${buildPipStanceBadgeHtml(state.armStyle)}<span>${arSrcLbl}</span></span></div>
+        <div class="pip-weapons-list">${wepHtml}</div>
+      `;
+    }
+
+    if ($("pvPreviewModeSel")) $("pvPreviewModeSel").value = mode;
+    if ($("pvCornerSel")) $("pvCornerSel").value = corner;
+    if ($("pvBossPlaceSel")) $("pvBossPlaceSel").value = state.pipBossPlacement;
+    if ($("pvGripPlaceSel")) $("pvGripPlaceSel").value = pvGripPlace;
+    if ($("pvBossHudCb")) $("pvBossHudCb").checked = Boolean(state.pipBossHud);
+    if ($("pvMapBossHudCb")) $("pvMapBossHudCb").checked = Boolean(state.pipMapBossHud);
+    if ($("pvBuffHudCb")) $("pvBuffHudCb").checked = Boolean(state.pipBuffHud);
+    if ($("pvMapBuffCb")) $("pvMapBuffCb").checked = Boolean(state.pipMapBuffHud);
+    if ($("pvFollowCb")) $("pvFollowCb").checked = Boolean(mapState.followPlayer);
+    if ($("pvDesignSel")) $("pvDesignSel").value = String(state.pipBossDesign || "1");
+    updateHiddenLoopBuffsUi();
+    const opPct = Math.round(op * 100);
+    if ($("pvOpRng")) $("pvOpRng").value = String(opPct);
+    if ($("pvOpVal")) $("pvOpVal").textContent = `${opPct}%`;
+    if ($("pvMapOpLbl")) $("pvMapOpLbl").textContent = `Opacity ${opPct}%`;
+    const layerNames = { m00: "The Lands Between", m01: "Underground", m10: "Shadow Realm" };
+    if ($("pvMapLayerTitle")) $("pvMapLayerTitle").textContent = layerNames[mapState.layer] || "Minimap HUD";
+    const cnv = $("pvMapCanvas");
+    if (cnv) {
+      const ctx = cnv.getContext("2d");
+      ctx.fillStyle = "#191610";
+      ctx.fillRect(0, 0, cnv.width, cnv.height);
+      const img = mapState.images && (mapState.images[mapState.layer] || mapState.images.m00);
+      if (img && img.complete && img.naturalWidth > 0) {
+        const iw = img.naturalWidth;
+        const ih = img.naturalHeight;
+        ctx.drawImage(img, iw * 0.34, ih * 0.50, iw * 0.24, ih * 0.22, 0, 0, cnv.width, cnv.height);
+      } else {
+        ctx.strokeStyle = "rgba(191,169,122,0.22)";
+        for (let x = 24; x < cnv.width; x += 36) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, cnv.height); ctx.stroke(); }
+        for (let y = 24; y < cnv.height; y += 36) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cnv.width, y); ctx.stroke(); }
+        ctx.fillStyle = "#c8b997";
+        ctx.font = "12px Constantia, Georgia, serif";
+        ctx.fillText("Limgrave · Live Minimap Preview", 14, 102);
+      }
+      ctx.fillStyle = "#dfc07a";
+      ctx.beginPath(); ctx.arc(178, 96, 5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function bindPipViewerEvents() {
+    $("pvLaunchHudBtn")?.addEventListener("click", () => setPipMode("hud"));
+    $("pvLaunchMapBtn")?.addEventListener("click", () => setPipMode("map"));
+    $("pvLaunchStatsBtn")?.addEventListener("click", () => setPipMode("stats"));
+    $("pvPreviewModeSel")?.addEventListener("change", (e) => {
+      state.pvPreviewMode = ["hud", "map", "stats"].includes(e.target.value) ? e.target.value : "hud";
+      persistSettings();
+      renderPipViewerWorkspace();
+    });
+    $("pvCornerSel")?.addEventListener("change", (e) => setPipCorner(e.target.value, true, true));
+    $("pvBossPlaceSel")?.addEventListener("change", (e) => setPipBossPlacement(e.target.value, true));
+    $("pvGripPlaceSel")?.addEventListener("change", (e) => setPipGripPlacement(e.target.value, true));
+    $("pvBossHudCb")?.addEventListener("change", (e) => { setPipBossHud(e.target.checked, true); renderPipViewerWorkspace(); });
+    $("pvMapBossHudCb")?.addEventListener("change", (e) => { setPipMapBossHud(e.target.checked, true); renderPipViewerWorkspace(); });
+    $("pvBuffHudCb")?.addEventListener("change", (e) => { setPipBuffHud(e.target.checked, true); renderPipViewerWorkspace(); });
+    $("pvMapBuffCb")?.addEventListener("change", (e) => { setPipMapBuffHud(e.target.checked, true); renderPipViewerWorkspace(); });
+    $("pvFollowCb")?.addEventListener("change", (e) => setMapFollow(e.target.checked));
+    $("pvHideLoopBuffsCb")?.addEventListener("change", (e) => setBuffHideLooping(e.target.checked, true));
+    $("pvResetLoopBuffsBtn")?.addEventListener("click", () => resetHiddenLoopBuffs(true));
+    $("pvDesignSel")?.addEventListener("change", (e) => { setPipBossDesign(e.target.value, true); renderPipViewerWorkspace(); });
+    $("pvOpRng")?.addEventListener("input", (e) => { applyPipOpacity(Number(e.target.value), true); renderPipViewerWorkspace(); });
+  }
+
   async function switchMainView(view) {
-    state.activeView = view === "map" ? "map" : "calc";
+    state.activeView = ["equip", "map", "pip", "system"].includes(view) ? view : "calc";
+    const isEquip = state.activeView === "equip";
     const isMap = state.activeView === "map";
-    $("tabCalcBtn").classList.toggle("active", !isMap);
+    const isPip = state.activeView === "pip";
+    const isSys = state.activeView === "system";
+    const isCalc = state.activeView === "calc";
+    if (!isCalc && state.equipPickSlot) {
+      state.equipPickSlot = null;
+      if ($("equipPickBanner")) $("equipPickBanner").classList.add("hidden");
+    }
+    if ($("tabEquipBtn")) $("tabEquipBtn").classList.toggle("active", isEquip);
+    $("tabCalcBtn").classList.toggle("active", isCalc);
     $("tabMapBtn").classList.toggle("active", isMap);
-    $("calcWorkspace").classList.toggle("hidden", isMap);
+    if ($("tabPipBtn")) $("tabPipBtn").classList.toggle("active", isPip);
+    if ($("tabSysBtn")) $("tabSysBtn").classList.toggle("active", isSys);
+    document.querySelectorAll(".main-tab").forEach((btn) => {
+      const cur = btn.querySelector(".er-nav-cur");
+      if (cur) cur.classList.toggle("hidden", btn.dataset.view !== state.activeView);
+    });
+
+    const a = getErMenuAssets();
+    const med = $("erHdrMedallion");
+    if (med) {
+      const mapMed = a.ic_map ? "ic_map" : "ic_grace";
+      const medKey = isEquip ? "ic_equip" : (isMap ? mapMed : (isSys ? "ic_option" : (isPip ? "ic_stat_mini" : "ic_weapon")));
+      if (a[medKey]) med.src = a[medKey];
+    }
+    const titleEl = document.querySelector(".app-title");
+    if (titleEl) {
+      const titles = { equip: "Equipment", calc: "Armory", map: "Map", pip: "PiP Viewer", system: "System" };
+      titleEl.textContent = titles[state.activeView] || "Equipment";
+    }
+    const helpEl = $("erFooterHelp");
+    if (helpEl) {
+      const helps = {
+        equip: "Select slot to inspect or click again to swap in Armory \u2014 cycle [Y] for All Affinities & Optimizer.",
+        calc: state.equipPickSlot ? "Click any weapon row to equip it directly to your selected Equipment slot." : "Filter affinities, weapon classes, and requirements \u2014 click any row to inspect, [X/P] to pin compare.",
+        map: "Scroll to zoom, drag to pan, and filter 15 marker categories across The Lands Between, Underground, and Shadow Realm.",
+        pip: "Preview and customize the always-on-top Elden Ring Minimap, Enemy Lock-On HUD, and Stats + Buff Timers overlay.",
+        system: "Configure custom regulation.bin, Live RAM reader, global hotkeys, map labels, and HUD options.",
+      };
+      helpEl.textContent = helps[state.activeView] || "";
+    }
+
+    if ($("equipWorkspace")) $("equipWorkspace").classList.toggle("hidden", !isEquip);
+    $("calcWorkspace").classList.toggle("hidden", !isCalc);
     $("mapWorkspace").classList.toggle("hidden", !isMap);
-    $("drawerToggleBtn").style.visibility = isMap ? "hidden" : "visible";
+    if ($("pipViewerWorkspace")) $("pipViewerWorkspace").classList.toggle("hidden", !isPip);
+    if ($("systemWorkspace")) $("systemWorkspace").classList.toggle("hidden", !isSys);
+    $("drawerToggleBtn").style.display = isCalc ? "inline-flex" : "none";
+    updateContextualFooterPrompts();
     notifyStreamMode();
-    if (isMap) {
+    if (isEquip) {
+      renderEquipView();
+    } else if (isMap) {
       await ensureMapLoaded();
       renderMapCanvas();
+    } else if (isPip) {
+      await ensureMapLoaded();
+      renderPipViewerWorkspace();
+    } else if (isSys) {
+      if (window.__switchSysSubTab) window.__switchSysSubTab(state.sysSubTab || "mod");
+      if (window.__syncModSourceUi) window.__syncModSourceUi(true);
+      renderFooterPrompts();
     } else {
       renderVirtualViewport(true);
     }
@@ -5211,17 +7382,21 @@
     $("mapStagePlayerBtn").addEventListener("click", centerPlayer);
     $("mapFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
     $("mapPipBtn").addEventListener("click", () => setPipMode("map"));
-    $("topPipBtn").addEventListener("click", () => setPipMode(state.activeView === "map" ? "map" : "stats"));
+    $("topPipBtn").addEventListener("click", () => setPipMode(state.pipMode !== "off" ? "off" : (state.activeView === "map" ? "map" : "hud")));
     $("pipModeMapBtn").addEventListener("click", () => setPipMode("map"));
+    $("pipModeHudBtn")?.addEventListener("click", () => setPipMode("hud"));
     $("pipModeStatsBtn").addEventListener("click", () => setPipMode("stats"));
     if ($("pipModeSwapBtn")) {
-      $("pipModeSwapBtn").addEventListener("click", () => setPipMode(state.pipMode === "map" ? "stats" : "map"));
+      $("pipModeSwapBtn").addEventListener("click", () => {
+        const order = ["map", "hud", "stats"];
+        setPipMode(order[(order.indexOf(state.pipMode) + 1) % order.length]);
+      });
     }
     $("pipExitBtn").addEventListener("click", () => setPipMode("off"));
     $("pipFollowBtn").addEventListener("click", () => setMapFollow(!mapState.followPlayer));
     if ($("pipBossBtn")) {
       $("pipBossBtn").addEventListener("click", () => {
-        if (state.pipMode === "map") setPipMapBossHud(!state.pipMapBossHud, true);
+        if (state.pipMode === "map" || state.pipMode === "hud") setPipMapBossHud(!state.pipMapBossHud, true);
         else setPipBossHud(!state.pipBossHud, true);
       });
     }
@@ -5302,6 +7477,9 @@
         window.pywebview.api.start_window_drag();
       }
     });
+    if (typeof ResizeObserver === "function" && $("pipBar")) {
+      new ResizeObserver(() => syncPipBarHeightVar()).observe($("pipBar"));
+    }
     let activeResizeEdge = null;
     let resizeRafPending = false;
     document.querySelectorAll(".pip-resize-edge").forEach((el) => {
@@ -5310,6 +7488,7 @@
         e.preventDefault();
         e.stopPropagation();
         activeResizeEdge = el.dataset.edge || "se";
+        unlockPipMapHeight();
         try {
           el.setPointerCapture(e.pointerId);
         } catch (_) {}
@@ -5337,6 +7516,12 @@
         if (window.pywebview && window.pywebview.api && window.pywebview.api.end_pip_resize) {
           window.pywebview.api.end_pip_resize();
         }
+        setTimeout(() => {
+          const bb = $("pipBossBox");
+          if (bb && !bb.classList.contains("hidden") && (state.pipMode === "hud" || state.pipMode === "map")) {
+            lockPipMapHeight();
+          }
+        }, 40);
       };
       el.addEventListener("pointerup", finishResize);
       el.addEventListener("pointercancel", finishResize);
@@ -5404,7 +7589,7 @@
       if (hit) {
         const rect = stage.getBoundingClientRect();
         tip.textContent = `${hit.name}${hit.sub ? " — " + hit.sub : ""}`;
-        tip.style.left = `${Math.min(rect.width - 180, e.clientX - rect.left + 12)}px`;
+        tip.style.left = `${Math.max(4, Math.min(rect.width - 180, e.clientX - rect.left + 12))}px`;
         tip.style.top = `${Math.max(8, e.clientY - rect.top - 24)}px`;
         tip.classList.remove("hidden");
         canvas.style.cursor = "pointer";
@@ -5455,9 +7640,14 @@
 
   async function initApp() {
     const payload = await window.pywebview.api.get_initial_payload();
+    state._selfTest = Boolean(payload.selfTestMode);
+    if (payload.erMenuAssets && typeof payload.erMenuAssets === "object") {
+      window.__ER_MENU_ASSETS = payload.erMenuAssets;
+    }
     state.data = payload.data;
     state.enemyPresets = payload.enemyPresets || { "Raw AR (No Defense)": null };
     state.buffIcons = payload.buffIcons || { icons: {}, iconMap: {}, spMeta: {} };
+    state.erUiIcons = payload.erUiIcons || { icons: {}, wep: {}, arm: {}, tal: {}, good: {}, count: 0 };
     state.modSource = payload.modSource || null;
     buildSearchTags(state.data);
     buildAffinitySidebar();
@@ -5466,6 +7656,7 @@
     populateGearDropdowns();
 
     const cfg = payload.settings || {};
+    if (["auto", "kbm", "xbox", "ps5"].includes(cfg.promptMode)) state.promptMode = cfg.promptMode;
     state.defaultKeybinds = Object.assign({}, payload.defaultKeybinds || {});
     state.keybinds = Object.assign({}, state.defaultKeybinds, (cfg.keybinds && typeof cfg.keybinds === "object") ? cfg.keybinds : {});
     state.hotkeyErrors = Object.assign({}, payload.hotkeyErrors || {});
@@ -5498,6 +7689,13 @@
     setPipBuffHud(typeof cfg.pipBuffHud === "boolean" ? cfg.pipBuffHud : true, false);
     setPipMapBuffHud(typeof cfg.pipMapBuffHud === "boolean" ? cfg.pipMapBuffHud : true, false);
     state.buffExpFlash = typeof cfg.buffExpFlash === "boolean" ? cfg.buffExpFlash : true;
+    state.buffHideLooping = typeof cfg.buffHideLooping === "boolean" ? cfg.buffHideLooping : true;
+    if (["bottom-right", "top-right", "bottom-left", "top-left"].includes(cfg.pipCorner)) state.pipCorner = cfg.pipCorner;
+    if (["below", "inside"].includes(cfg.pipBossPlacement)) state.pipBossPlacement = cfg.pipBossPlacement;
+    if (["weapon", "header", "map"].includes(cfg.pipGripPlacement)) state.pipGripPlacement = cfg.pipGripPlacement;
+    if (["hud", "map", "stats"].includes(cfg.pvPreviewMode)) state.pvPreviewMode = cfg.pvPreviewMode;
+    applyBossPlacementClass();
+    updateHiddenLoopBuffsUi();
     applyBuffSweepOpacity(typeof cfg.buffSweepOpacity === "number" ? cfg.buffSweepOpacity : 30, false, false);
     applyBuffTextOpacity(typeof cfg.buffTextOpacity === "number" ? cfg.buffTextOpacity : 75, false, false);
     state.enemyShowStatuses = typeof cfg.enemyShowStatuses === "boolean" ? cfg.enemyShowStatuses : true;
@@ -5537,11 +7735,16 @@
     if ($("mapAutoLayerCb")) $("mapAutoLayerCb").checked = mapState.autoSwitchLayer;
     if ($("mapAutoDetectCb")) $("mapAutoDetectCb").checked = mapState.autoDetect;
     if ($("mapCompletedModeSel")) $("mapCompletedModeSel").value = mapState.completedMode;
-    if ($("setAutoLayerCb")) $("setAutoLayerCb").checked = mapState.autoSwitchLayer;
-    if ($("setAutoDetectCb")) $("setAutoDetectCb").checked = mapState.autoDetect;
     if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
     if ($("mapFollowBtn")) $("mapFollowBtn").classList.toggle("following", mapState.followPlayer);
     if ($("pipFollowBtn")) $("pipFollowBtn").classList.toggle("following", mapState.followPlayer);
+    if (state.data && state.data.mod) {
+      if ($("hdrModTag")) $("hdrModTag").textContent = state.data.mod;
+      if ($("erFtrTag")) $("erFtrTag").textContent = String(state.data.mod).toUpperCase();
+    }
+    if ($("erFtrArmoryCount") && state.data && state.data.weapons) {
+      $("erFtrArmoryCount").textContent = state.data.weapons.length.toLocaleString();
+    }
     syncMapLayerButtons();
 
     $("twoHandCb").checked = state.twoHand;
@@ -5567,9 +7770,19 @@
     applySavePayload(payload.save, true);
     updateStatInputsDom();
     renderTableHeader();
+    hydrateErMenuAssets();
     bindUiEvents();
+    bindEquipUiEvents();
     bindMapUiEvents();
+    bindPipViewerEvents();
+    if (window.__syncModSourceUi) window.__syncModSourceUi(false);
+    renderFooterPrompts();
     recalculateAndRender();
+    if (!payload.selfTestMode) {
+      await switchMainView("equip");
+    } else {
+      await switchMainView("calc");
+    }
 
     // Live save sync: Python daemon thread pushes updates, plus focus & backup checks
     if (!payload.selfTestMode) {
@@ -5703,6 +7916,89 @@
           .catch((err) => {
             window.__ERR_OPT_RESULT = { error: String(err) };
           });
+      },
+      openEquipTab() {
+        switchMainView("equip");
+        return state.activeView;
+      },
+      testEquipTab() {
+        switchMainView("equip");
+        const eqVis = Boolean($("equipWorkspace") && !$("equipWorkspace").classList.contains("hidden"));
+        const calcHid = Boolean($("calcWorkspace") && $("calcWorkspace").classList.contains("hidden"));
+        const wakuCount = document.querySelectorAll("#equipWorkspace .waku").length;
+        const attrRows = document.querySelectorAll("#eqAttrList .eq-attr-row").length;
+        const title = $("eqDetTitle") ? $("eqDetTitle").textContent.trim() : "";
+        const rhNodes = Array.from(document.querySelectorAll("#eqRhRow .waku"));
+        const lhNodes = Array.from(document.querySelectorAll("#eqLhRow .waku"));
+        const rhActual = rhNodes.map((n) => (n.dataset.eqWid ? Number(n.dataset.eqWid) : null));
+        const lhActual = lhNodes.map((n) => (n.dataset.eqWid ? Number(n.dataset.eqWid) : null));
+        const rhExpected = ((state.equippedSlots && state.equippedSlots.rh) || []).map((e) => (e ? e.weaponId : null));
+        const lhExpected = ((state.equippedSlots && state.equippedSlots.lh) || []).map((e) => (e ? e.weaponId : null));
+        const slotsMatch =
+          rhActual.length === 3 &&
+          lhActual.length === 3 &&
+          rhActual.every((v, i) => v === (rhExpected[i] ?? null)) &&
+          lhActual.every((v, i) => v === (lhExpected[i] ?? null));
+        const rhFirst = rhNodes[0] && rhNodes[0].querySelector(".waku-cap") ? rhNodes[0].querySelector(".waku-cap").textContent.trim() : "";
+        const lhFirst = lhNodes[0] && lhNodes[0].querySelector(".waku-cap") ? lhNodes[0].querySelector(".waku-cap").textContent.trim() : "";
+        switchMainView("calc");
+        return {
+          ok: eqVis && calcHid && wakuCount >= 12 && attrRows === 5 && title.length > 0 && slotsMatch,
+          wakuCount,
+          attrRows,
+          title,
+          rhCount: rhActual.filter(Boolean).length,
+          lhCount: lhActual.filter(Boolean).length,
+          rhFirst,
+          lhFirst,
+          slotsMatch,
+        };
+      },
+      testErUiV2() {
+        const hasIcons = Boolean(state.erUiIcons && typeof state.erUiIcons === "object" && (!state.erUiIcons.ok || state.erUiIcons.count >= 300));
+        const affIcons = document.querySelectorAll("#affinityGrid .er-aff-ic").length;
+        const wtIcons = document.querySelectorAll("#weaponTypeTree .er-wt-ic").length;
+        const ramBadgeTxt = $("ramHeaderBadge") ? $("ramHeaderBadge").textContent.trim() : "";
+        const sysBadgeTxt = $("sysGameStatusBadge") ? $("sysGameStatusBadge").textContent.trim() : "";
+        const noLiveText =
+          !ramBadgeTxt.includes("Live RAM") &&
+          !sysBadgeTxt.includes("ModEngine") &&
+          ["✓", "✕"].includes(sysBadgeTxt);
+        switchMainView("pip");
+        const pipVis = Boolean($("pipViewerWorkspace") && !$("pipViewerWorkspace").classList.contains("hidden"));
+        let pipBossToggleOk = false;
+        const cb = $("pvMapBossHudCb");
+        const box = $("pvEnemyBox");
+        if (cb && box) {
+          const prev = cb.checked;
+          cb.checked = false;
+          cb.dispatchEvent(new Event("change"));
+          const hidAfterOff = box.classList.contains("hidden");
+          cb.checked = prev;
+          cb.dispatchEvent(new Event("change"));
+          pipBossToggleOk = hidAfterOff;
+        }
+        const prevMode = state.promptMode;
+        state.promptMode = "ps5";
+        renderFooterPrompts();
+        const ps5Src = $("erFtrKeyA") ? $("erFtrKeyA").src : "";
+        state.promptMode = "kbm";
+        renderFooterPrompts();
+        const kbmSrc = $("erFtrKeyA") ? $("erFtrKeyA").src : "";
+        state.promptMode = prevMode;
+        renderFooterPrompts();
+        const promptSwitchOk = Boolean(ps5Src && kbmSrc && ps5Src !== kbmSrc);
+        switchMainView("calc");
+        return {
+          ok: hasIcons && affIcons >= 20 && wtIcons >= 40 && noLiveText && pipVis && pipBossToggleOk && promptSwitchOk,
+          hasIcons,
+          affIcons,
+          wtIcons,
+          noLiveText,
+          pipVis,
+          pipBossToggleOk,
+          promptSwitchOk,
+        };
       },
       openMapTab() {
         switchMainView("map");
@@ -5870,10 +8166,16 @@
         if (g) setMarkerManualState(g.id, !beforeMan);
         const afterMan = g ? isMarkerCompleted(g) : null;
         if (g) setMarkerManualState(g.id, null);
-        $("topSettingsBtn").click();
-        const modalOpen = !$("settingsModal").classList.contains("hidden") && document.querySelectorAll("#keybindsList .kb-row").length === 6;
-        $("settingsCloseBtn").click();
-        const modalClosed = $("settingsModal").classList.contains("hidden");
+        const prevView = state.activeView;
+        switchMainView("system");
+        if (window.__switchSysSubTab) window.__switchSysSubTab("hotkeys");
+        const modalOpen = Boolean(
+          state.activeView === "system" &&
+          $("sysPaneHotkeys") && !$("sysPaneHotkeys").classList.contains("hidden") &&
+          document.querySelectorAll("#keybindsList .kb-row").length === 6
+        );
+        switchMainView(prevView);
+        const modalClosed = state.activeView === prevView;
         const bbWithIcon = (mapState.data && mapState.data.markers || []).filter((m) => m.cat === "bell_bearing" && m.icon && m.icon.startsWith("good_")).length;
         return {
           manualToggleOk: g ? (afterMan === !beforeMan) : false,
@@ -5888,6 +8190,8 @@
         const prevDesign = state.pipBossDesign;
         const prevRamLive = state.ramLive;
         const prevBosses = state.ramBosses;
+        const prevPlace = state.pipBossPlacement;
+        setPipBossPlacement("inside", false);
 
         const payload = [
           {
@@ -5956,14 +8260,13 @@
         const toggleOffHidden = Boolean(
           mapBox && mapBox.classList.contains("hidden") && statsBox && statsBox.classList.contains("hidden")
         );
-        $("topSettingsBtn").click();
-        const rStats = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipBossHud']");
-        const rMap = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipMapBossHud']");
+        const cbBossPv = $("pvBossHudCb");
+        const cbMapBossPv = $("pvMapBossHudCb");
+        if (typeof renderPipViewerWorkspace === "function") renderPipViewerWorkspace();
         const cbSyncedOff = Boolean(
-          rStats && !rStats.classList.contains("on") && rStats.textContent.includes("OFF") &&
-          rMap && !rMap.classList.contains("on") && rMap.textContent.includes("OFF")
+          cbBossPv && !cbBossPv.checked &&
+          cbMapBossPv && !cbMapBossPv.checked
         );
-        $("settingsCloseBtn").click();
 
         setPipBossHud(true, false);
         setPipMapBossHud(true, false);
@@ -5976,6 +8279,7 @@
         setPipBossDesign(prevDesign, false);
         setPipBossHud(prevBossHud, false);
         setPipMapBossHud(prevMapBossHud, false);
+        setPipBossPlacement(prevPlace, false);
         setPipMode(prevMode);
         renderPipRamBadges();
 
@@ -6055,28 +8359,51 @@
         const mBox = $("pipMapBuffBox");
         const shownMapOk = Boolean(mBox && !mBox.classList.contains("hidden") && mBox.querySelectorAll(".buff-tile").length === 2);
 
-        $("topSettingsBtn").click();
-        const togRowsCount = document.querySelectorAll("#settingsToggleables .er-opt-row[data-tog]").length;
-        const supQuestionsCount = document.querySelectorAll("#settingsToggleables sup.er-q").length;
+        switchMainView("system");
+        if (window.__switchSysSubTab) window.__switchSysSubTab("advanced");
+        const togRowsCount = document.querySelectorAll("#systemWorkspace .er-opt-row[data-tog]").length;
+        const supQuestionsCount = document.querySelectorAll("#systemWorkspace sup.er-q").length;
         applyBuffSweepOpacity(150, false, false);
         const clampHighOk = state.buffSweepOpacity === 100;
         applyBuffTextOpacity(-10, false, false);
         const clampLowOk = state.buffTextOpacity === 0;
         applyTogActionStateCheck: {
-          const firstRow = document.querySelector("#settingsToggleables .er-opt-row[data-tog='pipBuffHud']");
+          const firstRow = document.querySelector("#systemWorkspace .er-opt-row[data-tog='buffExpFlash']");
           if (firstRow) firstRow.click();
         }
-        const toggledOffOk = !state.pipBuffHud && Boolean(sBox && sBox.classList.contains("hidden"));
+        const toggledOffOk = !state.buffExpFlash;
         $("setTogResetBtn").click();
         const resetDefaultsOk = (
           state.buffSweepOpacity === 30 &&
           state.buffTextOpacity === 75 &&
+          state.buffExpFlash === true &&
           state.pipBuffHud === true &&
           state.pipMapBuffHud === true &&
           document.documentElement.style.getPropertyValue("--buff-swp-a") === "0.30" &&
           document.documentElement.style.getPropertyValue("--buff-txt-a") === "0.75"
         );
-        $("settingsCloseBtn").click();
+        switchMainView("calc");
+
+        setPipMode("stats");
+        const loopPrevBuffs = state.ramBuffs.slice();
+        const prevHideLoop = state.buffHideLooping;
+        resetHiddenLoopBuffs(false);
+        setBuffHideLooping(true, false);
+        for (let iter = 0; iter < 4; iter++) {
+          applyLiveRamBuffs([
+            { id: 1730, iconId: 20406, rem: 25.0 - iter, dur: 30.0 },
+            { id: 999001, iconId: 20406, rem: 0.9, dur: 1.0 },
+          ], 1000 + iter * 1200);
+          if (iter < 3) applyLiveRamBuffs([{ id: 1730, iconId: 20406, rem: 24.5 - iter, dur: 30.0 }], 1600 + iter * 1200);
+        }
+        const loopSuppressedOk = (
+          state.suppressedLoopBuffIds.has(999001) &&
+          sBox && sBox.querySelectorAll(".buff-tile").length === 1
+        );
+        setBuffHideLooping(false, false);
+        const loopShownWhenOffOk = Boolean(sBox && sBox.querySelectorAll(".buff-tile").length === 2);
+        resetHiddenLoopBuffs(false);
+        setBuffHideLooping(prevHideLoop, false);
 
         state.ramBuffs = prevBuffs;
         state.ramLive = prevRamLive;
@@ -6098,10 +8425,11 @@
           sweepDirectionOk,
           countTextOk,
           tooltipOk,
-          settingsRowsOk: togRowsCount === 16 && supQuestionsCount >= 17,
+          settingsRowsOk: togRowsCount === 12 && supQuestionsCount >= 16,
           clampOk: clampHighOk && clampLowOk,
           toggledOffOk,
           resetDefaultsOk,
+          loopSuppressionOk: loopSuppressedOk && loopShownWhenOffOk,
         };
       },
       testMapLabels() {
@@ -6117,7 +8445,8 @@
         const prevRadius = mapState.pipNearbyLabelRadius;
         const prevLabelCats = Object.assign({}, mapState.labelCats);
 
-        $("topSettingsBtn").click();
+        switchMainView("system");
+        if (window.__switchSysSubTab) window.__switchSysSubTab("hotkeys");
         const catCells = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell");
         const catCellsCountOk = catCells.length === 15;
         const defaultOnCountOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 3 &&
@@ -6149,7 +8478,7 @@
         if (anchor) centerMapOnUV(anchor.u, anchor.v, 4.5);
         else mapState.zoom = 4.5;
 
-        const showNamesRow = document.querySelector("#settingsToggleables .er-opt-row[data-tog='mapShowLabels']");
+        const showNamesRow = document.querySelector("#systemWorkspace .er-opt-row[data-tog='mapShowLabels']");
         if (showNamesRow && mapState.showLabels) showNamesRow.click();
         renderMapCanvas();
         const hiddenWhenOffOk = !mapState.showLabels &&
@@ -6171,7 +8500,6 @@
           mapState.pipNearbyLabelsOnly === true &&
           mapState.pipNearbyLabelRadius === 95 &&
           Boolean(mapState.labelCats.grace && mapState.labelCats.boss && mapState.labelCats.merchant && !mapState.labelCats.weapon);
-        $("settingsCloseBtn").click();
 
         mapState.layer = prevLayer;
         mapState.zoom = prevZoom;
@@ -6183,7 +8511,7 @@
         applyPipLabelRadius(prevRadius, false, false);
         mapState.labelCats = prevLabelCats;
         setPipMode(prevMode);
-        state.activeView = prevView;
+        switchMainView(prevView);
         syncSettingsToggleablesUi();
         renderMapCanvas();
 
@@ -6200,24 +8528,252 @@
           resetLabelsOk,
         };
       },
-      testModSourceUi() {
-        $("topSettingsBtn").click();
-        const box = $("modSourceSection");
-        const b1 = $("modBrowseRegBtn");
-        const b2 = $("modReadGameBtn");
-        const b3 = $("modRefreshNowBtn");
-        const b4 = $("modClearRegBtn");
-        const disp = $("modRegPathDisplay");
-        const ok = Boolean(
-          box && !box.closest(".hidden") &&
-          b1 && b2 && b3 && b4 && disp && disp.textContent.trim().length > 0
-        );
-        $("settingsCloseBtn").click();
+      testQaAuditFixes() {
+        const prevView = state.activeView;
+        const prevMode = state.pipMode;
+        const prevStr = state.stats.str;
+        const prevPreview = state.equipPreviewWid;
+
+        switchMainView("equip");
+        const attrInp = document.querySelector("#eqAttrList input[data-eq-attr='strInput']");
+        let focusPreserved = false;
+        if (attrInp) {
+          attrInp.focus();
+          attrInp.value = String(Math.min(99, prevStr + 2));
+          attrInp.dispatchEvent(new Event("input"));
+          focusPreserved = document.activeElement === attrInp;
+        }
+        $("strInput").value = String(prevStr);
+        $("strInput").dispatchEvent(new Event("input"));
+
+        const res0 = getEquipSelectedWeaponResult();
+        const guardOk = Boolean(res0 && Array.isArray(res0.guard) && res0.guard.length === 6);
+        const beforeSlotWid = (state.equippedSlots?.rh?.[state.equipSelectedSlot?.idx || 0] || {}).weaponId || null;
+        if ($("eqDetAshBox")) $("eqDetAshBox").click();
+        const afterSlotWid = (state.equippedSlots?.rh?.[state.equipSelectedSlot?.idx || 0] || {}).weaponId || null;
+        const previewCycled = !beforeSlotWid || (state.equipPreviewWid !== null && afterSlotWid === beforeSlotWid);
+        state.equipPreviewWid = prevPreview;
+
+        switchMainView("equip");
+        const fEquipVis = !$("erFtrPromptY").classList.contains("hidden") && $("erFtrSwitchLbl").textContent === ":Switch view (right)";
+        switchMainView("calc");
+        const prev2h = state.twoHand;
+        $("twoHandCb").checked = false;
+        $("twoHandCb").dispatchEvent(new Event("change"));
+        const fArmory1h = !$("erFtrPromptY").classList.contains("hidden") && $("erFtrSwitchLbl").textContent === ":Switch (Two-Handed)";
+        $("twoHandCb").checked = true;
+        $("twoHandCb").dispatchEvent(new Event("change"));
+        const fArmory2h = !$("erFtrPromptY").classList.contains("hidden") && $("erFtrSwitchLbl").textContent === ":Switch (One-Handed)";
+        $("twoHandCb").checked = prev2h;
+        $("twoHandCb").dispatchEvent(new Event("change"));
+        switchMainView("map");
+        const fMapHidden = $("erFtrPromptY").classList.contains("hidden") && $("erFtrPromptX").classList.contains("hidden");
+
+        switchMainView("pip");
+        const prevPvMode = state.pvPreviewMode;
+        const prevMapBossHudPv = state.pipMapBossHud;
+        state.pvPreviewMode = "hud";
+        state.pipMapBossHud = true;
+        renderPipViewerWorkspace();
+        const hasBossDom = Boolean(document.querySelector("#pvEnemyBox .pip-boss-card .er-meter.hp"));
+        const hasStatsDom = Boolean(document.querySelector("#pvStatsBox .pip-stats-grid"));
+        const pvRealBossOk = hasBossDom && hasStatsDom;
+        const prevCorner = state.pipCorner;
+        setPipCorner("top-right", false, false);
+        const cornerOk = $("pvOverlayShell") && $("pvOverlayShell").classList.contains("corner-tr");
+        setPipCorner(prevCorner, false, false);
+        state.pvPreviewMode = prevPvMode;
+        state.pipMapBossHud = prevMapBossHudPv;
+
+        setPipMode("stats");
+        const pvHiddenDuringStats = Boolean($("pipViewerWorkspace") && getComputedStyle($("pipViewerWorkspace")).display === "none");
+        const pip2hHiddenStats = Boolean($("pipTwoHandBtn") && getComputedStyle($("pipTwoHandBtn")).display === "none");
+        setPipMode("hud");
+        const pip2hDisabledOk = pip2hHiddenStats && Boolean($("pipTwoHandBtn") && getComputedStyle($("pipTwoHandBtn")).display === "none");
+        const prevBossLive = state.ramLive;
+        const prevBossArr = state.ramBosses.slice();
+        const prevArmStyle = state.armStyle;
+        const prevRhSlot = state.activeRhSlot;
+        const prevArBuffs = state.ramLiveArBuffs;
+        const prevBossPlace = state.pipBossPlacement;
+        state.pipMapBossHud = true;
+        state.ramLive = true;
+        setPipBossPlacement("inside", false);
+        const mapWrapEl = document.querySelector(".map-canvas-wrap");
+        window.__onLiveRamBosses([]);
+        const hudMapHNoBoss = mapWrapEl ? mapWrapEl.getBoundingClientRect().height : 0;
+        window.__onLiveRamBosses([{
+          slot: 0, name: "Boss", hp: 500, maxHp: 1000, stance: 10, maxStance: 80, stanceReset: 2,
+          statuses: [
+            { key: "bleed", label: "Bleed", cur: 80, max: 200 },
+            { key: "poison", label: "Poison", cur: 40, max: 180 },
+            { key: "rot", label: "Rot", cur: 30, max: 180 },
+            { key: "frost", label: "Frost", cur: 50, max: 220 },
+            { key: "sleep", label: "Sleep", cur: 20, max: 150 },
+            { key: "madness", label: "Madness", cur: 10, max: 120 },
+          ],
+        }]);
+        const hudMapHWithBossInside = mapWrapEl ? mapWrapEl.getBoundingClientRect().height : 0;
+        const hudBodyOk = document.body.classList.contains("pip-hud");
+        const hudMapOk = getComputedStyle($("mapWorkspace")).display !== "none";
+        const hudBossOverMapOk = getComputedStyle($("pipMapBossBox")).display !== "none"
+          && getComputedStyle($("pipMapBossBox")).position === "absolute"
+          && getComputedStyle($("pipBossBox")).display === "none"
+          && Math.abs(hudMapHWithBossInside - hudMapHNoBoss) <= 1.5;
+        const statsViewEl = $("pipStatsView");
+        const hudStatsHNoBoss = statsViewEl ? statsViewEl.getBoundingClientRect().height : 0;
+        setPipBossPlacement("below", false);
+        const hudMapHWithBossBelow = mapWrapEl ? mapWrapEl.getBoundingClientRect().height : 0;
+        const hudStatsHWithBossBelow = statsViewEl ? statsViewEl.getBoundingClientRect().height : 0;
+        const bossBoxEl = $("pipBossBox");
+        const bossRectBelow = bossBoxEl ? bossBoxEl.getBoundingClientRect() : null;
+        const extWithBossBelow = syncPipBossExtension();
+        const hudBossBelowOk = getComputedStyle(bossBoxEl).display !== "none"
+          && bossBoxEl.parentElement === document.body
+          && bossBoxEl.scrollHeight <= bossBoxEl.clientHeight + 2
+          && Boolean(bossRectBelow && bossRectBelow.height >= 40)
+          && extWithBossBelow >= 40
+          && getComputedStyle($("pipMapBossBox")).display === "none"
+          && Math.abs(hudStatsHWithBossBelow - hudStatsHNoBoss) <= 1.5
+          && Math.abs(hudMapHWithBossBelow - hudMapHNoBoss) <= 1.5;
+        setPipBossPlacement("inside", false);
+        const extInside = syncPipBossExtension();
+        const hudBossOk = hudBossOverMapOk && hudBossBelowOk && extInside === 0;
+        const hudStatsOk = getComputedStyle($("pipStatsView")).display !== "none";
+        const hudSameWinOk = hudBodyOk && hudMapOk && hudBossOk && hudStatsOk;
+
+        // Check live 1H/2H auto-detection, all 3 placement modes, and live applied AR buffs
+        const assetsRef = getErMenuAssets();
+        const prevEqRh0 = state.equippedSlots?.rh ? state.equippedSlots.rh.slice() : null;
+        if (!state.equippedSlots) state.equippedSlots = { rh: [null, null, null], lh: [null, null, null] };
+        if (!state.equippedSlots.rh || !state.equippedSlots.rh.some((s) => s && s.weaponId)) {
+          const sampleWeapon = state.data.weapons.find((w) => w.baseName === "Claymore") || state.data.weapons[0];
+          state.equippedSlots.rh = [{ weaponId: sampleWeapon.id, level: 15 }, null, null];
+        }
+        const defaultGripIsWeapon = state.pipGripPlacement === "weapon";
+        state.armStyle = 1;
+        state.activeRhSlot = 0;
+        window.__onLiveRamArBuffs(null);
+        const ar1hText = Number(($("pipWeaponsList")?.querySelector(".pip-wep-row .pip-wep-ar")?.textContent) || 0);
+        const badge1h = document.querySelector("#pipPresetTag .pip-grip-badge.one-h");
+        const wTile1h = document.querySelector("#pipWeaponsList .pip-wep-row.featured-grip .pip-grip-tile img");
+        const has1hIcon = Boolean(badge1h && badge1h.textContent.trim() === "1" && wTile1h && assetsRef.grip_1h && wTile1h.getAttribute("src") === assetsRef.grip_1h);
+        state.armStyle = 3;
+        window.__onLiveRamArBuffs({
+          statBonus: [0, 0, 0, 0, 0],
+          globalMult: [1.15, 1.15, 1.15, 1.15, 1.15],
+          globalFlat: [0, 0, 0, 0, 0],
+          rhMult: [1, 1, 1, 1, 1],
+          rhFlat: [0, 0, 85, 0, 0],
+          lhMult: [1, 1, 1, 1, 1],
+          lhFlat: [0, 0, 0, 0, 0],
+          activeCount: 2,
+        });
+        const ar2hBuffed = Number(($("pipWeaponsList")?.querySelector(".pip-wep-row .pip-wep-ar")?.textContent) || 0);
+        const badge2hEl = document.querySelector("#pipPresetTag .pip-grip-badge.two-h");
+        const wTile2h = document.querySelector("#pipWeaponsList .pip-wep-row.featured-grip .pip-grip-tile img");
+        const has2hWeapon = Boolean(badge2hEl && badge2hEl.textContent.includes("2") && badge2hEl.textContent.includes("(RH)") && wTile2h && assetsRef.grip_2h && wTile2h.getAttribute("src") === assetsRef.grip_2h);
+        setPipGripPlacement("header", false);
+        const has2hHeader = Boolean(document.querySelector("#pipHdrGripSlot .pip-grip-tile img")?.getAttribute("src") === assetsRef.grip_2h);
+        setPipGripPlacement("map", false);
+        const has2hMap = Boolean(document.querySelector("#pipMapGripBox .pip-grip-tile img")?.getAttribute("src") === assetsRef.grip_2h);
+        setPipGripPlacement("weapon", false);
+        if (prevEqRh0) state.equippedSlots.rh = prevEqRh0;
+        const presetTxt = ($("pipPresetTag")?.textContent || "");
+        const arLabelClean = presetTxt.includes("AR") && !presetTxt.includes("Live AR");
+        const pipLiveArAndStanceOk = defaultGripIsWeapon && arLabelClean && has1hIcon && has2hWeapon && has2hHeader && has2hMap && (ar2hBuffed > ar1hText || ar1hText === 0);
+
+        // Check official ER status effect <img> icons in Armory & PiP Boss HUD
+        const armStImgs = Array.from(document.querySelectorAll("#tableHead img.th-status-img"));
+        const bossStImgs = Array.from(document.querySelectorAll("#pipMapBossBox img.er-st-img"));
+        const erStatusImgsOk = armStImgs.length === 6 && bossStImgs.length === 6 &&
+          armStImgs.every((i) => i.naturalWidth > 0) && bossStImgs.every((i) => i.naturalWidth > 0);
+
+        // Check HUD mode supports distance-based marker labels (px) & search popover
+        setPipSearchPopover(true);
+        const hudSearchOk = Boolean($("pipSearchPopover") && !$("pipSearchPopover").classList.contains("hidden"));
+        setPipSearchPopover(false);
+        const prevSearch = mapState.search;
+        const prevShowLbl = mapState.showLabels;
+        const prevNearbyOnly = mapState.pipNearbyLabelsOnly;
+        const prevRad = mapState.pipNearbyLabelRadius;
+        const prevZoom = mapState.zoom;
+        mapState.search = "";
+        mapState.showLabels = true;
+        mapState.pipNearbyLabelsOnly = true;
+        mapState.zoom = 5.0;
+        mapState.pipNearbyLabelRadius = 35;
+        renderMapCanvas();
+        const tightCnt = mapState.lastLabelsDrawnCount;
+        mapState.pipNearbyLabelRadius = 220;
+        renderMapCanvas();
+        const wideCnt = mapState.lastLabelsDrawnCount;
+        const hudNearbyLabelsOk = hudSearchOk && wideCnt >= tightCnt && mapState.lastLabelsDrawnCount === wideCnt;
+        mapState.search = prevSearch;
+        mapState.showLabels = prevShowLbl;
+        mapState.pipNearbyLabelsOnly = prevNearbyOnly;
+        mapState.pipNearbyLabelRadius = prevRad;
+        mapState.zoom = prevZoom;
+
+        // Check #pipBar fits on 1 row at 380px window width and packs densely at 290px with >= 5 items on Row 1
+        const barEl = $("pipBar");
+        document.body.classList.add("pip-hover");
+        const origBarWidth = barEl.style.width;
+        barEl.style.right = "auto";
+        barEl.style.width = "368px";
+        syncPipBarHeightVar();
+        const singleRowAt380Ok = barEl.offsetHeight <= 34 && barEl.scrollWidth <= barEl.clientWidth + 1;
+        barEl.style.width = "278px";
+        syncPipBarHeightVar();
+        const barRect = barEl.getBoundingClientRect();
+        const visiblePills = Array.from(barEl.querySelectorAll("button.pip-pill")).filter((b) => getComputedStyle(b).display !== "none");
+        const pillsInBounds = visiblePills.every((b) => {
+          const r = b.getBoundingClientRect();
+          return r.left >= barRect.left - 1 && r.right <= barRect.right + 1;
+        });
+        const row1Top = visiblePills.length ? visiblePills[0].getBoundingClientRect().top : 0;
+        const row1Count = visiblePills.filter((b) => Math.abs(b.getBoundingClientRect().top - row1Top) < 4).length;
+        const pipBarWrapOk = singleRowAt380Ok && barEl.scrollWidth <= barEl.clientWidth + 1 && barEl.offsetHeight > 30 && pillsInBounds && row1Count >= 5;
+        barEl.style.width = origBarWidth;
+        barEl.style.right = "";
+        syncPipBarHeightVar();
+
+        state.armStyle = prevArmStyle;
+        state.activeRhSlot = prevRhSlot;
+        state.ramLiveArBuffs = prevArBuffs;
+        state.ramBosses = prevBossArr;
+        state.ramLive = prevBossLive;
+        state.pipMapBossHud = prevMapBossHudPv;
+        setPipBossPlacement(prevBossPlace, false);
+        renderPipBossBoxes();
+        setPipMode(prevMode);
+
+        switchMainView("system");
+        if (window.__switchSysSubTab) window.__switchSysSubTab("mod");
+        const erNums = Array.from(document.querySelectorAll("#systemWorkspace .er-num, .topbar .save-pill"));
+        const noClip = erNums.every((el) => el.scrollWidth <= el.clientWidth + 2);
+        const fSysHidden = $("erFtrPromptY").classList.contains("hidden") && $("erFtrPromptX").classList.contains("hidden");
+
+        switchMainView(prevView);
         return {
-          sectionPresent: Boolean(box),
-          buttonsPresent: Boolean(b1 && b2 && b3 && b4),
-          displayPopulated: Boolean(disp && disp.textContent.trim().length > 0),
-          ok,
+          ok: focusPreserved && guardOk && previewCycled && pvHiddenDuringStats && noClip &&
+              fEquipVis && fArmory1h && fArmory2h && fMapHidden && fSysHidden &&
+              pvRealBossOk && cornerOk && hudSameWinOk && erStatusImgsOk && hudNearbyLabelsOk &&
+              pipBarWrapOk && pip2hDisabledOk && pipLiveArAndStanceOk,
+          focusPreserved,
+          guardOk,
+          previewCycled,
+          pvHiddenDuringStats,
+          noClip,
+          footerContextOk: fEquipVis && fArmory1h && fArmory2h && fMapHidden && fSysHidden,
+          pvRealBossOk,
+          cornerOk,
+          hudSameWinOk,
+          erStatusImgsOk,
+          hudNearbyLabelsOk,
+          pipBarWrapOk,
+          pip2hDisabledOk,
+          pipLiveArAndStanceOk,
         };
       },
       startMapImagesTest() {

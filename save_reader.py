@@ -68,8 +68,9 @@ def _extract_player_pos(sdata: bytes) -> Optional[Tuple[int, Dict[str, Any]]]:
             if (
                 all(math.isfinite(v) for v in (x, y, z, rx, ry, rz))
                 and abs(x) < 10000.0
+                and abs(y) < 5000.0
                 and abs(z) < 10000.0
-                and (abs(x) > 0.01 or abs(y) > 0.01 or abs(z) > 0.01)
+                and (abs(x) > 0.01 or abs(z) > 0.01)
                 and abs(rx) < 0.01
                 and abs(rz) < 0.01
                 and abs(ry) <= 6.5
@@ -218,6 +219,11 @@ def _parse_slot_extras(
     pos += 4 + 0xA80 * 12 + 4 + 0x180 * 12 + 8
 
     # EquipMagicData + EquipItemData + GestureEquipData
+    spells: List[int] = []
+    for mi in range(14):
+        sid, _unk = struct.unpack_from("<ii", sdata, pos + mi * 8)
+        if 0 < sid < 0x10000000:
+            spells.append(int(sid))
     pos += (14 * 8 + 4) + (10 * 8 + 4 + 6 * 8 + 8) + 24
     proj_cnt = struct.unpack_from("<I", sdata, pos)[0]
     if proj_cnt > 0x1000:
@@ -257,6 +263,7 @@ def _parse_slot_extras(
             "talismans": sorted(talismans),
             "goods": sorted(goods),
         },
+        "spells": spells,
         "setFlags": set_flags,
         "mapPins": map_pins,
         "mpRelOff": mp_off + 8,
@@ -291,30 +298,57 @@ def read_save_characters(
             name = f"Slot {slot + 1}"
         level, play_secs = struct.unpack_from("<II", u10, po + 0x22)
 
+        def _decode_hand_slot(raw_id: int) -> Optional[Dict[str, int]]:
+            if not known_weapon_base_ids or raw_id in (0, 0xFFFFFFFF, 110000):
+                return None
+            lv = raw_id % 100
+            base_w = (raw_id // 100) * 100
+            if lv <= 25 and base_w in known_weapon_base_ids:
+                return {"rawId": raw_id, "weaponId": base_w, "level": lv}
+            return None
+
+        # ProfileSummary stores ChrAsm stance & active hand slots (armStyle, lhSlot, rhSlot) at +0x162..+0x16A
+        arm_style_raw, lh_slot_raw, rh_slot_raw = struct.unpack_from("<3I", u10, po + 0x162)
+        arm_style = arm_style_raw if arm_style_raw in (0, 1, 2, 3) else 1
+        lh_slot = lh_slot_raw if lh_slot_raw in (0, 1, 2) else 0
+        rh_slot = rh_slot_raw if rh_slot_raw in (0, 1, 2) else 0
+
+        # ProfileSummary stores the 6 equipped hand-weapon slots interleaved (L1,R1,L2,R2,L3,R3)
+        left_hand = [
+            _decode_hand_slot(struct.unpack_from("<I", u10, po + eo)[0])
+            for eo in (0x1D6, 0x1DE, 0x1E6)
+        ]
+        right_hand = [
+            _decode_hand_slot(struct.unpack_from("<I", u10, po + eo)[0])
+            for eo in (0x1DA, 0x1E2, 0x1EA)
+        ]
         equipped = []
-        if known_weapon_base_ids:
-            seen_raw = set()
-            # ProfileSummary stores the 6 equipped hand-weapon slots at +0x1D6 .. +0x1EA
-            for eo in range(0x1D6, 0x1EE, 4):
-                raw_id = struct.unpack_from("<I", u10, po + eo)[0]
-                if raw_id == 0xFFFFFFFF or raw_id in seen_raw:
-                    continue
-                lv = raw_id % 100
-                base_w = (raw_id // 100) * 100
-                if lv <= 25 and base_w in known_weapon_base_ids:
-                    seen_raw.add(raw_id)
-                    equipped.append({"rawId": raw_id, "weaponId": base_w, "level": lv})
+        seen_raw = set()
+        for ent in right_hand + left_hand:
+            if ent and ent["rawId"] not in seen_raw:
+                seen_raw.add(ent["rawId"])
+                equipped.append(ent)
 
         # ProfileSummary stores 4 armor slots (+0x206..+0x212) and 4 talisman slots (+0x21A..+0x226)
         armor = []
         for ao in (0x206, 0x20A, 0x20E, 0x212):
             aid = struct.unpack_from("<I", u10, po + ao)[0]
-            armor.append(aid if aid not in (0, 0xFFFFFFFF) else None)
+            armor.append(aid if aid not in (0, 0xFFFFFFFF) and aid > 10300 else None)
 
         talismans = []
         for toff in (0x21A, 0x21E, 0x222, 0x226):
             tid = struct.unpack_from("<I", u10, po + toff)[0]
             talismans.append(tid if tid not in (0, 0xFFFFFFFF) else None)
+
+        arrows = []
+        for aoff in (0x1EE, 0x1F6):
+            aid = struct.unpack_from("<I", u10, po + aoff)[0]
+            arrows.append(aid if aid not in (0, 0xFFFFFFFF) else None)
+
+        bolts = []
+        for boff in (0x1F2, 0x1FA):
+            bid = struct.unpack_from("<I", u10, po + boff)[0]
+            bolts.append(bid if bid not in (0, 0xFFFFFFFF) else None)
 
         s_off, s_sz = entries[slot]
         sdata = data[s_off : s_off + s_sz]
@@ -365,6 +399,14 @@ def read_save_characters(
                     "arc": arc,
                 },
                 "equipped": equipped,
+                "rightHand": right_hand,
+                "leftHand": left_hand,
+                "armStyle": arm_style,
+                "activeRhSlot": rh_slot,
+                "activeLhSlot": lh_slot,
+                "arrows": arrows,
+                "bolts": bolts,
+                "spells": extras["spells"] if extras else [],
                 "armor": armor,
                 "talismans": talismans,
                 "playerPos": player_pos,

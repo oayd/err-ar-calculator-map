@@ -155,6 +155,7 @@ def unpack_regulation_params(
     reg_path: str,
     game_dir: Optional[str] = None,
     wanted_names: Optional[Set[str]] = None,
+    optional_names: Optional[Set[str]] = None,
 ) -> Dict[str, bytes]:
     """Read, decrypt, decompress, and extract .param blobs from a regulation.bin file."""
     with open(reg_path, "rb") as fh:
@@ -170,11 +171,13 @@ def unpack_regulation_params(
     bnd = decompress_dcx_auto(dec, oodle_fn=oodle_fn)
     entries = game_map_extractor._parse_bnd4_entries(bnd)
     wanted = set(wanted_names) if wanted_names is not None else set(REQUIRED_PARAM_NAMES)
+    optional = set(optional_names) if optional_names is not None else ({"magic.param"} if wanted_names is None else set())
+    all_wanted = wanted | optional
 
     out: Dict[str, bytes] = {}
     for name, off, comp_sz, _uncomp_sz in entries:
         bname = os.path.basename(name.replace("\\", "/")).lower()
-        if bname in wanted:
+        if bname in all_wanted:
             blob = bnd[off : off + comp_sz]
             if blob[:4] == b"DCX\x00":
                 blob = decompress_dcx_auto(blob, oodle_fn=oodle_fn)
@@ -364,6 +367,12 @@ def _seed_fallback_names(
         gid = int(g.get("id", 0))
         if gid and g.get("name"):
             goods_names.setdefault(gid, g["name"])
+    for k, a in (fallback_data.get("ammo") or {}).items():
+        if a and a.get("n"):
+            weapon_names.setdefault(int(k), a["n"])
+    for k, sp in (fallback_data.get("spells") or {}).items():
+        if sp and sp.get("n"):
+            goods_names.setdefault(int(k), sp["n"])
     for k, v in (fallback_data.get("weaponTypes") or {}).items():
         fallback_wt.setdefault(int(k), v)
     if not fallback_grades and fallback_data.get("gradeTable"):
@@ -455,6 +464,7 @@ def build_weapon_payload_from_params(
     goods_rows = parse_param_rows(params["equipparamgoods.param"], 176)
     beh_rows = parse_param_rows(params["behaviorparam_pc.param"], 32)
     atk_rows = parse_param_rows(params["atkparam_pc.param"], 456)
+    magic_rows = parse_param_rows(params["magic.param"], 168) if "magic.param" in params else []
 
     weapon_names, arts_names, prot_names, acc_names, goods_names, menu_texts = load_mod_texts(
         mod_dir, game_dir=game_dir
@@ -506,12 +516,22 @@ def build_weapon_payload_from_params(
 
     raw_valid: List[Tuple[int, bytes, str]] = []
     valid_ids: Set[int] = set()
+    ammo: Dict[str, Dict[str, Any]] = {}
     for rid, r in wep_rows:
         if rid < 1000000:
             continue
         wc = _u8(r, 230)
         wt = _u16(r, 422)
-        if wc == 13 or wt in (81, 83, 85, 86):
+        if wt in (81, 83, 85, 86):
+            anm = weapon_names.get(rid, "").strip()
+            if anm and "[ERROR]" not in anm.upper():
+                ammo[str(rid)] = {
+                    "n": anm,
+                    "wt": wt,
+                    "atk": [_u16(r, 200), _u16(r, 202), _u16(r, 204), _u16(r, 206), _u16(r, 396)],
+                }
+            continue
+        if wc == 13:
             continue
         nm = weapon_names.get(rid, "").strip()
         if not nm or "[ERROR]" in nm.upper():
@@ -649,6 +669,14 @@ def build_weapon_payload_from_params(
                 "req": [_u8(r, 242), _u8(r, 243), _u8(r, 244), _u8(r, 245), _u8(r, 405)],
                 "ccg": ccg_list,
                 "spBeh": sp_beh,
+                "guard": [
+                    round(_f32(r, 52), 1),
+                    round(_f32(r, 56), 1),
+                    round(_f32(r, 60), 1),
+                    round(_f32(r, 64), 1),
+                    round(_f32(r, 392), 1),
+                    int(_s16(r, 216)),
+                ],
             }
         )
 
@@ -669,6 +697,12 @@ def build_weapon_payload_from_params(
             _u8(rr, 80),
             _u8(rr, 81),
             _u8(rr, 82),
+            round(_f32(rr, 44), 6),
+            round(_f32(rr, 48), 6),
+            round(_f32(rr, 52), 6),
+            round(_f32(rr, 56), 6),
+            round(_f32(rr, 92), 6),
+            round(_f32(rr, 76), 6),
         ]
 
     ccg: Dict[str, List[List[float]]] = {}
@@ -807,6 +841,19 @@ def build_weapon_payload_from_params(
             ]
         greases.append({"id": gid, "name": nm, "flat": flat, "rate": rate, "status": st_vals})
 
+    magic_ids: Set[int] = {int(mid) for mid, _mr in magic_rows} if magic_rows else set()
+    spells: Dict[str, Dict[str, Any]] = {}
+    for gid, gr in goods_rows:
+        if magic_ids:
+            if gid not in magic_ids:
+                continue
+        elif not (4000 <= gid <= 9999):
+            continue
+        snm = goods_names.get(gid, "").strip()
+        if not snm or "[ERROR]" in snm.upper():
+            continue
+        spells[str(gid)] = {"n": snm, "ic": _u16(gr, 48)}
+
     return {
         "mod": _detect_mod_label(mod_dir, fallback_data, mod_label),
         "weaponTypes": {str(k): v for k, v in sorted(weapon_types.items())},
@@ -820,6 +867,8 @@ def build_weapon_payload_from_params(
         "armors": armors,
         "talismans": talismans,
         "greases": greases,
+        "ammo": ammo,
+        "spells": spells,
     }
 
 

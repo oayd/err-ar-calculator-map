@@ -260,6 +260,14 @@ def compute_weapon(
     stance_mult = float(buffs.get("stanceMult", 1.0)) if buffs else 1.0
     eff_stance = weapon.get("stance", 0.0) * stance_mult
 
+    raw_guard = weapon.get("guard") or [0.0, 0.0, 0.0, 0.0, 0.0, 0]
+    guard_out: List[float] = []
+    for gi in range(5):
+        g_mult = float(reinf[13 + gi]) if len(reinf) > 13 + gi else 1.0
+        guard_out.append(round(min(100.0, max(0.0, float(raw_guard[gi]) * g_mult)), 1))
+    gb_mult = float(reinf[18]) if len(reinf) > 18 else 1.0
+    guard_out.append(int(round(max(0.0, float(raw_guard[5]) * gb_mult))))
+
     total_ar = sum(elem_ar)
     eff_total, eff_elems = calc_effective_damage(elem_ar, enemy_preset)
     return {
@@ -271,6 +279,7 @@ def compute_weapon(
         "ar": elem_ar,
         "base": elem_base,
         "scale": elem_scale,
+        "guard": guard_out,
         "spell": spell_scaling,
         "status": statuses,
         "grades": grades,

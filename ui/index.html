@@ -9,20 +9,51 @@
 <body>
   <header class="topbar">
     <div class="topbar-left">
-      <button id="drawerToggleBtn" class="icon-btn" title="Toggle filter sidebar (sidebar)">
+      <button id="drawerToggleBtn" class="icon-btn" title="Toggle filter sidebar">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
         </svg>
       </button>
-      <span class="app-title">Elden Ring Weapon Calculator</span>
-      <span class="mod-tag">ERR v2.3.10.1</span>
+      <img id="erHdrMedallion" class="er-hdr-medallion" alt="" />
+      <div class="er-hdr-title-stack">
+        <span class="app-title">Equipment</span>
+        <span class="mod-tag" id="hdrModTag">ERR v2.3.10.1</span>
+      </div>
       <div class="main-tabs" role="tablist" aria-label="Workspace View">
-        <button id="tabCalcBtn" class="main-tab active" data-view="calc" type="button">Calculator</button>
-        <button id="tabMapBtn" class="main-tab" data-view="map" type="button">Map</button>
+        <img id="erKeyQ" class="er-kg-key" alt="Q" title="Previous Menu" />
+        <button id="tabEquipBtn" class="main-tab active" data-view="equip" type="button">
+          <img id="erNavIcEquip" class="er-nav-ic" alt="" />
+          <span>Equipment</span>
+          <img class="er-nav-cur" alt="" />
+        </button>
+        <button id="tabCalcBtn" class="main-tab" data-view="calc" type="button">
+          <img id="erNavIcCalc" class="er-nav-ic" alt="" />
+          <span>Armory</span>
+          <img class="er-nav-cur hidden" alt="" />
+        </button>
+        <button id="tabMapBtn" class="main-tab" data-view="map" type="button">
+          <img id="erNavIcMap" class="er-nav-ic" alt="" />
+          <span>Map</span>
+          <img class="er-nav-cur hidden" alt="" />
+        </button>
+        <button id="tabPipBtn" class="main-tab" data-view="pip" type="button">
+          <img id="erNavIcPip" class="er-nav-ic" alt="" />
+          <span>PiP Viewer</span>
+          <img class="er-nav-cur hidden" alt="" />
+        </button>
+        <button id="tabSysBtn" class="main-tab" data-view="system" type="button">
+          <img id="erNavIcSys" class="er-nav-ic" alt="" />
+          <span>System</span>
+          <img class="er-nav-cur hidden" alt="" />
+        </button>
+        <img id="erKeyE" class="er-kg-key" alt="E" title="Next Menu" />
       </div>
     </div>
 
     <div class="topbar-right">
+      <button id="ramHeaderBadge" class="ram-badge-btn" type="button" title="Running Game Status">
+        <span id="ramHeaderMark" class="err-mark">&#10005;</span>
+      </button>
       <div class="save-pill" id="saveStatusPill" title="Loaded save status">
         <span id="saveAcceptedIcon" class="save-check" aria-hidden="true">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -31,26 +62,159 @@
         </span>
         <span id="charMetaText">Manual stats</span>
       </div>
-      <button id="topReloadBtn" class="top-btn" title="Reload latest character from ER0000.err (F5)">Reload Save</button>
-      <button id="topMatchEqBtn" class="top-btn" title="Match Weapon Level to equipped weapon upgrades">Match +Lv</button>
-      <button id="topGearBtn" class="top-btn" title="Configure Equipped Armor, Talismans, Greases &amp; Buffs">Gear &amp; Buffs</button>
-      <button id="topCompareBtn" class="top-btn gold-outline" title="Open Compare Tray">Compare (0)</button>
       <button id="topPipBtn" class="top-btn gold-outline" type="button" title="Open Always-on-Top Mini Overlay (Map or Stats)">Overlay</button>
-      <button id="topRefreshModBtn" class="top-btn" title="Re-extract regulation.bin data if extract_err_data.py is present">Refresh Mod</button>
-      <button id="topSettingsBtn" class="icon-btn" title="Settings &amp; Global Keybinds">
+      <button id="topSettingsBtn" class="icon-btn" type="button" title="System, Hotkeys &amp; Map Labels">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54A.484.484 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.42.49.42h4c.25 0 .46-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
         </svg>
       </button>
-      <button id="topSearchFocusBtn" class="icon-btn" title="Search weapons (Ctrl+F)">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-        </svg>
-      </button>
     </div>
   </header>
+  <div class="er-hdr-rule" aria-hidden="true"></div>
 
-  <div id="calcWorkspace" class="workspace">
+  <!-- Authentic 3-Column Elden Ring Equipment Workspace -->
+  <main id="equipWorkspace" class="equip-workspace">
+    <section id="eqLeftCol" class="eq-col">
+      <div class="eq-slot-top">
+        <div>
+          <div id="eqActiveSlotCat" class="eq-slot-cat">Right Hand Armament 1</div>
+          <div id="eqActiveSlotName" class="eq-slot-item">-</div>
+        </div>
+        <button id="eqChangeSlotBtn" type="button" class="mini-link-btn" title="Open Armory filtered to equip this slot">Change Equip &rarr;</button>
+      </div>
+
+      <div class="eq-grid-block">
+        <div class="eq-grid-line">
+          <div class="slot-row-3" id="eqRhRow"></div>
+          <div class="slot-row-2" id="eqArrowRow"></div>
+        </div>
+        <div class="eq-grid-line">
+          <div class="slot-row-3" id="eqLhRow"></div>
+          <div class="slot-row-2" id="eqBoltRow"></div>
+        </div>
+        <div class="eq-grid-subhdr">
+          <span>Armor</span>
+          <button id="eqGearResetBtn" type="button" class="link-act">Reset to Save</button>
+        </div>
+        <div class="slot-row-4" id="eqArmRow"></div>
+
+        <div class="eq-grid-subhdr">
+          <span>Talismans</span>
+          <button id="eqCondTogBtn" type="button" class="er-inline-tog">&#9671; Conditional Off</button>
+        </div>
+        <div class="slot-row-4" id="eqTalRow"></div>
+
+        <div id="eqSlotPicker" class="eq-slot-picker hidden">
+          <div class="eq-picker-hdr">
+            <span id="eqPickerTitle">Select Equipment</span>
+            <button id="eqPickerCloseBtn" type="button" class="banner-close" title="Close">&times;</button>
+          </div>
+          <select id="eqPickerSel" class="er-sel" style="width:100%;"></select>
+        </div>
+
+        <div class="eq-grid-subhdr" style="margin-top:6px;">
+          <span>Quick Items &middot; Grease &amp; Buffs</span>
+          <button id="eqClearBuffsBtn" type="button" class="link-act">Clear All Buffs</button>
+        </div>
+        <select id="eqGreaseSel" class="er-sel" style="width:100%;margin-bottom:4px;"></select>
+        <div class="slot-row-buffs" id="eqBuffRow"></div>
+        <div id="eqBuffSummary" class="eq-buff-summary">No active gear stat or damage modifiers</div>
+      </div>
+    </section>
+
+    <div class="er-vdiv" aria-hidden="true"></div>
+
+    <section id="eqCenterCol" class="eq-col">
+      <div class="eq-det-hdr">
+        <div style="min-width:0;flex:1;">
+          <div id="eqDetTitle" class="er-title eq-det-title">Select an Armament</div>
+          <div id="eqDetSub" class="eq-det-sub">Equipped or Top Armament</div>
+          <div class="eq-det-skill-line">
+            <span>Skill: <b id="eqDetSkill">-</b></span>
+            <span class="dim" style="margin-left:12px;">Weight <b id="eqDetWeight" style="color:#d7cfba;font-weight:400;">-</b></span>
+            <span class="dim" style="margin-left:12px;">Stance <b id="eqDetStance" style="color:#dfc07a;font-weight:400;">-</b></span>
+          </div>
+        </div>
+        <div class="eq-portraits">
+          <div id="eqDetAshBox" class="ash-waku" title="Cycle affinity (All Affinities)">
+            <img id="eqDetAffGem" class="ash-gem hidden" alt="" />
+            <img id="eqDetAshSil" class="ash-sil" alt="" />
+          </div>
+          <div id="eqDetBigBox" class="waku active eq-big-waku" title="Open in Armory table">
+            <div class="waku-glow"></div>
+            <img id="eqDetBigImg" class="waku-ic" alt="" />
+            <span id="eqDetBigBadge" class="eq-badge">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="subtabs" id="eqSubTabs">
+        <img id="erKeyFCenter" class="er-kg-key" alt="F" title="Cycle Right Panel View (Y / F)" />
+        <button type="button" class="subtab active" data-eqtab="0">Guarded &amp; Attack</button>
+        <button type="button" class="subtab" data-eqtab="1">All Affinities</button>
+        <button type="button" class="subtab" data-eqtab="2">Optimizer &amp; Curves</button>
+        <button type="button" class="subtab" data-eqtab="3">Compare (<span id="eqCmpCnt">0</span>/6)</button>
+      </div>
+
+      <div class="eq-det-actions">
+        <button id="eqOpenCalcBtn" type="button" class="link-act">Inspect in Armory &rarr;</button>
+        <button id="eqShowMapBtn" type="button" class="link-act">Show on Map &rarr;</button>
+        <button id="eqPinBtn" type="button" class="link-act">+ Pin Compare (P / X)</button>
+      </div>
+
+      <div class="er-hrule" aria-hidden="true"></div>
+      <div id="eqDetBody" class="eq-det-body"></div>
+    </section>
+
+    <div class="er-vdiv" aria-hidden="true"></div>
+
+    <section id="eqRightCol" class="eq-col">
+      <div class="er-sec-row">
+        <div class="er-sec"><img id="eqIcStatMini" alt="" /><span>Character Status</span></div>
+        <div class="eq-right-links">
+          <button id="eqRevertBtn" type="button" class="link-act">Revert Save</button>
+        </div>
+      </div>
+
+      <div class="eq-save-bar">
+        <select id="eqCharSel" class="er-sel" style="flex:1;min-width:0;"></select>
+        <button id="eqReloadBtn" type="button" class="mini-link-btn">Reload</button>
+        <button id="eqBrowseBtn" type="button" class="mini-link-btn">Browse...</button>
+      </div>
+
+      <div id="eqCoreVitals" class="eq-core-vitals"></div>
+
+      <div id="eqAttrList" class="eq-attr-list"></div>
+
+      <div class="eq-lvl-bar">
+        <span class="muted" style="font-size:11px;">Upgrade</span>
+        <select id="eqLevelSel" class="er-sel" style="flex:1;min-width:0;"></select>
+        <button id="eqMatchLvBtn" type="button" class="mini-link-btn">Match +Lv</button>
+        <button id="eqMaxLvBtn" type="button" class="mini-link-btn">Max</button>
+      </div>
+
+      <div class="er-hrule" aria-hidden="true"></div>
+
+      <div class="er-sec"><img id="eqIcAtkMini" alt="" /><span>Equipped Attack Power</span></div>
+      <div id="eqAtkSummary" class="eq-atk-summary"></div>
+
+      <div class="er-hrule" aria-hidden="true"></div>
+
+      <div class="er-sec"><img id="eqIcCutMini" alt="" /><span>Enemy Defense Benchmark</span></div>
+      <select id="eqEnemySel" class="er-sel" style="width:100%;margin-bottom:7px;"></select>
+      <div class="eq-right-ftr">
+        <button id="eqTwoHandBtn" type="button" class="er-inline-tog">&#9670; Two-Handing (1.5&times; STR)</button>
+        <span class="muted" style="font-size:11px;">Save: <b id="eqSaveName" style="color:#dcd4c2;">Manual</b></span>
+      </div>
+      <div class="eq-grid-subhdr" style="margin-top:6px;">
+        <span>Memory Slots</span>
+        <span id="eqMemCountLbl" class="muted">0 memorized</span>
+      </div>
+      <div id="eqMemTiles" class="mem-tiles"></div>
+    </section>
+  </main>
+
+  <div id="calcWorkspace" class="workspace hidden">
     <aside id="sidebar" class="sidebar">
       <div class="m-field">
         <label for="charSelect">Character (Save Slot)</label>
@@ -186,10 +350,17 @@
         </div>
 
         <div class="controls-right">
-          <span id="rowCountLabel" class="meta-count">0 weapons</span>
+          <div class="controls-right-top">
+            <span id="rowCountLabel" class="meta-count">0 weapons</span>
+          </div>
           <div class="quick-pills">
-            <button id="maxUpgradeBtn" class="mini-link-btn" title="Set weapon level to +25 / +10">Max +25/+10</button>
-            <button id="revertStatsBtn" class="mini-link-btn" title="Revert attributes back to loaded save">Revert Stats</button>
+            <button id="topMatchEqBtn" class="mini-link-btn" type="button" title="Match Weapon Level to equipped weapon upgrades">Match +Lv</button>
+            <button id="maxUpgradeBtn" class="mini-link-btn" type="button" title="Set weapon level to +25 / +10">Max +25/+10</button>
+            <button id="revertStatsBtn" class="mini-link-btn" type="button" title="Revert attributes back to loaded save">Revert Stats</button>
+          </div>
+          <div class="quick-pills">
+            <button id="topGearBtn" class="top-btn" type="button" title="Configure Equipped Armor, Talismans, Greases &amp; Buffs">Gear &amp; Buffs</button>
+            <button id="topCompareBtn" class="top-btn gold-outline" type="button" title="Open Compare Tray">Compare (0)</button>
           </div>
         </div>
       </section>
@@ -252,6 +423,11 @@
           Using regulation data from your custom <strong>ELDEN RING Reforged mod v2.3.10.1</strong>
         </span>
         <button id="bannerCloseBtn" class="banner-close" title="Dismiss banner">&times;</button>
+      </div>
+
+      <div id="equipPickBanner" class="info-banner hidden" style="border-color:rgba(230,198,120,0.65);">
+        <span id="equipPickBannerText">Select an armament to preview &amp; equip into slot</span>
+        <button id="equipPickCancelBtn" class="mini-link-btn" type="button">Cancel &amp; Return</button>
       </div>
 
       <div id="tableScroll" class="table-shell">
@@ -453,7 +629,7 @@
           </div>
         </div>
         <div id="mapCatList" class="map-cat-list">
-          <label class="map-cat-row"><input type="checkbox" id="mapCatPlayer" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-player" alt="" /><span class="map-dot player"></span></span><span class="map-cat-label">Live Player</span><span id="mapPlayerStatusTag" class="map-cat-cnt">Live</span></label>
+          <label class="map-cat-row"><input type="checkbox" id="mapCatPlayer" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-player" alt="" /><span class="map-dot player"></span></span><span class="map-cat-label">Live Player</span><span id="mapPlayerStatusTag" class="map-cat-cnt err-mark">&#10005;</span></label>
           <label class="map-cat-row" title="Show Elden Ring's in-game Blue Beacons (1-5) and Map Stamps from Live RAM or Save"><input type="checkbox" id="mapCatPins" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-beacon" alt="" /><span class="map-dot beacon"></span></span><span class="map-cat-label">In-Game Pins (Blue)</span><span id="cnt-pins" class="map-cat-cnt">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="grace" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-grace" alt="" /><span class="map-dot grace"></span></span><span class="map-cat-label">Sites of Grace</span><span class="map-cat-cnt" id="cnt-grace">0</span></label>
           <label class="map-cat-row"><input type="checkbox" class="map-cat-cb" data-cat="weapon" checked /><span class="map-cat-icon-wrap"><img class="map-cat-icon" id="icon-legend-weapon" alt="" /><span class="map-dot weapon"></span></span><span class="map-cat-label">Weapons</span><span class="map-cat-cnt" id="cnt-weapon">0</span></label>
@@ -512,53 +688,354 @@
     </aside>
 
     <section class="map-stage">
-      <canvas id="mapCanvas" class="map-canvas"></canvas>
-      <div id="mapLoadingOverlay" class="map-loading hidden">Loading map tiles...</div>
-      <div id="mapExtractBanner" class="map-extract-banner hidden">
-        <div class="map-extract-banner-hdr">
-          <span class="badge gold">Native Map Tiles Available</span>
-          <button id="mapExtractBannerClose" class="banner-close" type="button" title="Dismiss">&times;</button>
+      <div class="map-canvas-wrap">
+        <canvas id="mapCanvas" class="map-canvas"></canvas>
+        <div id="mapLoadingOverlay" class="map-loading hidden">Loading map tiles...</div>
+        <div id="mapExtractBanner" class="map-extract-banner hidden">
+          <div class="map-extract-banner-hdr">
+            <span class="badge gold">Native Map Tiles Available</span>
+            <button id="mapExtractBannerClose" class="banner-close" type="button" title="Dismiss">&times;</button>
+          </div>
+          <div class="map-extract-banner-body">
+            Using calibrated coordinate grid. Extract official high-res Elden Ring map tiles &amp; icons directly from your local game install in one click (~18s).
+          </div>
+          <div class="map-extract-banner-actions">
+            <button id="mapExtractHeroBtn" class="top-btn gold-outline" type="button">Extract Game Maps &amp; Icons</button>
+            <button id="mapExtractBrowseBtn" class="top-btn" type="button">Choose Game Folder...</button>
+          </div>
         </div>
-        <div class="map-extract-banner-body">
-          Using calibrated coordinate grid. Extract official high-res Elden Ring map tiles &amp; icons directly from your local game install in one click (~18s).
+        <div class="map-controls">
+          <button id="mapZoomInBtn" class="map-ctrl-btn" type="button" title="Zoom In">+</button>
+          <button id="mapZoomOutBtn" class="map-ctrl-btn" type="button" title="Zoom Out">&minus;</button>
+          <button id="mapZoomResetBtn" class="map-ctrl-btn" type="button" title="Reset View">Fit</button>
+          <button id="mapStagePlayerBtn" class="map-ctrl-btn gold" type="button" title="Jump to Player">Player</button>
+          <button id="mapFollowBtn" class="map-ctrl-btn" type="button" title="Follow live player at 30 Hz">Follow</button>
+          <button id="mapPipBtn" class="map-ctrl-btn" type="button" title="Mini Map Overlay (Always on Top)">PiP</button>
         </div>
-        <div class="map-extract-banner-actions">
-          <button id="mapExtractHeroBtn" class="top-btn gold-outline" type="button">Extract Game Maps &amp; Icons</button>
-          <button id="mapExtractBrowseBtn" class="top-btn" type="button">Choose Game Folder...</button>
+        <div id="mapHoverTip" class="map-hover-tip hidden"></div>
+        <div id="mapPinCard" class="map-pin-card hidden">
+          <div class="map-pin-hdr">
+            <span id="mapPinBadge" class="badge gold">Weapon</span>
+            <button id="mapPinCloseBtn" class="banner-close" type="button" title="Close">&times;</button>
+          </div>
+          <div id="mapPinTitle" class="map-pin-title">-</div>
+          <div id="mapPinSub" class="map-pin-sub">-</div>
+          <div id="mapPinItems" class="map-pin-items"></div>
+          <div id="mapPinCoords" class="map-pin-coords"></div>
+          <div id="mapPinActions" class="map-pin-actions"></div>
         </div>
+        <div id="pipMapBuffBox" class="pip-map-buff-box hidden"></div>
+        <div id="pipMapGripBox" class="pip-map-grip-box hidden"></div>
+        <div id="pipMapBossBox" class="pip-map-boss-box hidden"></div>
       </div>
-      <div class="map-controls">
-        <button id="mapZoomInBtn" class="map-ctrl-btn" type="button" title="Zoom In">+</button>
-        <button id="mapZoomOutBtn" class="map-ctrl-btn" type="button" title="Zoom Out">&minus;</button>
-        <button id="mapZoomResetBtn" class="map-ctrl-btn" type="button" title="Reset View">Fit</button>
-        <button id="mapStagePlayerBtn" class="map-ctrl-btn gold" type="button" title="Jump to Player">Player</button>
-        <button id="mapFollowBtn" class="map-ctrl-btn" type="button" title="Follow live player at 30 Hz">Follow</button>
-        <button id="mapPipBtn" class="map-ctrl-btn" type="button" title="Mini Map Overlay (Always on Top)">PiP</button>
-      </div>
-      <div id="mapHoverTip" class="map-hover-tip hidden"></div>
-      <div id="mapPinCard" class="map-pin-card hidden">
-        <div class="map-pin-hdr">
-          <span id="mapPinBadge" class="badge gold">Weapon</span>
-          <button id="mapPinCloseBtn" class="banner-close" type="button" title="Close">&times;</button>
-        </div>
-        <div id="mapPinTitle" class="map-pin-title">-</div>
-        <div id="mapPinSub" class="map-pin-sub">-</div>
-        <div id="mapPinItems" class="map-pin-items"></div>
-        <div id="mapPinCoords" class="map-pin-coords"></div>
-        <div id="mapPinActions" class="map-pin-actions"></div>
-      </div>
-      <div id="pipMapBuffBox" class="pip-map-buff-box hidden"></div>
-      <div id="pipMapBossBox" class="pip-map-boss-box hidden"></div>
     </section>
   </div>
+
+  <!-- PiP Display Viewer Workspace -->
+  <section id="pipViewerWorkspace" class="pip-viewer-ws hidden">
+    <div class="pip-viewer-stage" id="pipViewerStage">
+      <div class="pip-viewport-watermark">Simulated In-Game Viewport &middot; Always-On-Top PiP Preview</div>
+
+      <div id="pvOverlayShell" class="pv-overlay-shell corner-br mode-hud">
+        <div id="pvMapSection" class="pv-minimap">
+          <div class="pv-mini-hdr">
+            <span id="pvMapLayerTitle">The Lands Between</span>
+            <span class="dim" id="pvMapOpLbl">Opacity 100%</span>
+          </div>
+          <div class="pv-map-body">
+            <canvas id="pvMapCanvas" width="360" height="206"></canvas>
+            <div id="pvMapBuffPreview" class="pv-map-buff-preview hidden"></div>
+            <div id="pvMapGripPreview" class="pv-map-grip-preview hidden"></div>
+            <div id="pvEnemyInsideSlot"></div>
+          </div>
+        </div>
+
+        <div id="pvStatsBox" class="pip-stats-view pv-stats-card"></div>
+
+        <div id="pvEnemyBelowSlot">
+          <div id="pvEnemyBox" class="pv-enemy-host"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="er-vdiv" aria-hidden="true"></div>
+
+    <aside class="pv-controls">
+      <div class="er-sec"><img id="pvCtrlIc" alt="" /><span>PiP Overlay Controls</span></div>
+      <button id="pvLaunchHudBtn" class="top-btn gold-outline" type="button" style="width:100%;">Launch Stacked HUD PiP</button>
+      <div class="pv-btn-row">
+        <button id="pvLaunchMapBtn" class="top-btn" type="button">Map Only</button>
+        <button id="pvLaunchStatsBtn" class="top-btn" type="button">Stats Only</button>
+      </div>
+      <div class="pv-field">
+        <span class="muted">Preview Mode</span>
+        <select id="pvPreviewModeSel" class="er-sel" style="width:100%;">
+          <option value="hud">Stacked HUD (Map + Boss + Stats)</option>
+          <option value="map">Standalone Map Only</option>
+          <option value="stats">Standalone Stats Only</option>
+        </select>
+      </div>
+      <div class="pv-field">
+        <span class="muted">Screen Corner Position</span>
+        <select id="pvCornerSel" class="er-sel" style="width:100%;">
+          <option value="bottom-right">Bottom-Right</option>
+          <option value="top-right">Top-Right</option>
+          <option value="bottom-left">Bottom-Left</option>
+          <option value="top-left">Top-Left</option>
+        </select>
+      </div>
+      <div class="pv-field">
+        <span class="muted">Boss Bar Placement</span>
+        <select id="pvBossPlaceSel" class="er-sel" style="width:100%;">
+          <option value="inside">Show Over Map</option>
+          <option value="below">Show Below</option>
+        </select>
+      </div>
+      <div class="pv-field">
+        <span class="muted">1H / 2H Grip Icon</span>
+        <select id="pvGripPlaceSel" class="er-sel" style="width:100%;">
+          <option value="weapon">Active Weapon Emblem</option>
+          <option value="header">Character Header Medallion</option>
+          <option value="map">Minimap Corner Emblem</option>
+        </select>
+      </div>
+      <label class="cb-row"><input type="checkbox" id="pvBossHudCb" checked /><span>PiP Stats Enemy Bar</span></label>
+      <label class="cb-row"><input type="checkbox" id="pvMapBossHudCb" checked /><span>PiP Map / HUD Enemy Bar</span></label>
+      <label class="cb-row"><input type="checkbox" id="pvBuffHudCb" checked /><span>Stats Buff Timers Bar</span></label>
+      <label class="cb-row"><input type="checkbox" id="pvMapBuffCb" checked /><span>Minimap Buff Timers Bar</span></label>
+      <label class="cb-row"><input type="checkbox" id="pvFollowCb" /><span>Follow Player (30 Hz)</span></label>
+      <div class="pv-loop-row">
+        <label class="cb-row" style="flex:1;min-width:0;"><input type="checkbox" id="pvHideLoopBuffsCb" checked /><span>Hide Looping (&gt;3&times;/10s)</span></label>
+        <button id="pvResetLoopBuffsBtn" class="mini-link-btn" type="button" title="Restore suppressed looping buffs">Hidden: 0</button>
+      </div>
+      <div class="pv-field">
+        <span class="muted">Boss HUD Layout</span>
+        <select id="pvDesignSel" class="er-sel" style="width:100%;">
+          <option value="1">Classic Boss Bar</option>
+          <option value="2">Compact Target Bar</option>
+          <option value="3">Dual Poise + Status Bar</option>
+        </select>
+      </div>
+      <div class="pv-field">
+        <span class="muted">Overlay Opacity (<span id="pvOpVal">100%</span>)</span>
+        <input type="range" id="pvOpRng" min="15" max="100" step="1" value="100" class="er-slider" style="width:100%;" />
+      </div>
+    </aside>
+  </section>
+
+  <!-- Elden Ring System Workspace (Mod Source, Hotkeys, Map Labels & Toggleables) -->
+  <section id="systemWorkspace" class="sys-ws hidden">
+    <div class="sys-subtabs-hdr">
+      <div class="subtabs" id="sysSubTabs">
+        <button type="button" class="subtab active" data-systab="mod">Mod &amp; Prompts</button>
+        <button type="button" class="subtab" data-systab="hotkeys">Hotkeys &amp; Map Labels</button>
+        <button type="button" class="subtab" data-systab="advanced">Buffs, Enemy HUD &amp; Map</button>
+      </div>
+      <span class="muted" style="font-size:11.5px;">PiP HUD toggles live in the <b>PiP Viewer</b> tab</span>
+    </div>
+
+    <div id="sysPaneMod" class="sys-pane sys-pane-2col">
+      <div class="sys-left">
+        <div class="er-sec"><img id="sysSecIc" alt="" /><span>System &mdash; Mod Source &amp; Input Prompts</span></div>
+        <div class="sys-list" id="sysList">
+          <div class="sys-row active" id="modRegRow" data-sys-act="browse">
+            <span class="sys-lbl">Regulation File Path (regulation.bin)</span>
+            <span class="sys-val" id="modRegPathDisplay">Bundled (ERR v2.3.10.1)</span>
+          </div>
+          <div class="sys-row" id="modBrowseRegBtn" data-sys-act="browse">
+            <span class="sys-lbl">Browse regulation.bin...</span>
+            <span class="sys-action-tag">Open File Picker</span>
+          </div>
+          <div class="sys-row" id="modReadGameBtn" data-sys-act="readgame" title="Detect ModEngine 2/3 or offline live game RAM">
+            <span class="sys-lbl">Read from Running Game</span>
+            <span id="sysGameStatusBadge" class="err-mark">&#10005;</span>
+          </div>
+          <div class="sys-row" id="modRefreshNowBtn" data-sys-act="refresh">
+            <span class="sys-lbl">Refresh Mod Data Now</span>
+            <span class="sys-action-tag">Extract Params &amp; Reload</span>
+          </div>
+          <div class="sys-row" id="sysReextractIconsBtn" data-sys-act="icons">
+            <span class="sys-lbl">Re-Extract Game Icons Cache</span>
+            <span class="sys-action-tag" id="sysIconsCountTag">Refresh Icons</span>
+          </div>
+          <div class="sys-row" id="sysPromptModeRow" data-sys-act="prompts">
+            <span class="sys-lbl">On-Screen Prompts (Auto / KB+M / Controller)</span>
+            <span class="sys-action-tag" id="sysPromptModeLbl">Auto (Keyboard &amp; Mouse)</span>
+          </div>
+          <div class="sys-row" id="modClearRegBtn" data-sys-act="clear">
+            <span class="sys-lbl">Clear Saved Regulation Path</span>
+            <span class="sys-action-tag">Revert to Bundled Data</span>
+          </div>
+          <div class="sys-row" id="sysOpenSettingsModalBtn" data-sys-act="hotkeys">
+            <span class="sys-lbl">Hotkeys, Map Labels &amp; Toggleables...</span>
+            <span class="sys-action-tag">Open Sub-Tab</span>
+          </div>
+        </div>
+        <div id="modSourceStatus" class="mod-source-status">Ready.</div>
+      </div>
+
+      <div class="er-vdiv" aria-hidden="true"></div>
+
+      <aside class="sys-right">
+        <div class="er-sec"><img id="sysInfoIc" alt="" /><span>Extraction &amp; Input Diagnostics</span></div>
+        <div class="sys-diag-list">
+          <div class="eq-kv"><span>Live RAM Reader</span><span id="sysDiagRamMark" class="err-mark">&#10005;</span></div>
+          <div class="eq-kv"><span>Running Game Process</span><span id="sysDiagProc" class="er-num muted">Not Running</span></div>
+          <div class="eq-kv"><span>Weapons Loaded</span><span id="sysDiagWeapons" class="er-num">6,478</span></div>
+          <div class="eq-kv"><span>Active Prompt Device</span><span id="sysDiagPromptDev" style="color:#dfc07a;">Keyboard &amp; Mouse</span></div>
+          <div class="eq-kv"><span>Extracted Icon Cache</span><span id="sysDiagIcons" class="er-num">0 icons</span></div>
+          <div class="eq-kv"><span>Anti-Cheat Status</span><span id="sysDiagEac" class="er-num muted">Offline Safe</span></div>
+        </div>
+      </aside>
+    </div>
+
+    <div id="sysPaneHotkeys" class="sys-pane sys-pane-2col hidden">
+      <div class="sys-left">
+        <div class="er-sec"><img id="erSettingsMedallion" alt="" /><span>Global Hotkeys (work while Elden Ring is focused)</span></div>
+        <div id="keybindsList" class="keybinds-list"></div>
+        <div id="keybindErrorNote" class="keybind-err-note"></div>
+        <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+          <button id="keybindResetBtn" class="mini-link-btn" type="button">Reset Default Keybinds</button>
+        </div>
+      </div>
+
+      <div class="er-vdiv" aria-hidden="true"></div>
+
+      <div class="sys-right sys-labels-wrap">
+        <div class="er-lbl-sec" style="margin-top:0;">
+          <div class="er-sec-hdr-row">
+            <span class="er-sec-hdr">Map Marker Labels</span>
+            <div class="er-lbl-acts">
+              <button id="setLabelCatsAllBtn" type="button" class="er-mini-act">All</button>
+              <span class="er-mini-sep">&middot;</span>
+              <button id="setLabelCatsDefBtn" type="button" class="er-mini-act">Default</button>
+              <span class="er-mini-sep">&middot;</span>
+              <button id="setLabelCatsNoneBtn" type="button" class="er-mini-act">None</button>
+            </div>
+          </div>
+          <div class="er-lbl-top-grid">
+            <div class="er-opt-row on" data-tog="mapShowLabels">
+              <span class="er-opt-lbl">Show Marker Names<sup class="er-q" data-title="Show Marker Names" data-tip="Master switch for all map name labels across both the full map and PiP minimap (hovering icons still shows names).">?</sup></span>
+              <span class="er-opt-state">&#9670; ON</span>
+            </div>
+            <div class="er-opt-row on" data-tog="mapPipNearbyLabelsOnly">
+              <span class="er-opt-lbl">PiP Nearby Labels Only<sup class="er-q" data-title="PiP Nearby Labels Only" data-tip="In PiP minimap mode (when not searching), only displays marker names close to your player and skips overlapping labels.">?</sup></span>
+              <span class="er-opt-state">&#9670; ON</span>
+            </div>
+            <div class="er-opt-row er-opt-static er-lbl-span2">
+              <span class="er-opt-lbl">PiP Nearby Label Radius<sup class="er-q" data-title="PiP Nearby Label Radius" data-tip="Screen distance around your player (or minimap center) in PiP mode where nearby marker names fade in (30–220px, Default: 95px).">?</sup></span>
+              <span class="er-slider-ctrl">
+                <input id="setPipLabelRadRng" type="range" min="30" max="220" step="5" value="95" class="er-slider er-slider-wide" />
+                <span class="er-num-wrap"><input id="setPipLabelRadNum" type="number" min="30" max="220" step="1" value="95" class="er-num" /><span class="er-pct">px</span></span>
+              </span>
+            </div>
+          </div>
+          <div id="setLabelCatsGrid" class="er-cat-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sysPaneAdvanced" class="sys-pane hidden">
+      <div id="settingsToggleables" class="er-tog-shell">
+        <div class="er-tog-grid">
+          <div class="er-tog-col">
+            <div>
+              <div class="er-sec-hdr">Player Buff Timers</div>
+              <div class="er-opt-row on" data-tog="buffExpFlash">
+                <span class="er-opt-lbl">Expiring Flash Alert (&le; 10s)<sup class="er-q" data-title="Expiring Flash Alert" data-tip="Gently pulses a soft crimson border when a buff has 10 seconds or less before wearing off.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="buffHideLooping">
+                <span class="er-opt-lbl">Hide Looping Effects (&gt;3&times; / 10s)<sup class="er-q" data-title="Auto-Hide Rapidly Looping Effects" data-tip="Automatically hides transient effects that repeatedly loop or reset more than 3 times in a row within 10 seconds (e.g. 1s passive ticks). Toggle off to show them again.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row er-opt-static">
+                <span class="er-opt-lbl">Suppressed Looping Effects</span>
+                <button id="sysResetLoopBuffsBtn" type="button" class="mini-link-btn">Reset Hidden (0)</button>
+              </div>
+              <div class="er-opt-row er-opt-static">
+                <span class="er-opt-lbl">Radial Sweep Opacity<sup class="er-q" data-title="Radial Sweep Opacity" data-tip="Controls how dark the cooldown shadow is as it sweeps clockwise off the icon (0–100%, Default: 30%).">?</sup></span>
+                <span class="er-slider-ctrl">
+                  <input id="setBuffSweepRng" type="range" min="0" max="100" step="1" value="30" class="er-slider" />
+                  <span class="er-num-wrap"><input id="setBuffSweepNum" type="number" min="0" max="100" step="1" value="30" class="er-num" /><span class="er-pct">%</span></span>
+                </span>
+              </div>
+              <div class="er-opt-row er-opt-static">
+                <span class="er-opt-lbl">Timer Text Opacity<sup class="er-q" data-title="Timer Text Opacity" data-tip="Adjusts transparency of the white countdown numbers over each buff icon (0–100%, Default: 75%).">?</sup></span>
+                <span class="er-slider-ctrl">
+                  <input id="setBuffTextRng" type="range" min="0" max="100" step="1" value="75" class="er-slider" />
+                  <span class="er-num-wrap"><input id="setBuffTextNum" type="number" min="0" max="100" step="1" value="75" class="er-num" /><span class="er-pct">%</span></span>
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div class="er-sec-hdr">Enemy / Boss HUD</div>
+              <div class="er-opt-row on" data-tog="enemyShowStatuses">
+                <span class="er-opt-lbl">Enemy Status Bars<sup class="er-q" data-title="Enemy Status Bars" data-tip="Shows Bleed, Frost, Rot, Sleep, Poison, and Madness buildup on enemies that can take them.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="enemyShowStance">
+                <span class="er-opt-lbl">Enemy Stance / Poise Bar<sup class="er-q" data-title="Enemy Stance / Poise Bar" data-tip="Displays how close the boss or enemy is to a stance break or riposte.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="er-tog-col">
+            <div>
+              <div class="er-sec-hdr">Live Map &amp; Tracking</div>
+              <div class="er-opt-row on" data-tog="liveWatch">
+                <span class="er-opt-lbl">Live Game Watchers<sup class="er-q" data-title="Live Game Watchers" data-tip="Automatically reads your save file and offline game memory for real-time stats, position, buffs, and enemy bars.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapAutoSwitchLayer">
+                <span class="er-opt-lbl">Auto-Switch Map Layer<sup class="er-q" data-title="Auto-Switch Map Layer" data-tip="Automatically flips between Overworld, Underground, and Shadow Realm maps when you travel between them.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapAutoDetect">
+                <span class="er-opt-lbl">Auto-Detect Completed<sup class="er-q" data-title="Auto-Detect Completed" data-tip="Automatically marks Sites of Grace you discovered, bosses you defeated, and loot you already own.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapShowPlayer">
+                <span class="er-opt-lbl">Player Marker &amp; Ring<sup class="er-q" data-title="Player Marker &amp; Ring" data-tip="Draws your character's live directional arrow and subtle green ring on the interactive map.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapShowPins">
+                <span class="er-opt-lbl">Native Blue Beacons &amp; Pins<sup class="er-q" data-title="Native Blue Beacons &amp; Pins" data-tip="Syncs your in-game blue light pillars (1–5) and map stamps onto the live map.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapShowOffscreenArrow">
+                <span class="er-opt-lbl">Off-Screen Target Arrow<sup class="er-q" data-title="Off-Screen Target Arrow" data-tip="Shows a directional edge arrow and distance in the corner minimap pointing toward your searched item or grace.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row er-opt-static">
+                <span class="er-opt-lbl">Completed Markers<sup class="er-q" data-title="Completed Markers" data-tip="Controls how collected items, touched Graces, and defeated bosses render on the map.">?</sup></span>
+                <select id="setCompletedModeSel" class="er-select">
+                  <option value="dim">Dim + Checkmark</option>
+                  <option value="show">Show Normally</option>
+                  <option value="hide">Hide Completed</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="er-tog-ftr">
+          <span id="setTogResetNote" class="er-reset-note">Restored default settings.</span>
+          <button id="setTogResetBtn" type="button" class="er-reset-btn">Reset to Default</button>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <!-- Picture-in-Picture / Mini Overlay Controls & Compact Stats HUD -->
   <div id="pipBar" class="pip-bar">
     <div class="pip-group">
       <span class="pip-drag-grip" title="Drag bar to move overlay">&#8942;&#8942;</span>
       <button id="pipModeMapBtn" class="pip-pill pip-mode-pair" type="button" title="Switch overlay to Live Minimap">Map</button>
+      <button id="pipModeHudBtn" class="pip-pill pip-mode-pair" type="button" title="Switch overlay to Stacked HUD (Map + Boss Bar + Stats/Buffs)">HUD</button>
       <button id="pipModeStatsBtn" class="pip-pill pip-mode-pair" type="button" title="Switch overlay to Live Stats &amp; Equipped AR HUD">Stats</button>
-      <button id="pipModeSwapBtn" class="pip-pill active pip-mode-swap" type="button" title="Switch between Map and Stats">Map</button>
+      <button id="pipModeSwapBtn" class="pip-pill active pip-mode-swap" type="button" title="Cycle between Map, Stacked HUD, and Stats">HUD</button>
     </div>
     <div class="pip-group">
       <button id="pipSearchBtn" class="pip-pill pip-icon-pill pip-icon-sq" type="button" title="Search map markers (Ctrl+F)" aria-label="Search map markers">
@@ -567,11 +1044,13 @@
         </svg>
       </button>
       <button id="pipFollowBtn" class="pip-pill pip-icon-sq" type="button" title="Follow live player position at 30 Hz"><span class="pip-lbl">Follow</span><span class="pip-ico" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="3.8"/><path d="M8 1.5v2.2M8 12.3v2.2M1.5 8h2.2M12.3 8h2.2"/></svg></span></button>
-      <button id="pipBossBtn" class="pip-pill pip-enemy-btn pip-icon-sq active" type="button" title="Toggle Live Enemy Bar (Green = ON, Yellow = OFF; 30 Hz Offline RAM, auto-off under EAC)"><span class="pip-lbl">Enemy</span><span class="pip-ico" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg></span></button>
-      <div id="pipDesignSpin" class="pip-design-spin" data-design="1" title="Enemy HUD Design 1/3 (click ▲/▼ to cycle)">
-        <button id="pipDesignPrevBtn" type="button" aria-label="Previous HUD design">&#9650;</button>
-        <button id="pipDesignNextBtn" type="button" aria-label="Next HUD design">&#9660;</button>
-      </div>
+      <span class="pip-cluster">
+        <button id="pipBossBtn" class="pip-pill pip-enemy-btn pip-icon-sq active" type="button" title="Toggle Live Enemy Bar (Green = ON, Yellow = OFF; 30 Hz Offline RAM, auto-off under EAC)"><span class="pip-lbl">Enemy</span><span class="pip-ico" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg></span></button>
+        <div id="pipDesignSpin" class="pip-design-spin" data-design="1" title="Enemy HUD Design 1/3 (click ▲/▼ to cycle)">
+          <button id="pipDesignPrevBtn" type="button" aria-label="Previous HUD design">&#9650;</button>
+          <button id="pipDesignNextBtn" type="button" aria-label="Next HUD design">&#9660;</button>
+        </div>
+      </span>
       <span id="pipMapRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
       <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)"><span class="pip-op-lbl">Opacity </span><span id="pipOpacityVal">100%</span></button>
@@ -604,10 +1083,12 @@
   <div id="pipStatsView" class="pip-stats-view">
     <div class="pip-stats-hdr">
       <span id="pipCharName" class="pip-char-name">Character</span>
-      <span id="pipRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
+      <span class="pip-hdr-right">
+        <span id="pipHdrGripSlot" class="pip-hdr-grip-slot hidden"></span>
+        <span id="pipRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
+      </span>
     </div>
     <div id="pipStatsBuffBox" class="pip-buff-row hidden"></div>
-    <div id="pipBossBox" class="pip-boss-box hidden"></div>
     <div id="pipStatsGrid" class="pip-stats-grid"></div>
     <div class="pip-subhdr">
       <span>Equipped Weapons</span>
@@ -616,6 +1097,7 @@
     <div id="pipWeaponsList" class="pip-weapons-list"></div>
     <div id="pipGearLine" class="pip-gear-line"></div>
   </div>
+  <div id="pipBossBox" class="pip-boss-box hidden"></div>
   <div class="pip-resize-edge pip-edge-n" data-edge="n" title="Drag edge to resize"></div>
   <div class="pip-resize-edge pip-edge-s" data-edge="s" title="Drag edge to resize"></div>
   <div class="pip-resize-edge pip-edge-e" data-edge="e" title="Drag edge to resize"></div>
@@ -625,175 +1107,22 @@
   <div class="pip-resize-edge pip-edge-sw" data-edge="sw" title="Drag corner to resize"></div>
   <div id="pipResizeGrip" class="pip-resize-edge pip-edge-se pip-resize-grip" data-edge="se" title="Drag corner to resize"></div>
 
-  <!-- Settings & Global Keybinds Modal -->
-  <div id="settingsModal" class="settings-backdrop hidden" role="dialog" aria-modal="true" aria-label="Settings and Keybinds">
-    <div class="settings-card">
-      <div class="settings-hdr">
-        <span class="settings-title">Settings &amp; Global Keybinds</span>
-        <button id="settingsCloseBtn" class="banner-close" type="button" title="Close (Esc)">&times;</button>
+  <!-- Elden Ring Key Prompt & Contextual Footer -->
+  <footer id="erFooter" class="er-footer">
+    <div class="er-ftr-keys">
+      <div class="er-ftr-left">
+        <button type="button" class="er-prompt-btn" id="erFtrPromptA"><img id="erFtrKeyA" class="er-kg-key" alt="OK" /><span>:OK</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrPromptB"><img id="erFtrKeyEsc" class="er-kg-key" alt="Back" /><span>:Back</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrPromptX"><img id="erFtrKeyP" class="er-kg-key" alt="Compare" /><span id="erFtrCompareLbl">:Compare / Remove</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrPromptY"><img id="erFtrKeyF" class="er-kg-key" alt="Switch" /><span id="erFtrSwitchLbl">:Switch view (right)</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrPromptR3"><img id="erFtrKeyR" class="er-kg-key" alt="Armory" /><span id="erFtrArmoryLbl">:Armory (<span id="erFtrArmoryCount">6,478</span>)</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrPromptMenu"><img id="erFtrKeyQ" class="er-kg-key" alt="System" /><span>:System</span></button>
+        <button type="button" class="er-prompt-btn" id="erFtrF5Btn"><span class="er-f5-chip" id="erFtrF5Chip">F5</span> <span id="erFtrF5Lbl">Reload Save</span></button>
       </div>
-      <div class="settings-body">
-        <div class="settings-sec-title">Mod / Regulation Source</div>
-        <div id="modSourceSection" class="mod-source-box">
-          <div id="modRegPathDisplay" class="mod-path-display">Bundled data (auto-detects running game)</div>
-          <div class="mod-source-actions">
-            <button id="modBrowseRegBtn" class="top-btn gold-outline" type="button">Browse regulation.bin...</button>
-            <button id="modReadGameBtn" class="top-btn" type="button" title="Reads live params or active ModEngine2 regulation.bin while Elden Ring is running">Read from Running Game</button>
-            <button id="modRefreshNowBtn" class="top-btn" type="button">Refresh Now</button>
-            <button id="modClearRegBtn" class="mini-link-btn" type="button" title="Reset path back to bundled data">Clear</button>
-          </div>
-          <div id="modSourceStatus" class="mod-source-status"></div>
-        </div>
-        <div class="settings-sec-title" style="margin-top:8px;">Global Hotkeys (work while Elden Ring is focused)</div>
-        <div id="keybindsList" class="keybinds-list"></div>
-        <div id="keybindErrorNote" class="keybind-err-note"></div>
-        <div class="settings-sec-title" style="margin-top:10px;">Toggleables</div>
-        <div id="settingsToggleables" class="er-tog-shell">
-          <div class="er-tog-grid">
-            <div class="er-tog-col">
-              <div>
-                <div class="er-sec-hdr">Player Buff Timers</div>
-                <div class="er-opt-row on" data-tog="pipBuffHud">
-                  <span class="er-opt-lbl">PiP Stats Buff Bar<sup class="er-q" data-title="PiP Stats Buff Bar" data-tip="Shows your active timed buffs and debuffs inside the compact Stats overlay.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="pipMapBuffHud">
-                  <span class="er-opt-lbl">PiP Map Buff Bar<sup class="er-q" data-title="PiP Map Buff Bar" data-tip="Shows your active timed buff and debuff icons in the corner minimap overlay.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="buffExpFlash">
-                  <span class="er-opt-lbl">Expiring Flash Alert (&le; 10s)<sup class="er-q" data-title="Expiring Flash Alert" data-tip="Gently pulses a soft crimson border when a buff has 10 seconds or less before wearing off.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row er-opt-static">
-                  <span class="er-opt-lbl">Radial Sweep Opacity<sup class="er-q" data-title="Radial Sweep Opacity" data-tip="Controls how dark the cooldown shadow is as it sweeps clockwise off the icon (0–100%, Default: 30%).">?</sup></span>
-                  <span class="er-slider-ctrl">
-                    <input id="setBuffSweepRng" type="range" min="0" max="100" step="1" value="30" class="er-slider" />
-                    <span class="er-num-wrap"><input id="setBuffSweepNum" type="number" min="0" max="100" step="1" value="30" class="er-num" /><span class="er-pct">%</span></span>
-                  </span>
-                </div>
-                <div class="er-opt-row er-opt-static">
-                  <span class="er-opt-lbl">Timer Text Opacity<sup class="er-q" data-title="Timer Text Opacity" data-tip="Adjusts transparency of the white countdown numbers over each buff icon (0–100%, Default: 75%).">?</sup></span>
-                  <span class="er-slider-ctrl">
-                    <input id="setBuffTextRng" type="range" min="0" max="100" step="1" value="75" class="er-slider" />
-                    <span class="er-num-wrap"><input id="setBuffTextNum" type="number" min="0" max="100" step="1" value="75" class="er-num" /><span class="er-pct">%</span></span>
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <div class="er-sec-hdr">Enemy / Boss HUD</div>
-                <div class="er-opt-row on" data-tog="pipBossHud">
-                  <span class="er-opt-lbl">PiP Stats Enemy Bar<sup class="er-q" data-title="PiP Stats Enemy Bar" data-tip="Shows active bosses or your locked-on enemy's HP, stance, and status buildup in the Stats overlay.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="pipMapBossHud">
-                  <span class="er-opt-lbl">PiP Map Enemy Bar<sup class="er-q" data-title="PiP Map Enemy Bar" data-tip="Shows a compact enemy HP, stance, and status bar anchored at the bottom of the minimap overlay.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="enemyShowStatuses">
-                  <span class="er-opt-lbl">Enemy Status Bars<sup class="er-q" data-title="Enemy Status Bars" data-tip="Shows Bleed, Frost, Rot, Sleep, Poison, and Madness buildup on enemies that can take them.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="enemyShowStance">
-                  <span class="er-opt-lbl">Enemy Stance / Poise Bar<sup class="er-q" data-title="Enemy Stance / Poise Bar" data-tip="Displays how close the boss or enemy is to a stance break or riposte.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row er-opt-static">
-                  <span class="er-opt-lbl">Enemy HUD Design<sup class="er-q" data-title="Enemy HUD Design" data-tip="Choose the visual layout (1–3) for enemy status buildup meters.">?</sup></span>
-                  <div id="setDesignGroup" class="pip-design-grp">
-                    <button type="button" class="pip-d-btn active" data-design="1">1</button>
-                    <button type="button" class="pip-d-btn" data-design="2">2</button>
-                    <button type="button" class="pip-d-btn" data-design="3">3</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="er-tog-col">
-              <div>
-                <div class="er-sec-hdr">Live Map &amp; Tracking</div>
-                <div class="er-opt-row on" data-tog="liveWatch">
-                  <span class="er-opt-lbl">Live Game Sync<sup class="er-q" data-title="Live Game Sync" data-tip="Automatically reads your save file and offline game memory for real-time stats, position, buffs, and enemy bars.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapFollow">
-                  <span class="er-opt-lbl">Follow Live Player<sup class="er-q" data-title="Follow Live Player" data-tip="Keeps the map camera centered on your character as you move across the world.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapAutoSwitchLayer">
-                  <span class="er-opt-lbl">Auto-Switch Map Layer<sup class="er-q" data-title="Auto-Switch Map Layer" data-tip="Automatically flips between Overworld, Underground, and Shadow Realm maps when you travel between them.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapAutoDetect">
-                  <span class="er-opt-lbl">Auto-Detect Completed<sup class="er-q" data-title="Auto-Detect Completed" data-tip="Automatically marks Sites of Grace you discovered, bosses you defeated, and loot you already own.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapShowPlayer">
-                  <span class="er-opt-lbl">Player Marker &amp; Ring<sup class="er-q" data-title="Player Marker &amp; Ring" data-tip="Draws your character's live directional arrow and subtle green ring on the interactive map.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapShowPins">
-                  <span class="er-opt-lbl">Native Blue Beacons &amp; Pins<sup class="er-q" data-title="Native Blue Beacons &amp; Pins" data-tip="Syncs your in-game blue light pillars (1–5) and map stamps onto the live map.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row on" data-tog="mapShowOffscreenArrow">
-                  <span class="er-opt-lbl">Off-Screen Target Arrow<sup class="er-q" data-title="Off-Screen Target Arrow" data-tip="Shows a directional edge arrow and distance in the corner minimap pointing toward your searched item or grace.">?</sup></span>
-                  <span class="er-opt-state">&#9670; ON</span>
-                </div>
-                <div class="er-opt-row er-opt-static">
-                  <span class="er-opt-lbl">Completed Markers<sup class="er-q" data-title="Completed Markers" data-tip="Controls how collected items, touched Graces, and defeated bosses render on the map.">?</sup></span>
-                  <select id="setCompletedModeSel" class="er-select">
-                    <option value="dim">Dim + Checkmark</option>
-                    <option value="show">Show Normally</option>
-                    <option value="hide">Hide Completed</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="er-lbl-sec">
-            <div class="er-sec-hdr-row">
-              <span class="er-sec-hdr">Map Marker Labels</span>
-              <div class="er-lbl-acts">
-                <button id="setLabelCatsAllBtn" type="button" class="er-mini-act">All</button>
-                <span class="er-mini-sep">&middot;</span>
-                <button id="setLabelCatsDefBtn" type="button" class="er-mini-act">Default</button>
-                <span class="er-mini-sep">&middot;</span>
-                <button id="setLabelCatsNoneBtn" type="button" class="er-mini-act">None</button>
-              </div>
-            </div>
-            <div class="er-lbl-top-grid">
-              <div class="er-opt-row on" data-tog="mapShowLabels">
-                <span class="er-opt-lbl">Show Marker Names<sup class="er-q" data-title="Show Marker Names" data-tip="Master switch for all map name labels across both the full map and PiP minimap (hovering icons still shows names).">?</sup></span>
-                <span class="er-opt-state">&#9670; ON</span>
-              </div>
-              <div class="er-opt-row on" data-tog="mapPipNearbyLabelsOnly">
-                <span class="er-opt-lbl">PiP Nearby Labels Only<sup class="er-q" data-title="PiP Nearby Labels Only" data-tip="In PiP minimap mode (when not searching), only displays marker names close to your player and skips overlapping labels.">?</sup></span>
-                <span class="er-opt-state">&#9670; ON</span>
-              </div>
-              <div class="er-opt-row er-opt-static er-lbl-span2">
-                <span class="er-opt-lbl">PiP Nearby Label Radius<sup class="er-q" data-title="PiP Nearby Label Radius" data-tip="Screen distance around your player (or minimap center) in PiP mode where nearby marker names fade in (30–220px, Default: 95px).">?</sup></span>
-                <span class="er-slider-ctrl">
-                  <input id="setPipLabelRadRng" type="range" min="30" max="220" step="5" value="95" class="er-slider er-slider-wide" />
-                  <span class="er-num-wrap"><input id="setPipLabelRadNum" type="number" min="30" max="220" step="1" value="95" class="er-num" /><span class="er-pct">px</span></span>
-                </span>
-              </div>
-            </div>
-            <div id="setLabelCatsGrid" class="er-cat-grid"></div>
-          </div>
-          <div class="er-tog-ftr">
-            <span id="setTogResetNote" class="er-reset-note">Restored default Toggleables settings.</span>
-            <button id="setTogResetBtn" type="button" class="er-reset-btn">Reset to Default</button>
-          </div>
-        </div>
-      </div>
-      <div class="settings-ftr">
-        <button id="keybindResetBtn" class="mini-link-btn" type="button">Reset Default Keybinds</button>
-        <button id="settingsDoneBtn" class="top-btn gold-outline" type="button">Done</button>
-      </div>
+      <span id="erFtrTag" class="er-ftr-tag">ELDEN RING REFORGED V2.3.10.1</span>
     </div>
-  </div>
+    <div id="erFooterHelp" class="er-ftr-help">Select slot to inspect or click Change Equip to browse Armory.</div>
+  </footer>
 
   <!-- Floating Elden Ring Tooltip (Settings Help & Player Buff/Debuff Hover Details) -->
   <div id="erHoverTip" class="er-tip" role="tooltip">

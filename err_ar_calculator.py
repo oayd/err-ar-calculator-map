@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 import webview
 
 import ar_engine
+import er_ui_asset_extractor
 import game_map_extractor
 import memory_reader
 import regulation_extractor
@@ -25,7 +26,15 @@ def app_base_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def resource_data_path() -> str:
+def custom_weapon_data_path() -> str:
+    return os.path.join(app_base_dir(), "err_custom_weapon_data.json.gz")
+
+
+def resource_data_path(settings: Optional[Dict[str, Any]] = None) -> str:
+    if settings and str(settings.get("regulationPath") or "").strip():
+        custom = custom_weapon_data_path()
+        if os.path.exists(custom):
+            return custom
     local = os.path.join(app_base_dir(), "err_weapon_data.json.gz")
     if os.path.exists(local):
         return local
@@ -77,6 +86,10 @@ def buff_icons_path() -> Optional[str]:
     return None
 
 
+def er_ui_icons_path() -> str:
+    return os.path.join(app_base_dir(), "er_ui_icons.json.gz")
+
+
 def map_image_path(layer: str) -> Optional[str]:
     if layer not in ("m00", "m01", "m10"):
         return None
@@ -103,8 +116,8 @@ def map_tile_path(layer: str, cx: int, cy: int) -> Optional[str]:
     return None
 
 
-def load_weapon_data() -> Dict:
-    path = resource_data_path()
+def load_weapon_data(settings: Optional[Dict[str, Any]] = None) -> Dict:
+    path = resource_data_path(settings)
     with gzip.open(path, "rt", encoding="utf-8") as fh:
         data = json.load(fh)
     by_id: Dict[int, Dict] = {}
@@ -121,6 +134,21 @@ def clean_data_for_ui(data: Dict) -> Dict:
     return {k: v for k, v in data.items() if not k.startswith("_")}
 
 
+def load_er_menu_assets() -> Dict[str, str]:
+    ui_dir = resource_ui_dir()
+    er_assets_path = os.path.join(ui_dir, "er_menu_assets.json")
+    if not os.path.exists(er_assets_path):
+        return {}
+    try:
+        with open(er_assets_path, "r", encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            return {str(k): str(v) for k, v in loaded.items() if isinstance(v, str)}
+    except Exception:
+        pass
+    return {}
+
+
 def build_inlined_html() -> str:
     ui_dir = resource_ui_dir()
     with open(os.path.join(ui_dir, "index.html"), "r", encoding="utf-8") as fh:
@@ -131,7 +159,11 @@ def build_inlined_html() -> str:
         js = fh.read().replace("</script", "<\\/script")
 
     html = html.replace("<!-- INJECT_CSS -->", f"<style>\n{css}\n</style>", 1)
-    html = html.replace("<!-- INJECT_JS -->", f"<script>\n{js}\n</script>", 1)
+    html = html.replace(
+        "<!-- INJECT_JS -->",
+        f"<script>window.__ER_MENU_ASSETS = window.__ER_MENU_ASSETS || {{}};</script>\n<script>\n{js}\n</script>",
+        1,
+    )
     return html
 
 
@@ -314,6 +346,42 @@ class GlobalHotkeyManager:
             user32.DestroyWindow(hwnd)
 
 
+def _compute_pip_corner_xy(corner: str, pw: int, ph: int) -> tuple[int, int]:
+    c = str(corner or "bottom-right").lower()
+    try:
+        scr = webview.screens[0]
+        sw, sh = int(scr.width), int(scr.height)
+    except Exception:
+        sw, sh = 1920, 1080
+    if c == "top-left":
+        return (24, 24)
+    if c == "top-right":
+        return (max(16, sw - pw - 24), 24)
+    if c == "bottom-left":
+        return (24, max(16, sh - ph - 56))
+    return (max(16, sw - pw - 24), max(16, sh - ph - 56))
+
+
+def _clamp_pip_bounds_dict(raw: Any) -> Dict[str, List[int]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, List[int]] = {}
+    for mode, def_sz in (("map", (380, 380)), ("stats", (350, 310)), ("hud", (380, 560))):
+        vals = raw.get(mode)
+        if not isinstance(vals, (list, tuple)) or len(vals) != 4:
+            continue
+        try:
+            px, py, pw, ph = [int(v) for v in vals]
+        except Exception:
+            continue
+        if pw < 220 or ph < 180 or pw > 1100 or ph > 1080:
+            pw, ph = def_sz
+        if px < -50 or py < -50 or px > 3840 or py > 2160:
+            px, py = 24, 24
+        out[mode] = [px, py, pw, ph]
+    return out
+
+
 def _save_summary_key(parsed: Dict[str, Any]) -> str:
     chars = [
         {
@@ -322,6 +390,11 @@ def _save_summary_key(parsed: Dict[str, Any]) -> str:
             "level": c["level"],
             "stats": c["stats"],
             "equipped": c.get("equipped", []),
+            "rightHand": c.get("rightHand", []),
+            "leftHand": c.get("leftHand", []),
+            "arrows": c.get("arrows", []),
+            "bolts": c.get("bolts", []),
+            "spells": c.get("spells", []),
             "armor": c.get("armor", []),
             "talismans": c.get("talismans", []),
             "mapPins": c.get("mapPins", []),
@@ -347,23 +420,25 @@ class CalculatorApi:
     def __init__(self, self_test_mode: bool = False):
         self._self_test_mode = self_test_mode
         self._window: Optional[webview.Window] = None
-        self._data = load_weapon_data()
+        cfg0 = self._load_settings()
+        self._data = load_weapon_data(cfg0)
         self._known_weapon_ids = set(self._data["_byId"].keys())
         self._save_lock = threading.Lock()
         self._save_path: Optional[str] = None
+        self._custom_save_browsed: bool = False
         self._save_mtime: float = 0.0
         self._save_fingerprint: Optional[str] = None
         self._save_stat_offsets: Dict[str, int] = {}
         self._save_summary_key: Optional[str] = None
         self._save_pos_key: Optional[str] = None
-        cfg0 = self._load_settings()
         self._live_watch: bool = bool(cfg0.get("liveWatch", True))
-        self._regulation_path: str = str(cfg0.get("regulationPath") or "").strip()
         self._watcher_stop = threading.Event()
         self._watcher_thread: Optional[threading.Thread] = None
         self._map_data: Optional[Dict[str, Any]] = None
         self._map_icons: Optional[Dict[str, str]] = None
         self._buff_icons: Optional[Dict[str, Any]] = None
+        self._er_ui_icons: Optional[Dict[str, Any]] = None
+        self._regulation_path: str = str(cfg0.get("regulationPath") or "").strip()
         self._flag_bst: Dict[int, int] = {}
         self._wanted_flags: Set[int] = set()
         self._npc_meta: Dict[int, tuple] = {}
@@ -385,8 +460,9 @@ class CalculatorApi:
         self._pip_boss_design: str = d0 if d0 in ("1", "2", "3") else "1"
         self._overlay_hidden: bool = False
         self._normal_bounds = None
-        saved_pb = cfg0.get("pipBounds")
-        self._pip_bounds: Dict[str, Any] = dict(saved_pb) if isinstance(saved_pb, dict) else {}
+        self._pip_bounds: Dict[str, Any] = _clamp_pip_bounds_dict(cfg0.get("pipBounds"))
+        self._pip_boss_ext: int = 0
+        self._pip_ext_shift_y: int = 0
         self._resize_drag = None
         self._hotkeys = GlobalHotkeyManager(self._on_global_hotkey)
         self._hotkey_errors: Dict[str, str] = {}
@@ -497,6 +573,8 @@ class CalculatorApi:
             "defaultKeybinds": dict(DEFAULT_KEYBINDS),
             "hotkeyErrors": dict(self._hotkey_errors),
             "buffIcons": self.get_buff_icons(),
+            "erMenuAssets": load_er_menu_assets(),
+            "erUiIcons": self.get_er_ui_icons(),
             "modSource": self.get_mod_source_info(),
             "selfTestMode": self._self_test_mode,
         }
@@ -515,7 +593,11 @@ class CalculatorApi:
         return {"keybinds": clean, "errors": dict(self._hotkey_errors)}
 
     def reload_save(self, select_latest: bool = True) -> Dict[str, Any]:
-        path = self._save_path if (not select_latest and self._save_path) else save_reader.find_default_save()
+        if self._save_path and os.path.exists(self._save_path) and (not select_latest or self._custom_save_browsed):
+            path = self._save_path
+        else:
+            path = save_reader.find_default_save()
+            self._custom_save_browsed = False
         return self._read_save(path)
 
     def browse_save(self) -> Dict[str, Any]:
@@ -535,6 +617,8 @@ class CalculatorApi:
             return {"cancelled": True}
         path = chosen[0] if isinstance(chosen, (list, tuple)) else chosen
         res = self._read_save(path)
+        if res.get("characters"):
+            self._custom_save_browsed = True
         res["cancelled"] = False
         return res
 
@@ -607,7 +691,7 @@ class CalculatorApi:
         return {"liveWatch": self._live_watch}
 
     def set_live_stream_mode(self, view: str, follow: bool) -> Dict[str, Any]:
-        self._ui_view = "map" if view == "map" else "calc"
+        self._ui_view = "map" if view in ("map", "hud") else "calc"
         self._map_follow = bool(follow)
         return {"view": self._ui_view, "follow": self._map_follow, "ramActive": self._ram_active}
 
@@ -636,14 +720,14 @@ class CalculatorApi:
         except Exception:
             return False
 
-    def set_pip_mode(self, mode: str, opacity: Optional[float] = None) -> Dict[str, Any]:
-        target = mode if mode in ("off", "map", "stats") else "off"
+    def set_pip_mode(self, mode: str, opacity: Optional[float] = None, corner: Optional[str] = None) -> Dict[str, Any]:
+        target = mode if mode in ("off", "map", "stats", "hud") else "off"
         if opacity is not None:
             self._pip_opacity = max(0.15, min(1.0, float(opacity)))
         prev = self._pip_mode
         self._pip_mode = target
         self._resize_drag = None
-        if target == "map":
+        if target in ("map", "hud"):
             self._ui_view = "map"
         if self._self_test_mode or target == prev:
             if not self._self_test_mode and target != "off":
@@ -659,7 +743,14 @@ class CalculatorApi:
                 if prev == "off":
                     self._normal_bounds = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
                 else:
-                    self._pip_bounds[prev] = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
+                    base_prev_y = int(bv.Top) + self._pip_ext_shift_y
+                    base_prev_h = max(180, int(bv.Height) - self._pip_boss_ext)
+                    clamped_prev = _clamp_pip_bounds_dict({prev: [int(bv.Left), base_prev_y, int(bv.Width), base_prev_h]})
+                    if prev in clamped_prev:
+                        self._pip_bounds[prev] = clamped_prev[prev]
+                self._pip_boss_ext = 0
+                self._pip_ext_shift_y = 0
+                self._pip_bounds = _clamp_pip_bounds_dict(self._pip_bounds)
 
                 if target == "off":
                     self._pip_click_through = False
@@ -673,29 +764,75 @@ class CalculatorApi:
                     if self._normal_bounds:
                         bv.SetBounds(*self._normal_bounds)
                 else:
+                    if getattr(bv, "WindowState", None) != SWinForms.FormWindowState.Normal:
+                        bv.WindowState = SWinForms.FormWindowState.Normal
                     bv.Visible = not self._overlay_hidden
                     bv.FormBorderStyle = getattr(SWinForms.FormBorderStyle, "None")
                     bv.MinimumSize = SD.Size(220, 180)
                     bv.TopMost = True
                     bv.Opacity = self._pip_opacity
-                    def_w, def_h = (380, 380) if target == "map" else (350, 310)
+                    def_w, def_h = (380, 560) if target == "hud" else ((380, 380) if target == "map" else (350, 310))
                     if target in self._pip_bounds:
                         px, py, pw, ph = self._pip_bounds[target]
-                    elif prev != "off" and prev in self._pip_bounds:
-                        ox, oy, ow, _ = self._pip_bounds[prev]
-                        px, py, pw, ph = (ox + ow - def_w, oy, def_w, def_h)
                     else:
-                        try:
-                            scr = webview.screens[0]
-                            sw = int(scr.width)
-                        except Exception:
-                            sw = 1920
-                        px, py, pw, ph = (max(16, sw - def_w - 24), 24, def_w, def_h)
+                        pw, ph = def_w, def_h
+                        snap_c = corner or ("bottom-right" if target in ("hud", "stats") else "top-right")
+                        px, py = _compute_pip_corner_xy(snap_c, pw, ph)
                     bv.SetBounds(int(px), int(py), int(pw), int(ph))
                     self._apply_click_through_hwnd(bv, self._pip_click_through)
 
             self._invoke_ui(_apply)
         return {"mode": self._pip_mode, "opacity": self._pip_opacity, "clickThrough": self._pip_click_through, "hidden": self._overlay_hidden}
+
+    def snap_pip_corner(self, mode: str, corner: str) -> Dict[str, Any]:
+        target = mode if mode in ("map", "stats", "hud") else "hud"
+        def_w, def_h = (380, 560) if target == "hud" else ((380, 380) if target == "map" else (350, 310))
+        cur = self._pip_bounds.get(target)
+        pw = int(cur[2]) if isinstance(cur, (list, tuple)) and len(cur) == 4 else def_w
+        ph = int(cur[3]) if isinstance(cur, (list, tuple)) and len(cur) == 4 else def_h
+        px, py = _compute_pip_corner_xy(corner, pw, ph)
+        self._pip_bounds[target] = [px, py, pw, ph]
+        self._pip_boss_ext = 0
+        self._pip_ext_shift_y = 0
+        if not self._self_test_mode and self._pip_mode == target:
+            bv = self._get_winforms_form()
+            if bv is not None:
+                self._invoke_ui(lambda: bv.SetBounds(int(px), int(py), int(pw), int(ph)))
+        return {"mode": target, "bounds": [px, py, pw, ph]}
+
+    def set_pip_boss_extension(self, ext_px: int) -> Dict[str, Any]:
+        """Temporarily extend or restore the PiP window height for external Show Below boss bars."""
+        want = 0 if self._pip_mode == "off" else max(0, min(420, int(round(ext_px or 0))))
+        if self._self_test_mode or self._pip_mode == "off" or self._resize_drag:
+            if self._pip_mode == "off":
+                self._pip_boss_ext = 0
+                self._pip_ext_shift_y = 0
+            return {"ext": self._pip_boss_ext, "shiftY": self._pip_ext_shift_y}
+
+        bv = self._get_winforms_form()
+        if bv is None:
+            return {"ext": self._pip_boss_ext, "shiftY": self._pip_ext_shift_y}
+
+        def _apply():
+            import System.Windows.Forms as SWinForms
+
+            cx, cy, cw, ch = int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height)
+            base_h = max(180, ch - self._pip_boss_ext)
+            base_y = cy + self._pip_ext_shift_y
+            new_h = base_h + want
+            wa = SWinForms.Screen.FromControl(bv).WorkingArea
+            if base_y + new_h > int(wa.Bottom):
+                shift_y = min(max(0, base_y - int(wa.Top)), (base_y + new_h) - int(wa.Bottom))
+            else:
+                shift_y = 0
+            new_y = base_y - shift_y
+            if int(new_y) != cy or int(new_h) != ch:
+                bv.SetBounds(cx, int(new_y), cw, int(new_h))
+            self._pip_boss_ext = want
+            self._pip_ext_shift_y = int(shift_y)
+
+        self._invoke_ui(_apply)
+        return {"ext": self._pip_boss_ext, "shiftY": self._pip_ext_shift_y}
 
     @staticmethod
     def _apply_click_through_hwnd(bv, enabled: bool):
@@ -882,7 +1019,12 @@ class CalculatorApi:
             return False
 
         def _save():
-            self._pip_bounds[self._pip_mode] = (int(bv.Left), int(bv.Top), int(bv.Width), int(bv.Height))
+            self._pip_bounds[self._pip_mode] = [
+                int(bv.Left),
+                int(bv.Top) + self._pip_ext_shift_y,
+                int(bv.Width),
+                max(180, int(bv.Height) - self._pip_boss_ext),
+            ]
 
         return self._invoke_ui(_save)
 
@@ -984,22 +1126,25 @@ class CalculatorApi:
             last_prog_key = None
             last_boss_key = None
             last_buffs_key = None
+            last_ar_buffs_key = None
             has_active_boss = False
             last_char_t = 0.0
             last_pins_t = 0.0
             last_prog_t = 0.0
             last_buffs_t = 0.0
+            last_ar_buffs_t = 0.0
             last_save_t = 0.0
             miss_streak = 0
             while True:
                 want_boss = (
                     (self._pip_mode == "stats" and self._pip_boss_hud)
-                    or (self._pip_mode == "map" and self._pip_map_boss_hud)
+                    or (self._pip_mode in ("map", "hud") and self._pip_map_boss_hud)
                 )
                 want_buffs = (
                     (self._pip_mode == "stats" and self._pip_buff_hud)
-                    or (self._pip_mode == "map" and self._pip_map_buff_hud)
+                    or (self._pip_mode in ("map", "hud") and self._pip_map_buff_hud)
                 )
+                want_ar_buffs = self._pip_mode in ("stats", "hud")
                 if self._ram_active:
                     if (self._ui_view == "map" and self._map_follow) or want_boss:
                         dt = 0.033
@@ -1038,6 +1183,13 @@ class CalculatorApi:
                                     ch["level"],
                                     tuple(ch["stats"].values()),
                                     tuple(e["rawId"] for e in ch["equipped"]),
+                                    tuple((e or {}).get("rawId") for e in ch.get("rightHand") or []),
+                                    tuple((e or {}).get("rawId") for e in ch.get("leftHand") or []),
+                                    ch.get("armStyle"),
+                                    ch.get("activeRhSlot"),
+                                    ch.get("activeLhSlot"),
+                                    tuple(ch.get("arrows") or []),
+                                    tuple(ch.get("bolts") or []),
                                     tuple(ch["armor"]),
                                     tuple(ch["talismans"]),
                                 )
@@ -1061,7 +1213,7 @@ class CalculatorApi:
                                     self._window.evaluate_js(
                                         f"window.__onLiveRamPos && window.__onLiveRamPos({json.dumps(pos)});"
                                     )
-                            if (self._ui_view == "map" or self._pip_mode == "map") and (not was_active or now - last_pins_t >= 0.45):
+                            if (self._ui_view == "map" or self._pip_mode in ("map", "hud")) and (not was_active or now - last_pins_t >= 0.45):
                                 last_pins_t = now
                                 pins = self._mem.read_world_map_pins()
                                 if pins is not None:
@@ -1112,6 +1264,16 @@ class CalculatorApi:
                                 self._window.evaluate_js(
                                     "window.__onLiveRamBuffs && window.__onLiveRamBuffs([]);"
                                 )
+                            if want_ar_buffs and (not was_active or now - last_ar_buffs_t >= 0.22):
+                                last_ar_buffs_t = now
+                                ar_buffs = self._mem.read_player_live_ar_buffs()
+                                if ar_buffs is not None:
+                                    ar_buffs_key = json.dumps(ar_buffs, sort_keys=True)
+                                    if not was_active or ar_buffs_key != last_ar_buffs_key:
+                                        last_ar_buffs_key = ar_buffs_key
+                                        self._window.evaluate_js(
+                                            f"window.__onLiveRamArBuffs && window.__onLiveRamArBuffs({ar_buffs_key});"
+                                        )
                             # Save-file fallback for live pin updates if MenuProfileSaveLoad RAM pointer didn't match
                             if (now - last_save_t >= 2.5):
                                 last_save_t = now
@@ -1137,6 +1299,7 @@ class CalculatorApi:
                             last_prog_key = None
                             last_boss_key = None
                             last_buffs_key = None
+                            last_ar_buffs_key = None
                             has_active_boss = False
                             self._window.evaluate_js(
                                 'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
@@ -1149,6 +1312,7 @@ class CalculatorApi:
                         last_prog_key = None
                         last_boss_key = None
                         last_buffs_key = None
+                        last_ar_buffs_key = None
                         has_active_boss = False
                         self._window.evaluate_js(
                             'window.__onLiveRamStatus && window.__onLiveRamStatus({"attached":false});'
@@ -1286,6 +1450,55 @@ class CalculatorApi:
         self._known_armor_ids = {int(k) for k in (payload.get("armors") or {}).keys() if int(k) > 10300}
         self._known_talisman_ids = {int(k) for k in (payload.get("talismans") or {}).keys()}
 
+    def get_er_ui_icons(self) -> Dict[str, Any]:
+        if self._er_ui_icons is not None:
+            return self._er_ui_icons
+        p = er_ui_icons_path()
+        if os.path.exists(p):
+            try:
+                with gzip.open(p, "rt", encoding="utf-8") as fh:
+                    self._er_ui_icons = json.load(fh)
+                    return self._er_ui_icons
+            except Exception:
+                pass
+        if not self._self_test_mode:
+            try:
+                res = self.reextract_er_ui_icons()
+                if res.get("ok") and isinstance(self._er_ui_icons, dict):
+                    return self._er_ui_icons
+            except Exception:
+                pass
+        self._er_ui_icons = {"ok": False, "count": 0, "icons": {}, "wep": {}, "arm": {}, "tal": {}, "good": {}, "ammo": {}, "spell": {}}
+        return self._er_ui_icons
+
+    def reextract_er_ui_icons(self) -> Dict[str, Any]:
+        running_info = memory_reader.detect_running_game_regulation()
+        reg_p = self._regulation_path if (self._regulation_path and os.path.isfile(self._regulation_path)) else running_info.get("regulationPath")
+        mdir = os.path.dirname(reg_p) if reg_p else running_info.get("modDir")
+        gdir = running_info.get("gameDir") or game_map_extractor.detect_elden_ring_game_dir()
+        try:
+            res = er_ui_asset_extractor.extract_er_ui_assets(
+                mod_dir=mdir,
+                game_dir=gdir,
+                reg_path=reg_p,
+                weapon_data=clean_data_for_ui(self._data),
+                out_menu_json=None if getattr(sys, "frozen", False) else os.path.join(resource_ui_dir(), "er_menu_assets.json"),
+                out_icons_gz=er_ui_icons_path(),
+            )
+            payload = dict(res.get("iconsPayload") or {})
+            payload["ok"] = True
+            self._er_ui_icons = payload
+            return {
+                "ok": True,
+                "count": payload.get("count", 0),
+                "wtCount": res.get("wtCount", 0),
+                "affCount": res.get("affCount", 0),
+                "erUiIcons": payload,
+                "erMenuAssets": res.get("menuAssets") or load_er_menu_assets(),
+            }
+        except Exception as exc:
+            return {"ok": False, "message": str(exc), "count": 0}
+
     def get_mod_source_info(self) -> Dict[str, Any]:
         return {
             "regulationPath": self._regulation_path,
@@ -1321,10 +1534,30 @@ class CalculatorApi:
 
     def clear_regulation_path(self) -> Dict[str, Any]:
         self._persist_regulation_path("")
-        return {"ok": True, "modSource": self.get_mod_source_info()}
+        cust = custom_weapon_data_path()
+        if os.path.exists(cust):
+            try:
+                os.remove(cust)
+            except Exception:
+                pass
+        try:
+            bundled = load_weapon_data({})
+            self._reload_extracted_payload(bundled)
+        except Exception as exc:
+            return {"ok": False, "message": f"Failed to reload bundled data: {exc}", "modSource": self.get_mod_source_info()}
+        save_res = self._read_save(self._save_path if (self._save_path and os.path.exists(self._save_path)) else save_reader.find_default_save())
+        return {
+            "ok": True,
+            "source": "Bundled",
+            "sourceKind": "bundled",
+            "weaponCount": len(self._data.get("weapons", [])),
+            "modSource": self.get_mod_source_info(),
+            "data": clean_data_for_ui(self._data),
+            "save": save_res,
+        }
 
     def refresh_mod_data(self, mode: str = "auto", custom_path: Optional[str] = None) -> Dict[str, Any]:
-        out_path = os.path.join(app_base_dir(), "err_weapon_data.json.gz")
+        out_path = custom_weapon_data_path()
         game_dir = game_map_extractor.detect_elden_ring_game_dir()
         target_path = str(custom_path or "").strip() or self._regulation_path
 
@@ -1358,8 +1591,15 @@ class CalculatorApi:
                     fallback_data=self._data,
                     game_dir=game_dir or running_info.get("gameDir"),
                 )
+                if len(payload.get("weapons", [])) < 100:
+                    return {
+                        "ok": False,
+                        "message": f"Extracted too few weapons ({len(payload.get('weapons', []))}) from {target_path}.",
+                        "modSource": self.get_mod_source_info(),
+                    }
                 self._persist_regulation_path(os.path.abspath(target_path))
                 self._reload_extracted_payload(payload)
+                save_res = self._read_save(self._save_path if (self._save_path and os.path.exists(self._save_path)) else save_reader.find_default_save())
                 return {
                     "ok": True,
                     "source": os.path.abspath(target_path),
@@ -1367,6 +1607,7 @@ class CalculatorApi:
                     "weaponCount": len(payload["weapons"]),
                     "modSource": self.get_mod_source_info(),
                     "data": clean_data_for_ui(self._data),
+                    "save": save_res,
                 }
 
             # use_mode == "game"
@@ -1382,11 +1623,10 @@ class CalculatorApi:
             mdir = running_info.get("modDir")
             reg_disk = running_info.get("regulationPath")
 
-            # Try live offline RAM params first when EAC is off
             live_params = None
             if not running_info.get("eac"):
                 try:
-                    live_params = self._mem.read_live_params(set(regulation_extractor.REQUIRED_PARAM_NAMES))
+                    live_params = self._mem.read_live_params(set(regulation_extractor.REQUIRED_PARAM_NAMES) | {"magic.param"})
                 except Exception:
                     live_params = None
 
@@ -1400,6 +1640,7 @@ class CalculatorApi:
                 if len(payload.get("weapons", [])) >= 100:
                     regulation_extractor.write_weapon_payload(payload, out_path)
                     self._reload_extracted_payload(payload)
+                    save_res = self._read_save(self._save_path if (self._save_path and os.path.exists(self._save_path)) else save_reader.find_default_save())
                     src_label = f"Live Game RAM ({os.path.basename(mdir) if mdir else 'eldenring.exe'})"
                     return {
                         "ok": True,
@@ -1408,6 +1649,7 @@ class CalculatorApi:
                         "weaponCount": len(payload["weapons"]),
                         "modSource": self.get_mod_source_info(),
                         "data": clean_data_for_ui(self._data),
+                        "save": save_res,
                     }
 
             if reg_disk and os.path.isfile(reg_disk):
@@ -1424,6 +1666,7 @@ class CalculatorApi:
                         "modSource": self.get_mod_source_info(),
                     }
                 self._reload_extracted_payload(payload)
+                save_res = self._read_save(self._save_path if (self._save_path and os.path.exists(self._save_path)) else save_reader.find_default_save())
                 return {
                     "ok": True,
                     "source": reg_disk,
@@ -1431,6 +1674,7 @@ class CalculatorApi:
                     "weaponCount": len(payload["weapons"]),
                     "modSource": self.get_mod_source_info(),
                     "data": clean_data_for_ui(self._data),
+                    "save": save_res,
                 }
 
             return {
@@ -1754,8 +1998,8 @@ def run_self_test(report_path: Optional[str]):
             assert w.evaluate_js("document.getElementById('mapFollowBtn') !== null"), "mapFollowBtn should exist"
             ram_test = w.evaluate_js("window.__ERR_TEST.testLiveRamHooks()")
             assert ram_test["followOn"] and not ram_test["followOff"], f"Follow toggle failed: {ram_test}"
-            assert ram_test["ramActive"] and "LIVE RAM" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
-            assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "LIVE RAM" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
+            assert ram_test["ramActive"] and "\u2713" in ram_test["ramMeta"] and ram_test["ramStr"] == 55, f"RAM char sync failed: {ram_test}"
+            assert ram_test["ramHasPos"] and not ram_test["restoredRamActive"] and "\u2713" not in ram_test["restoredMeta"], f"RAM restore failed: {ram_test}"
             assert ram_test["autoSwitchedToDlc"] and ram_test["pinsCount"] == 1, f"Auto-switch/pins hook failed: {ram_test}"
             pip_res = w.evaluate_js("window.__ERR_TEST.testPipModes()")
             assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"] and pip_res["offscreenArrowOk"], f"PiP modes failed: {pip_res}"
@@ -1800,17 +2044,72 @@ def run_self_test(report_path: Optional[str]):
                 (5005, 20406, 0.02, 30.0, 0),
             ])
             assert len(_sp_parsed) == 1 and _sp_parsed[0]["id"] == 5000, f"Finite buff filter failed: {_sp_parsed}"
+
+            def _mk_sp(icon_id=-1, wc=0, atk_attr=254, sp_attr=254, si=0, inv=(0, 0, 0), thr=False, msc1=0, r1=1.0, r2=1.0, th_r1=1.0, th_flat=0, str_b=0):
+                b = bytearray(816)
+                _st.pack_into("<i", b, 0, icon_id)
+                _st.pack_into("<f", b, 4, -1.0)
+                _st.pack_into("<f", b, 496, -1.0)
+                for _ro, _rv in ((72, r1), (76, r1), (80, r1), (84, th_r1), (480, r1), (672, r2), (676, r2), (680, r2), (684, r2), (688, r2)):
+                    _st.pack_into("<f", b, _ro, _rv)
+                _st.pack_into("<i", b, 100, th_flat)
+                b[314] = msc1
+                b[340] = atk_attr
+                b[341] = sp_attr
+                _st.pack_into("<H", b, 342, si)
+                b[344] = wc
+                if thr:
+                    b[356] |= 0x08
+                _st.pack_into("<3H", b, 696, *inv)
+                _st.pack_into("<b", b, 802, str_b)
+                return bytes(b)
+
+            _ar_agg = memory_reader._aggregate_live_ar_speffects([
+                (1660000, _mk_sp(icon_id=20406, wc=0, r2=1.10), 25.0, 50.0, 0),
+                (800, _mk_sp(icon_id=20500, wc=1, th_r1=1.04, th_flat=48), 40.0, 60.0, 0),
+                (1302227, _mk_sp(icon_id=20064, wc=0, inv=(39031, 0, 0), r2=2.0), 3.0, 3.0, 0),
+                (7407090, _mk_sp(icon_id=-1, wc=0, r1=1.95), -1.0, -1.0, 0),
+                (320900, _mk_sp(icon_id=20260, wc=0, thr=True, r1=1.24), -1.0, -1.0, 0),
+                (321800, _mk_sp(icon_id=20261, wc=0, msc1=102, r1=1.15), -1.0, -1.0, 0),
+                (330400, _mk_sp(icon_id=20207, wc=3, r1=1.075), -1.0, -1.0, 0),
+                (600, _mk_sp(icon_id=-1, wc=0, str_b=2), -1.0, -1.0, 0),
+            ], hp=1000, hp_max=1000)
+            assert _ar_agg["statBonus"][0] == 2, f"Expected +2 STR armor bonus, got {_ar_agg}"
+            assert abs(_ar_agg["globalMult"][0] - 1.10) < 1e-4, f"Unexpected globalMult (leaked 2x/1.95x/talisman?): {_ar_agg}"
+            assert abs(_ar_agg["rhMult"][3] - 1.04) < 1e-4 and _ar_agg["rhFlat"][3] == 48, f"Unexpected rh enchant: {_ar_agg}"
+            assert abs(_ar_agg["lhMult"][3] - 1.0) < 1e-4 and _ar_agg["lhFlat"][3] == 0, f"RH enchant leaked to LH: {_ar_agg}"
+            assert set(_ar_agg["contributors"]) == {1660000, 800, 600}, f"Unexpected contributors: {_ar_agg}"
             pb_res = w.evaluate_js("window.__ERR_TEST.testPlayerBuffs()")
             assert pb_res and all(pb_res.values()), f"Player buffs/Toggleables test failed: {pb_res}"
             ml_res = w.evaluate_js("window.__ERR_TEST.testMapLabels()")
             assert ml_res and all(ml_res.values()), f"Map labels test failed: {ml_res}"
-            mod_info = api.get_mod_source_info()
-            assert "regulationPath" in mod_info and "runningGame" in mod_info and mod_info.get("weaponCount", 0) >= 6000, f"Bad mod info: {mod_info}"
-            from webview.platforms import winforms as _wv_winforms
+            from webview.util import parse_file_type
             for _ft in CalculatorApi.REGULATION_FILE_TYPES:
-                _wv_winforms.parse_file_type(_ft)
-            ms_res = w.evaluate_js("window.__ERR_TEST.testModSourceUi()")
-            assert ms_res and all(ms_res.values()), f"Mod source UI test failed: {ms_res}"
+                _desc, _exts = parse_file_type(_ft)
+                assert _desc and _exts, f"Invalid regulation file filter: {_ft}"
+            _ms_info = api.get_mod_source_info()
+            assert isinstance(_ms_info, dict) and len(_ms_info) >= 2, f"Invalid get_mod_source_info: {_ms_info}"
+            _ui_icons = api.get_er_ui_icons()
+            if os.path.exists(er_ui_icons_path()):
+                assert isinstance(_ui_icons, dict) and int(_ui_icons.get("count", 0)) >= 300, (
+                    f"Expected >=300 ER UI icons, got {_ui_icons.get('count') if isinstance(_ui_icons, dict) else _ui_icons}"
+                )
+            er_assets_n = int(w.evaluate_js("Object.keys(window.__ER_MENU_ASSETS || {}).length") or 0)
+            assert er_assets_n >= 100, f"Expected >=100 ER menu assets, got {er_assets_n}"
+            eq_res = w.evaluate_js("window.__ERR_TEST.testEquipTab()")
+            assert eq_res and eq_res.get("ok"), f"Equip tab test failed: {eq_res}"
+            v2_res = w.evaluate_js("window.__ERR_TEST.testErUiV2()")
+            assert v2_res and v2_res.get("ok"), f"ER UI v2 test failed: {v2_res}"
+            sample_w = next(we for we in api._data["weapons"] if we["baseName"] == "Brass Shield" or "Shield" in we["baseName"])
+            assert isinstance(sample_w.get("guard"), list) and len(sample_w["guard"]) == 6, f"Missing guard field: {sample_w}"
+            assert len(api._data.get("ammo", {})) >= 30 and len(api._data.get("spells", {})) >= 100, "Missing ammo/spells data"
+            _chars = (api.reload_save(False) or {}).get("characters", [])
+            for ch_row in _chars:
+                assert "arrows" in ch_row and "bolts" in ch_row and "spells" in ch_row, f"Missing ammo/spells on char {ch_row.get('name')}"
+                if ch_row.get("playerPos"):
+                    assert abs(ch_row["playerPos"].get("y", 0.0)) < 5000.0, f"Unrealistic playerPos: {ch_row['playerPos']}"
+            qa_res = w.evaluate_js("window.__ERR_TEST.testQaAuditFixes()")
+            assert qa_res and qa_res.get("ok"), f"QA audit fixes test failed: {qa_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -1849,7 +2148,8 @@ def run_self_test(report_path: Optional[str]):
                 f"BUFF_ICONS_COUNT={len(b_pack.get('icons', {}))}",
                 f"PLAYER_BUFFS_OK=True",
                 f"MAP_LABELS_OK=True",
-                f"MOD_SOURCE_OK=True",
+                f"ER_MENU_ASSETS={er_assets_n}",
+                f"EQUIP_TAB_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]
@@ -1889,13 +2189,13 @@ def main():
     api = CalculatorApi(self_test_mode=False)
     html_doc = build_inlined_html()
     win = webview.create_window(
-        "Elden Ring Weapon Calculator — ERR v2.3.10.1",
+        "Elden Ring Weapon Calculator v2.0.0 — ERR v2.3.10.1",
         html=html_doc,
         js_api=api,
         width=1500,
         height=920,
         min_size=(1060, 680),
-        background_color="#191613",
+        background_color="#11100c",
         text_select=True,
     )
     api._window = win

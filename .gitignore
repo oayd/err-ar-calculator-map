@@ -10,5 +10,6 @@ __pycache__/
 err_ar_settings.json
 map_cache/
 err_map_icons.json.gz
+er_ui_icons.json.gz
 .vscode/
 .DS_Store
