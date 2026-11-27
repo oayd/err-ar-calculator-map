@@ -1,6 +1,9 @@
-# Elden Ring Weapon Calculator & Map — v2.1.0 (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.1.1 (ERR v2.3.10.1)
 
 A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
+
+## What's New in v2.1.1: Authentic Elden Ring Player Map Icon
+- Redesigned the live player marker on the World Map and PiP Minimap using the official in-game Elden Ring map sprites (`MENU_MAP_Player_01` rotating directional ring & spear underneath, `MENU_MAP_Player_02` upright Tarnished bust centered cleanly inside the hollow ring) with exact sub-pixel centering across every heading.
 
 ## What's New in v2.1.0: Boss Resistances, Live AR, Overlay & QoL Update
 - **Enemy Damage Resistances (Boss HUD & Armory)**:

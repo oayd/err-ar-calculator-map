@@ -5206,34 +5206,48 @@
     // Live Player marker (authentic Elden Ring player medallion + directional pointer)
     if (hasPlayerOnLayer) {
       const pScale = pipSearchProx ? computePipPlayerScale(nearestSearchDist) : 1.0;
+      const ph = 44 * pScale;
+      const ringR = ph * (10.3 / 56.0);
       ctx.save();
       ctx.translate(playerX, playerY);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
 
-      // Subtle dark backdrop medallion ring so player icon reads crisply on parchment without bright neon glare
-      const haloGrad = ctx.createRadialGradient(0, 0, 2 * pScale, 0, 0, 17 * pScale);
-      haloGrad.addColorStop(0, "rgba(10, 8, 6, 0.56)");
-      haloGrad.addColorStop(0.7, "rgba(10, 8, 6, 0.32)");
+      // Subtle dark translucent disc inside the hollow ring so the gold Tarnished bust reads cleanly
+      const haloGrad = ctx.createRadialGradient(0, 0, ringR * 0.15, 0, 0, ringR * 1.06);
+      haloGrad.addColorStop(0, "rgba(10, 8, 6, 0.44)");
+      haloGrad.addColorStop(0.75, "rgba(10, 8, 6, 0.34)");
       haloGrad.addColorStop(1, "rgba(10, 8, 6, 0)");
       ctx.beginPath();
-      ctx.arc(0, 0, 17 * pScale, 0, Math.PI * 2);
+      ctx.arc(0, 0, ringR * 1.06, 0, Math.PI * 2);
       ctx.fillStyle = haloGrad;
       ctx.fill();
 
+      ctx.shadowColor = "rgba(0, 0, 0, 0.78)";
+      ctx.shadowBlur = Math.max(2, ph * 0.06);
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = Math.max(0.75, ph * 0.018);
+
       const pBase = mapState.iconImgs.player;
       const pArrow = mapState.iconImgs.player_arrow;
+      // 1. Rotating golden ring + directional spear underneath, pivoted on exact inner-ring center
+      if (pArrow && pArrow.naturalWidth > 0) {
+        ctx.save();
+        ctx.rotate(lp.yaw + Math.PI);
+        const pr = pArrow.naturalWidth / Math.max(1, pArrow.naturalHeight);
+        const pw = ph * pr;
+        ctx.drawImage(pArrow, -pw * (12.50 / 27.0), -ph * (33.40 / 56.0), pw, ph);
+        ctx.restore();
+      }
+      // 2. Upright golden Tarnished bust on top, dead-center inside the hollow ring
       if (pBase && pBase.naturalWidth > 0) {
         const br = pBase.naturalWidth / Math.max(1, pBase.naturalHeight);
-        const bh = 25 * pScale;
+        const bh = ph * 0.355;
         const bw = bh * br;
-        ctx.drawImage(pBase, -bw * 0.5, -bh * 0.5, bw, bh);
-      }
-      ctx.rotate(lp.yaw + Math.PI);
-      if (pArrow && pArrow.naturalWidth > 0) {
-        const pr = pArrow.naturalWidth / Math.max(1, pArrow.naturalHeight);
-        const ph = 30 * pScale;
-        const pw = Math.max(6, ph * pr);
-        ctx.drawImage(pArrow, -pw * 0.5, -ph * 0.5, pw, ph);
-      } else if (!pBase || pBase.naturalWidth <= 0) {
+        ctx.drawImage(pBase, -bw * (15.55 / 38.0), -bh * (24.45 / 56.0), bw, bh);
+      } else if (!pArrow || pArrow.naturalWidth <= 0) {
+        ctx.save();
+        ctx.rotate(lp.yaw + Math.PI);
         ctx.beginPath();
         ctx.moveTo(0, -10 * pScale);
         ctx.lineTo(7 * pScale, 8 * pScale);
@@ -5245,6 +5259,7 @@
         ctx.strokeStyle = "#18130c";
         ctx.lineWidth = Math.max(1.0, 1.6 * pScale);
         ctx.stroke();
+        ctx.restore();
       }
       ctx.restore();
     }
