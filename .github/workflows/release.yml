@@ -90,12 +90,14 @@ jobs:
           $hash = (Get-FileHash 'release_assets\ERR_AR_Calculator.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ERR_AR_Calculator.exe" | Set-Content -Encoding ascii 'release_assets\SHA256SUMS.txt'
           "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $relName = if ($env:GITHUB_REF_NAME -eq 'v2.0.0') { 'v2.0.0: UI Update' } else { $env:GITHUB_REF_NAME }
+          "release_name=$relName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name == 'v2.0.0' && 'v2.0.0: UI Update' || github.ref_name }}
+          name: ${{ steps.prep.outputs.release_name }}
           files: |
             release_assets/ERR_AR_Calculator.exe
             release_assets/SHA256SUMS.txt
@@ -107,5 +109,5 @@ jobs:
             - **SHA-256 (`ERR_AR_Calculator.exe`):** `${{ steps.prep.outputs.sha256 }}`
             - **VirusTotal Scan:** [View report](https://www.virustotal.com/gui/file/${{ steps.prep.outputs.sha256 }})
 
-            Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator#privacy-policy).
+            Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See the [Code Signing Policy](https://github.com/oayd/err-ar-calculator-map#code-signing-policy) and [Privacy Policy](https://github.com/oayd/err-ar-calculator-map#privacy-policy).
           generate_release_notes: true
