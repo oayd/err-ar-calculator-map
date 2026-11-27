@@ -1996,11 +1996,17 @@ def run_self_test(report_path: Optional[str]):
 
     def runner(w: webview.Window):
         try:
-            deadline = time.time() + 20.0
+            ready_ev = getattr(w.events, "_pywebviewready", None) or getattr(w.events, "loaded", None)
+            if ready_ev is not None:
+                ready_ev.wait(75)
+            deadline = time.time() + 45.0
             while time.time() < deadline:
-                if w.evaluate_js("Boolean(window.__ERR_READY)"):
-                    break
-                time.sleep(0.05)
+                try:
+                    if w.evaluate_js("Boolean(window.__ERR_READY)"):
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.1)
             else:
                 raise RuntimeError("Timed out waiting for __ERR_READY in WebView2")
 
