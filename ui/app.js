@@ -9672,6 +9672,15 @@
         // Check live 1H/2H auto-detection, all 3 placement modes, and live applied AR buffs
         const assetsRef = getErMenuAssets();
         const defaultGripIsWeapon = state.pipGripPlacement === "weapon";
+        let prevEqRh0 = null;
+        if (!(state.equippedSlots && state.equippedSlots.rh && state.equippedSlots.rh[0])) {
+          prevEqRh0 = ((state.equippedSlots && state.equippedSlots.rh) || [null, null, null]).slice();
+          const _sampleW = state.data.weapons.find((w) => !w.dual && w.atk && w.atk[0] > 50) || state.data.weapons[0];
+          if (_sampleW) {
+            if (!state.equippedSlots) state.equippedSlots = { rh: [null, null, null], lh: [null, null, null] };
+            state.equippedSlots.rh = [{ weaponId: _sampleW.id, level: Math.min(10, _sampleW.maxLv || 10) }, prevEqRh0[1] || null, prevEqRh0[2] || null];
+          }
+        }
         state.armStyle = 1;
         state.activeRhSlot = 0;
         window.__onLiveRamArBuffs(null);
@@ -9711,6 +9720,7 @@
         setPipGripPlacement("map", false);
         const has2hMap = Boolean(document.querySelector("#pipMapGripBox .pip-grip-tile img")?.getAttribute("src") === assetsRef.grip_2h);
         setPipGripPlacement("weapon", false);
+        if (prevEqRh0) state.equippedSlots.rh = prevEqRh0;
         const presetTxt = ($("pipPresetTag")?.textContent || "");
         const arLabelClean = presetTxt.includes("AR") && !presetTxt.includes("Live AR");
         const pipLiveArAndStanceOk = defaultGripIsWeapon && arLabelClean && has1hIcon && has2hWeapon && has2hHeader && has2hMap && (ar2hBuffed > ar1hText || ar1hText === 0);
