@@ -229,10 +229,11 @@ def _fval(row, col: str, default: float = 1.0) -> float:
         return default
 
 
-def _analyze_sp_effect(row) -> Tuple[Optional[str], bool, List[str]]:
-    """Return (auto_desc, is_debuff, keywords) from SpEffectParam numerical fields."""
+def _analyze_sp_effect(row) -> Tuple[Optional[str], bool, bool, List[str]]:
+    """Return (auto_desc, is_debuff, has_positive, keywords) from SpEffectParam numerical fields."""
     hints: List[str] = []
-    debuff = False
+    has_positive = False
+    has_negative = False
 
     atk_phys = _fval(row, "physicsAttackPowerRate", 1.0) * _fval(row, "atkEnemyDmgCorrectRate_Physics", 1.0)
     atk_mag = _fval(row, "magicAttackPowerRate", 1.0) * _fval(row, "atkEnemyDmgCorrectRate_Magic", 1.0)
@@ -241,61 +242,79 @@ def _analyze_sp_effect(row) -> Tuple[Optional[str], bool, List[str]]:
     atk_hly = _fval(row, "darkAttackPowerRate", 1.0) * _fval(row, "atkEnemyDmgCorrectRate_Dark", 1.0)
     max_atk = max(atk_phys, atk_mag, atk_fir, atk_ltg, atk_hly)
     min_atk = min(atk_phys, atk_mag, atk_fir, atk_ltg, atk_hly)
-    if max_atk > 1.02:
+    flat_atk = max(
+        _fval(row, "physicsAttackPower", 0.0),
+        _fval(row, "magicAttackPower", 0.0),
+        _fval(row, "fireAttackPower", 0.0),
+        _fval(row, "thunderAttackPower", 0.0),
+        _fval(row, "darkAttackPower", 0.0),
+    )
+    if max_atk > 1.02 or flat_atk > 0.5:
         hints.append("Increases attack power")
+        has_positive = True
     elif 0.01 < min_atk < 0.98:
         hints.append("Reduces attack power")
-        debuff = True
+        has_negative = True
 
     cut_p = _fval(row, "slashDamageCutRate", 1.0) * _fval(row, "defEnemyDmgCorrectRate_Physics", 1.0)
     cut_m = _fval(row, "magicDamageCutRate", 1.0) * _fval(row, "defEnemyDmgCorrectRate_Magic", 1.0)
-    min_cut = min(cut_p, cut_m)
-    max_cut = max(cut_p, cut_m)
+    cut_f = _fval(row, "fireDamageCutRate", 1.0) * _fval(row, "defEnemyDmgCorrectRate_Fire", 1.0)
+    cut_t = _fval(row, "thunderDamageCutRate", 1.0) * _fval(row, "defEnemyDmgCorrectRate_Thunder", 1.0)
+    cut_d = _fval(row, "darkDamageCutRate", 1.0) * _fval(row, "defEnemyDmgCorrectRate_Dark", 1.0)
+    min_cut = min(cut_p, cut_m, cut_f, cut_t, cut_d)
+    max_cut = max(cut_p, cut_m, cut_f, cut_t, cut_d)
     if 0.0 < min_cut < 0.97:
         hints.append("increases damage negation")
-    elif max_cut > 1.03:
+        has_positive = True
+    if max_cut > 1.03:
         hints.append("increases damage taken")
-        debuff = True
+        has_negative = True
 
     hp_pt = _fval(row, "changeHpPoint", 0.0)
     hp_rt = _fval(row, "changeHpRate", 0.0)
     if hp_pt < -0.1 or hp_rt < -0.01:
         hints.append("gradually restores HP")
+        has_positive = True
     elif hp_pt > 0.1 or hp_rt > 0.01:
         hints.append("drains HP over time")
-        debuff = True
+        has_negative = True
 
     max_hp = _fval(row, "maxHpRate", 1.0)
     if max_hp > 1.02:
         hints.append("raises Max HP")
+        has_positive = True
     elif 0.01 < max_hp < 0.98:
         hints.append("reduces Max HP")
-        debuff = True
+        has_negative = True
 
     max_st = _fval(row, "maxStaminaRate", 1.0)
     if max_st > 1.02:
         hints.append("raises Max Stamina")
+        has_positive = True
     elif 0.01 < max_st < 0.98:
         hints.append("reduces Max Stamina")
-        debuff = True
+        has_negative = True
 
     st_rec = _fval(row, "staminaRecoverChangeSpeed", 0.0)
     if st_rec > 1.0:
         hints.append("boosts stamina recovery")
+        has_positive = True
     elif st_rec < -1.0:
         hints.append("slows stamina recovery")
-        debuff = True
+        has_negative = True
 
     max_mp = _fval(row, "maxMpRate", 1.0)
     if max_mp > 1.02:
         hints.append("raises Max FP")
+        has_positive = True
 
     eq_w = _fval(row, "equipWeightChangeRate", 1.0)
     if eq_w > 1.02:
         hints.append("increases Equip Load")
+        has_positive = True
     elif 0.01 < eq_w < 0.95:
         hints.append("lowers Equip Load")
-        debuff = True
+        has_negative = True
 
     add_stats = []
     for lbl, col in (
@@ -309,25 +328,33 @@ def _analyze_sp_effect(row) -> Tuple[Optional[str], bool, List[str]]:
         v = _fval(row, col, 0.0)
         if v >= 1:
             add_stats.append(f"+{int(v)} {lbl}")
+            has_positive = True
         elif v <= -1:
             add_stats.append(f"{int(v)} {lbl}")
-            debuff = True
+            has_negative = True
     if add_stats:
         hints.append("adjusts " + ", ".join(add_stats[:3]))
 
     sa_r = _fval(row, "saAttackPowerRate", 1.0)
     if sa_r > 1.02:
         hints.append("raises stance damage")
+        has_positive = True
 
     soul_r = _fval(row, "soulRate", 1.0)
     if soul_r > 1.02:
         hints.append("increases runes gained")
+        has_positive = True
 
+    if int(round(_fval(row, "stateInfo", 0.0))) == 290:
+        hints.append("improves dodge rolls")
+        has_positive = True
+
+    debuff = bool(has_negative and not has_positive)
     desc = None
     if hints:
         sentence = ", ".join(hints)
         desc = sentence[0].upper() + sentence[1:] + "."
-    return desc, debuff, hints
+    return desc, debuff, has_positive, hints
 
 
 def _pick_fex_num_for_icon(icon_id: int, crn_names: List[str], hints: List[str], is_debuff: bool) -> int:
@@ -373,12 +400,24 @@ def _pick_fex_num_for_icon(icon_id: int, crn_names: List[str], hints: List[str],
     return 54
 
 
-def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str, regulation_path: str = "") -> Dict[str, Any]:
-    print("Fetching Fextralife Status_Effects list...")
-    fex_rows = scrape_fextralife_status_icons()
-    print(f"Found {len(fex_rows)} Fextralife status icons; downloading & centering cleanly...")
-    icons = download_all_icons(fex_rows)
-    fex_by_num = {r["num"]: r for r in fex_rows}
+def build_bundle(
+    game_dir: str,
+    smithbox_dir: str,
+    err_mod_dir: str,
+    regulation_path: str = "",
+    reuse_icons_path: str = "",
+) -> Dict[str, Any]:
+    if reuse_icons_path and os.path.exists(reuse_icons_path):
+        print(f"Reusing existing icons from {reuse_icons_path}...")
+        with gzip.open(reuse_icons_path, "rt", encoding="utf-8") as fh:
+            icons = dict(json.load(fh).get("icons") or {})
+        fex_by_num: Dict[int, Dict[str, Any]] = {}
+    else:
+        print("Fetching Fextralife Status_Effects list...")
+        fex_rows = scrape_fextralife_status_icons()
+        print(f"Found {len(fex_rows)} Fextralife status icons; downloading & centering cleanly...")
+        icons = download_all_icons(fex_rows)
+        fex_by_num = {r["num"]: r for r in fex_rows}
 
     sys.path.insert(0, BASE_DIR)
     import extract_err_data as ed
@@ -479,13 +518,36 @@ def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str, regulation_
         clean_crn = _clean_crn_name(crn_raw)
         srcs = sp_sources.get(pid, [])
         best_name = srcs[0] if srcs else (clean_crn or "")
-        auto_desc, is_debuff, hints = _analyze_sp_effect(r)
-        if ic in CURATED_ICON_MAP and CURATED_ICON_MAP[ic][3]:
+        auto_desc, is_debuff, has_positive, hints = _analyze_sp_effect(r)
+        if ic in CURATED_ICON_MAP and CURATED_ICON_MAP[ic][3] and not has_positive:
             is_debuff = True
         if best_name or auto_desc:
+            cur_entry = CURATED_ICON_MAP.get(ic)
+            if best_name:
+                meta_title = best_name
+            elif is_debuff and (not cur_entry or not cur_entry[3]):
+                joined_h = " ".join(hints).lower()
+                if "drains hp" in joined_h:
+                    meta_title = "HP Drain"
+                elif "increases damage taken" in joined_h:
+                    meta_title = "Defense Negation Down"
+                elif "reduces attack power" in joined_h:
+                    meta_title = "Attack Power Down"
+                elif "reduces max hp" in joined_h:
+                    meta_title = "Max HP Down"
+                else:
+                    meta_title = f"Effect #{pid}"
+            else:
+                meta_title = cur_entry[1] if cur_entry else f"Effect #{pid}"
+            if auto_desc:
+                meta_desc = auto_desc
+            elif is_debuff and (not cur_entry or not cur_entry[3]):
+                meta_desc = "Temporary debuff active."
+            else:
+                meta_desc = cur_entry[2] if cur_entry else "Temporary active status effect."
             sp_meta[str(pid)] = [
-                best_name or CURATED_ICON_MAP.get(ic, (0, f"Effect #{pid}", "", is_debuff))[1],
-                auto_desc or CURATED_ICON_MAP.get(ic, (0, "", "Temporary active status effect.", is_debuff))[2],
+                meta_title,
+                meta_desc,
                 bool(is_debuff),
             ]
         icon_rows[ic].append((pid, r, best_name))
@@ -495,29 +557,33 @@ def build_bundle(game_dir: str, smithbox_dir: str, err_mod_dir: str, regulation_
         rows_for_ic = icon_rows.get(ic, [])
         sample_names = [nm for _, _, nm in rows_for_ic if nm]
         all_hints: List[str] = []
-        any_debuff = False
+        deb_votes = 0
+        buff_votes = 0
         first_desc = ""
-        for _, r, _ in rows_for_ic[:5]:
-            d, deb, hs = _analyze_sp_effect(r)
+        for _, r, _ in rows_for_ic[:25]:
+            d, deb, _hp, hs = _analyze_sp_effect(r)
             if d and not first_desc:
                 first_desc = d
             all_hints.extend(hs)
             if deb:
-                any_debuff = True
+                deb_votes += 1
+            else:
+                buff_votes += 1
+        majority_debuff = bool(deb_votes > 0 and deb_votes > buff_votes)
 
         if ic in CURATED_ICON_MAP:
             fex_num, cur_title, cur_desc, cur_deb = CURATED_ICON_MAP[ic]
             fex_key = f"fex_{fex_num}" if f"fex_{fex_num}" in icons else "fex_54"
             title = cur_title
             desc = cur_desc
-            debuff = bool(cur_deb or any_debuff)
+            debuff = bool(cur_deb)
         else:
-            fex_num = _pick_fex_num_for_icon(ic, sample_names, all_hints, any_debuff)
+            fex_num = _pick_fex_num_for_icon(ic, sample_names, all_hints, majority_debuff)
             fex_key = f"fex_{fex_num}" if f"fex_{fex_num}" in icons else "fex_54"
             fex_info = fex_by_num.get(fex_num, {})
             title = sample_names[0] if sample_names else f"Active Effect ({ic})"
             desc = first_desc or (fex_info.get("effect") or "Temporary status effect active on player.")
-            debuff = bool(any_debuff)
+            debuff = majority_debuff
 
         icon_map[str(ic)] = [fex_key, title, desc, debuff]
 
@@ -536,10 +602,11 @@ def main():
     parser.add_argument("--smithbox", default=r"C:\Users\kenne\Desktop\Smithbox_2_1_2_2016_02_16_a")
     parser.add_argument("--err-mod", default=r"C:\Elden Ring Modded\Convergence\2\EldenRingReforgedv2.3.9.1\ERR_v2.3.10.1\mod")
     parser.add_argument("--regulation", default="", help="Optional override path to regulation.bin")
+    parser.add_argument("--reuse-icons", default="", help="Reuse scraped icons from an existing err_buff_icons.json.gz")
     parser.add_argument("--out", default=DEFAULT_OUT_PATH)
     args = parser.parse_args()
 
-    payload = build_bundle(args.game, args.smithbox, args.err_mod, args.regulation)
+    payload = build_bundle(args.game, args.smithbox, args.err_mod, args.regulation, args.reuse_icons)
     out_path = os.path.abspath(args.out)
     with gzip.open(out_path, "wt", encoding="utf-8") as fh:
         json.dump(payload, fh, separators=(",", ":"))

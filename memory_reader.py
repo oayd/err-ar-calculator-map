@@ -238,6 +238,8 @@ def _aggregate_live_ar_speffects(
     masks before aggregating global, RH, and LH AR multipliers, flats, and stat bonuses.
     """
     stat_bonus = [0, 0, 0, 0, 0]
+    end_bonus = 0
+    equip_weight_mult = 1.0
     g_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
     g_flat = [0, 0, 0, 0, 0]
     rh_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
@@ -262,8 +264,10 @@ def _aggregate_live_ar_speffects(
         if (flags & 0x800C0003) != 0 or param_id <= 0 or not sp_raw or len(sp_raw) < 816:
             continue
         is_finite = math.isfinite(dur) and dur > 0.0
-        if is_finite and (not math.isfinite(rem) or rem <= 0.01):
-            continue
+        if is_finite:
+            min_rem = 0.0 if dur <= 0.25 else 0.01
+            if not math.isfinite(rem) or rem < min_rem or (min_rem > 0.0 and rem <= min_rem):
+                continue
 
         cond_hp = struct.unpack_from("<f", sp_raw, 4)[0]
         cond_hp_rate = struct.unpack_from("<f", sp_raw, 496)[0]
@@ -281,34 +285,55 @@ def _aggregate_live_ar_speffects(
                     hp_ok = False
 
         valid_nodes.append((int(param_id), sp_raw, float(rem), float(dur), hp_ok))
-        if hp_ok:
+
+    for _ in range(4):
+        added = False
+        for _pid, sp_raw, _rem, _dur, hp_ok in valid_nodes:
+            if not hp_ok or (sp_raw[352] & 0x02) != 0:
+                continue
             inv = struct.unpack_from("<3H", sp_raw, 696)
-            if inv == (0, 0, 0):
-                si = struct.unpack_from("<H", sp_raw, 342)[0]
-                if si > 0:
-                    active_state_infos.add(si)
+            req_states = [v for v in inv if v > 0]
+            if req_states and not any(v in active_state_infos for v in req_states):
+                continue
+            si = struct.unpack_from("<H", sp_raw, 342)[0]
+            if si > 0 and si not in active_state_infos:
+                active_state_infos.add(si)
+                added = True
+        if not added:
+            break
 
     seen_params: Set[Tuple[int, int]] = set()
     for param_id, sp_raw, _rem, dur, hp_ok in valid_nodes:
         wep_change = sp_raw[344]
+        sp_cat = struct.unpack_from("<H", sp_raw, 318)[0]
         pk = (param_id, wep_change)
-        if pk in seen_params:
-            continue
-        seen_params.add(pk)
+        if sp_cat not in (0, 10):
+            if pk in seen_params:
+                continue
+            seen_params.add(pk)
 
         if not hp_ok or (sp_raw[352] & 0x02) != 0:
             continue
         inv = struct.unpack_from("<3H", sp_raw, 696)
-        if any(v > 0 and v not in active_state_infos for v in inv):
+        req_states = [v for v in inv if v > 0]
+        if req_states and not any(v in active_state_infos for v in req_states):
             continue
 
         contributed = False
-        if wep_change == 0:
+        if wep_change in (0, 3):
             for i, soff in enumerate(stat_offs):
                 sb = struct.unpack_from("<b", sp_raw, soff)[0]
                 if -50 <= sb <= 99 and sb != 0:
                     stat_bonus[i] += sb
                     contributed = True
+            eb = struct.unpack_from("<b", sp_raw, 800)[0]
+            if -50 <= eb <= 99 and eb != 0:
+                end_bonus += eb
+                contributed = True
+            ew = struct.unpack_from("<f", sp_raw, 228)[0]
+            if math.isfinite(ew) and 0.05 < ew < 20.0 and abs(ew - 1.0) > 1e-4:
+                equip_weight_mult *= ew
+                contributed = True
 
         ar_eligible = wep_change in (0, 1, 2)
         if ar_eligible:
@@ -322,10 +347,19 @@ def _aggregate_live_ar_speffects(
                 state_info = struct.unpack_from("<H", sp_raw, 342)[0]
                 icon_id = struct.unpack_from("<i", sp_raw, 0)[0]
                 is_finite = math.isfinite(dur) and dur > 0.0
+                tgt_bits = sp_raw[351]
+                is_player_only_passive = ((tgt_bits & 0x01) != 0) and ((tgt_bits & 0x04) == 0)
+                is_scadutree = (sp_cat == 132)
+                iconless_world_scaling = (
+                    icon_id <= 0
+                    and not is_finite
+                    and not is_player_only_passive
+                    and not is_scadutree
+                )
                 if (
                     sp_attr != 254
                     or (700 <= state_info <= 725)
-                    or (icon_id <= 0 and not is_finite)
+                    or iconless_world_scaling
                 ):
                     ar_eligible = False
 
@@ -354,11 +388,13 @@ def _aggregate_live_ar_speffects(
 
         if contributed:
             active_cnt += 1
-            if len(contributors) < 24:
+            if param_id not in contributors and len(contributors) < 24:
                 contributors.append(param_id)
 
     return {
         "statBonus": stat_bonus,
+        "endBonus": int(end_bonus),
+        "equipWeightMult": round(equip_weight_mult, 6),
         "globalMult": [round(x, 6) for x in g_mult],
         "globalFlat": g_flat,
         "rhMult": [round(x, 6) for x in rh_mult],
@@ -616,7 +652,11 @@ class EldenRingMemoryReader:
                     return sbuf.decode("utf-16-le", errors="replace").split("\x00")[0].strip()
         return ""
 
-    def read_live_params(self, wanted_names: Set[str]) -> Optional[Dict[str, bytes]]:
+    def read_live_params(
+        self,
+        wanted_names: Set[str],
+        optional_names: Optional[Set[str]] = None,
+    ) -> Optional[Dict[str, bytes]]:
         """Read raw binary PARAM buffers directly from SoloParamRepositoryImp in offline RAM."""
         if _is_eac_running() or not self.ensure_attached(min_retry_secs=0.2):
             return None
@@ -628,6 +668,8 @@ class EldenRingMemoryReader:
             return None
 
         wanted = {w.lower() for w in wanted_names}
+        opt = {w.lower() for w in (optional_names or ())}
+        all_wanted = wanted | opt
         out: Dict[str, bytes] = {}
         for i in range(256):
             cap = self._ru64(repo + 0x88 + i * 0x48)
@@ -637,7 +679,7 @@ class EldenRingMemoryReader:
             if not pname:
                 continue
             key = pname.lower() + ".param"
-            if key not in wanted or key in out:
+            if key not in all_wanted or key in out:
                 continue
             p_hdr = self._ru64(cap + 0x80)
             if p_hdr < 0x10000:
@@ -673,9 +715,9 @@ class EldenRingMemoryReader:
             raw_param = self._read_bytes(p_data, total_sz)
             if raw_param:
                 out[key] = raw_param
-                if len(out) == len(wanted):
+                if len(out) == len(all_wanted):
                     return out
-        return out if len(out) == len(wanted) else None
+        return out if all(w in out for w in wanted) else None
 
     def _get_player_ins(self) -> int:
         if not self._wcm_addr:
@@ -717,6 +759,25 @@ class EldenRingMemoryReader:
             "yaw": round(yaw, 4),
             "source": "ram",
         }
+
+    def read_live_slot_ar(self) -> Optional[Dict[str, List[int]]]:
+        """Read Elden Ring's exact in-game per-slot Attack Power (L1..L3, R1..R3)."""
+        if not self._gdm_addr or _is_eac_running():
+            return None
+        gdm = self._ru64(self._gdm_addr)
+        if gdm < 0x10000:
+            return None
+        pgd = self._ru64(gdm + 0x8)
+        if pgd < 0x10000:
+            return None
+        raw = self._read_bytes(pgd + 0x968, 24)
+        if not raw or len(raw) < 24:
+            return None
+        l1, r1, l2, r2, l3, r3 = struct.unpack_from("<6i", raw, 0)
+        vals = (l1, r1, l2, r2, l3, r3)
+        if not all(0 <= v <= 99999 for v in vals) or not any(v > 0 for v in vals):
+            return None
+        return {"lh": [int(l1), int(l2), int(l3)], "rh": [int(r1), int(r2), int(r3)]}
 
     def read_character_state(
         self,
@@ -835,6 +896,7 @@ class EldenRingMemoryReader:
             "bolts": bolts,
             "armor": armor,
             "talismans": talismans,
+            "slotAr": self.read_live_slot_ar(),
             "source": "ram",
         }
 
@@ -856,7 +918,17 @@ class EldenRingMemoryReader:
             return None
         return save_reader.decode_event_flags(buf, flag_bst, wanted_flags)
 
-    def _collect_live_inv_table(self, inv_ptr: int, ncap: int, kcap: int, weapons: Set[int], armor: Set[int], talismans: Set[int], goods: Set[int]) -> bool:
+    def _collect_live_inv_table(
+        self,
+        inv_ptr: int,
+        ncap: int,
+        kcap: int,
+        weapons: Set[int],
+        armor: Set[int],
+        talismans: Set[int],
+        goods: Set[int],
+        weapon_levels: Optional[Dict[int, int]] = None,
+    ) -> bool:
         hdr = self._read_bytes(inv_ptr + 0x0C, 36)
         if not hdr or len(hdr) < 36:
             return False
@@ -876,7 +948,16 @@ class EldenRingMemoryReader:
                 top = item_id & 0xF0000000
                 raw = item_id & 0x0FFFFFFF
                 if top == 0x00000000:
-                    weapons.add((raw // 100) * 100)
+                    base_w = (raw // 100) * 100
+                    weapons.add(base_w)
+                    if weapon_levels is not None:
+                        lv = raw % 100
+                        if 0 <= lv <= 25:
+                            if lv > weapon_levels.get(base_w, -1):
+                                weapon_levels[base_w] = lv
+                            base_root = (raw // 10000) * 10000
+                            if base_root > 0 and lv > weapon_levels.get(base_root, -1):
+                                weapon_levels[base_root] = lv
                 elif top == 0x10000000:
                     armor.add(raw)
                 elif top == 0x20000000:
@@ -885,7 +966,7 @@ class EldenRingMemoryReader:
                     goods.add(raw)
         return True
 
-    def read_inventory(self) -> Optional[Dict[str, List[int]]]:
+    def read_inventory(self) -> Optional[Dict[str, Any]]:
         if not self._gdm_addr:
             return None
         gdm = self._ru64(self._gdm_addr)
@@ -899,6 +980,7 @@ class EldenRingMemoryReader:
         armor: Set[int] = set()
         talismans: Set[int] = set()
         goods: Set[int] = set()
+        weapon_levels: Dict[int, int] = {}
 
         if self._inv_off is None:
             for off in range(0x3D0, 0x520, 8):
@@ -908,7 +990,7 @@ class EldenRingMemoryReader:
                     if cn == 0xA80 and ck == 0x180 and hn >= 0x10000 and ln <= cn:
                         self._inv_off = off
                         break
-        if self._inv_off is None or not self._collect_live_inv_table(pgd + self._inv_off, 0xA80, 0x180, weapons, armor, talismans, goods):
+        if self._inv_off is None or not self._collect_live_inv_table(pgd + self._inv_off, 0xA80, 0x180, weapons, armor, talismans, goods, weapon_levels):
             self._inv_off = None
             return None
 
@@ -924,7 +1006,7 @@ class EldenRingMemoryReader:
                             break
         if self._storage_ptr_off is not None:
             sptr = self._ru64(pgd + self._storage_ptr_off)
-            if sptr < 0x10000 or not self._collect_live_inv_table(sptr, 0x780, 0x80, weapons, armor, talismans, goods):
+            if sptr < 0x10000 or not self._collect_live_inv_table(sptr, 0x780, 0x80, weapons, armor, talismans, goods, weapon_levels):
                 self._storage_ptr_off = None
 
         return {
@@ -932,6 +1014,7 @@ class EldenRingMemoryReader:
             "armor": sorted(armor),
             "talismans": sorted(talismans),
             "goods": sorted(goods),
+            "weaponLevels": {str(k): v for k, v in weapon_levels.items()},
         }
 
     def read_world_map_pins(self) -> Optional[List[Dict[str, Any]]]:
@@ -1016,6 +1099,7 @@ class EldenRingMemoryReader:
         fallback_name: str,
         menu_name: str = "",
         npc_meta: Optional[Dict[int, Tuple[str, int]]] = None,
+        npc_def: Optional[Dict[str, List[int]]] = None,
     ) -> Optional[Dict[str, Any]]:
         hdr = self._read_bytes(chr_ins + 0x60, 4)
         npc_param_id = struct.unpack("<i", hdr)[0] if hdr and len(hdr) == 4 else -1
@@ -1083,9 +1167,10 @@ class EldenRingMemoryReader:
                 statuses = _parse_resist_block(rraw, immune_mask)
 
         name = menu_name or meta_name or fallback_name
-        return {
+        res: Dict[str, Any] = {
             "slot": slot,
             "name": name,
+            "npcParamId": int(npc_param_id),
             "hp": hp,
             "maxHp": hp_max,
             "stance": stance,
@@ -1095,9 +1180,17 @@ class EldenRingMemoryReader:
             "stanceKind": stance_kind,
             "statuses": statuses,
         }
+        if npc_def and npc_param_id >= 0:
+            row = npc_def.get(str(npc_param_id))
+            if row and len(row) >= 13:
+                res["def"] = row[:5]
+                res["neg"] = row[5:13]
+        return res
 
     def read_active_bosses(
-        self, npc_meta: Optional[Dict[int, Tuple[str, int]]] = None
+        self,
+        npc_meta: Optional[Dict[int, Tuple[str, int]]] = None,
+        npc_def: Optional[Dict[str, List[int]]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Return live boss HP/stance/status, or locked-on enemy if no boss bar is active."""
         if not self._wcm_addr or not self._fem_addr or _is_eac_running():
@@ -1133,7 +1226,7 @@ class EldenRingMemoryReader:
             seen_chr.add(chr_ins)
 
             mname = self._read_menu_string(tag_addr + 0x28) if (tag_vis or tag_handle == handle) else ""
-            entry = self._read_chr_telemetry(chr_ins, slot, f"Boss {slot + 1}", mname, npc_meta)
+            entry = self._read_chr_telemetry(chr_ins, slot, f"Boss {slot + 1}", mname, npc_meta, npc_def)
             if entry:
                 out.append(entry)
 
@@ -1161,7 +1254,7 @@ class EldenRingMemoryReader:
                                     mname = self._read_menu_string(ea + 0x28)
                                     if mname:
                                         break
-                        entry = self._read_chr_telemetry(chr_ins, 0, "Enemy", mname, npc_meta)
+                        entry = self._read_chr_telemetry(chr_ins, 0, "Enemy", mname, npc_meta, npc_def)
                         if entry:
                             return [entry]
         return out
@@ -1230,7 +1323,9 @@ class EldenRingMemoryReader:
             return None
         node = self._ru64(sp_mgr + 0x08)
         if node < 0x10000:
-            return _aggregate_live_ar_speffects([])
+            res = _aggregate_live_ar_speffects([])
+            res["slotAr"] = self.read_live_slot_ar()
+            return res
 
         hp: Optional[int] = None
         hp_max: Optional[int] = None
@@ -1268,7 +1363,9 @@ class EldenRingMemoryReader:
                     entries.append((param_id, sp_raw, rem, dur, flags))
             node = nxt
 
-        return _aggregate_live_ar_speffects(entries, hp=hp, hp_max=hp_max)
+        res = _aggregate_live_ar_speffects(entries, hp=hp, hp_max=hp_max)
+        res["slotAr"] = self.read_live_slot_ar()
+        return res
 
 
 def _get_process_image_path(pid: int) -> Optional[str]:

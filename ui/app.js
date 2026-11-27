@@ -192,14 +192,65 @@
     return atk * mult;
   }
 
-  function calcEffectiveDamage(elemAr, enemyPresetName, enemyPresets) {
-    const preset = enemyPresets[enemyPresetName];
+  function resolveEnemyPresetEntry(enemyPresetName, enemyPresets) {
+    if (!enemyPresetName || enemyPresetName === "Raw AR (No Defense)") return null;
+    if (enemyPresetName === "__LIVE_TARGET__") {
+      const b0 = Array.isArray(state.ramBosses) && state.ramBosses[0];
+      if (b0 && Array.isArray(b0.def) && b0.def.length >= 5 && Array.isArray(b0.neg) && b0.neg.length >= 5) {
+        return { def: b0.def, neg: b0.neg };
+      }
+      return (enemyPresets && enemyPresets["Endgame / DLC Boss (125 Def, 35% Neg)"]) || {
+        def: [125, 125, 125, 125, 125],
+        neg: [0.35, 0.35, 0.35, 0.35, 0.35],
+      };
+    }
+    if (enemyPresetName === "__CUSTOM_BOSS__" && state.customBossPreset) {
+      return {
+        def: state.customBossPreset.d || state.customBossPreset.def || [125, 125, 125, 125, 125],
+        neg: state.customBossPreset.g || state.customBossPreset.neg || [0, 0, 0, 0, 0, 0, 0, 0],
+      };
+    }
+    return enemyPresets ? enemyPresets[enemyPresetName] : null;
+  }
+
+  function resolvePhysNegationPct(negs8, physTypes) {
+    if (!Array.isArray(negs8) || negs8.length < 8) return Number((negs8 && negs8[0]) || 0);
+    if (physTypes) {
+      const pt = String(physTypes).toLowerCase();
+      const idxs = [];
+      if (pt.includes("standard")) idxs.push(0);
+      if (pt.includes("slash")) idxs.push(1);
+      if (pt.includes("strike")) idxs.push(2);
+      if (pt.includes("pierce")) idxs.push(3);
+      if (idxs.length) {
+        let sum = 0;
+        for (const i of idxs) sum += Number(negs8[i]) || 0;
+        return sum / idxs.length;
+      }
+    }
+    return Number(negs8[0]) || 0;
+  }
+
+  function calcEffectiveDamage(elemAr, enemyPresetName, enemyPresets, physTypes = "") {
+    const preset = resolveEnemyPresetEntry(enemyPresetName, enemyPresets);
     if (!preset) {
       const sum = elemAr[0] + elemAr[1] + elemAr[2] + elemAr[3] + elemAr[4];
       return { total: sum, elems: elemAr.slice() };
     }
-    const defs = preset.def;
-    const negs = preset.neg;
+    const defs = preset.def || preset.d;
+    const rawNeg = preset.neg || preset.g;
+    let negs;
+    if (Array.isArray(rawNeg) && rawNeg.length >= 8) {
+      negs = [
+        resolvePhysNegationPct(rawNeg, physTypes) / 100.0,
+        Number(rawNeg[4] || 0) / 100.0,
+        Number(rawNeg[5] || 0) / 100.0,
+        Number(rawNeg[6] || 0) / 100.0,
+        Number(rawNeg[7] || 0) / 100.0,
+      ];
+    } else {
+      negs = rawNeg;
+    }
     const dmg = [0, 0, 0, 0, 0];
     let sum = 0;
     for (let i = 0; i < 5; i++) {
@@ -417,7 +468,7 @@
     guardOut.push(Math.max(0, Math.round((Number(rawGuard[5]) || 0) * (gr[5] != null ? gr[5] : 1.0))));
 
     const totalAr = elemAr[0] + elemAr[1] + elemAr[2] + elemAr[3] + elemAr[4];
-    const eff = calcEffectiveDamage(elemAr, enemyPreset, enemyPresets);
+    const eff = calcEffectiveDamage(elemAr, enemyPreset, enemyPresets, weapon.physTypes || "");
     return {
       weapon,
       lv,
@@ -509,7 +560,12 @@
     bestAffinityOnly: false,
     buffableOnly: false,
     equippedOnly: false,
+    ownedOnly: false,
+    favoritesOnly: false,
+    pinFavTop: true,
+    favoriteIds: [],
     enemyPreset: "Raw AR (No Defense)",
+    customBossPreset: null,
     search: "",
     selectedAffs: new Set(),
     selectedWts: new Set(),
@@ -564,6 +620,25 @@
     buffTextOpacity: 75,
     enemyShowStatuses: true,
     enemyShowStance: true,
+    pipBossResMode: "compact",
+    pipLocked: false,
+    pipAutoHide: false,
+    minimizeToTray: false,
+    pipSmartFade: false,
+    pipIdleOpacity: 0.45,
+    pipCombatOpacity: 1.0,
+    pipFadeMs: 400,
+    pipFadeOnBoss: true,
+    pipFadeOnBuffs: false,
+    _effectiveOpacity: 1.0,
+    _fadeRafId: 0,
+    _fadeLastTs: 0,
+    _fadeLastPushTs: 0,
+    _pipMouseHover: false,
+    _hoverEquipOverride: null,
+    _favSet: new Set(),
+    _prevRamAttached: false,
+    _prevRamCharName: "",
     overlayHidden: false,
     keybinds: {},
     defaultKeybinds: {},
@@ -657,6 +732,7 @@
     { key: "toggleFollow", label: "Toggle Live Follow (30 Hz)" },
     { key: "focusPipSearch", label: "Focus Map Search" },
     { key: "toggleOverlayHide", label: "Hide / Show Overlay" },
+    { key: "toggleBossResMode", label: "Cycle Boss Resistances Strip" },
   ];
 
   const mapState = {
@@ -700,6 +776,8 @@
     followPlayer: false,
     autoSwitchLayer: true,
     autoDetect: true,
+    autoClearBeacon: true,
+    clearedBeaconKeys: new Set(),
     completedMode: "dim",
     manualCompleted: {},
     lastPlayerLayer: null,
@@ -989,15 +1067,41 @@
   }
 
   function populateEnemySelect() {
-    const sel = $("enemySelect");
-    sel.innerHTML = "";
-    for (const name of Object.keys(state.enemyPresets)) {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      sel.appendChild(opt);
+    const applyToSel = (sel) => {
+      if (!sel) return;
+      sel.innerHTML = "";
+      for (const name of Object.keys(state.enemyPresets)) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+      const liveOpt = document.createElement("option");
+      liveOpt.value = "__LIVE_TARGET__";
+      const b0 = Array.isArray(state.ramBosses) && state.ramBosses[0];
+      liveOpt.textContent = (b0 && b0.name) ? `Live Target: ${b0.name}` : "Current Live Target (Auto)";
+      sel.insertBefore(liveOpt, sel.children[1] || null);
+      if (state.customBossPreset && state.customBossPreset.n) {
+        const cOpt = document.createElement("option");
+        cOpt.value = "__CUSTOM_BOSS__";
+        cOpt.textContent = `Boss: ${state.customBossPreset.n}`;
+        sel.appendChild(cOpt);
+      }
+      const valid = state.enemyPreset === "__LIVE_TARGET__"
+        || (state.enemyPreset === "__CUSTOM_BOSS__" && state.customBossPreset)
+        || (state.enemyPreset in state.enemyPresets);
+      sel.value = valid ? state.enemyPreset : "Raw AR (No Defense)";
+    };
+    applyToSel($("enemySelect"));
+    applyToSel($("eqEnemySel"));
+  }
+
+  function getCustomEnemyPresetForBackend() {
+    if (state.enemyPreset === "__LIVE_TARGET__" || state.enemyPreset === "__CUSTOM_BOSS__") {
+      const p = resolveEnemyPresetEntry(state.enemyPreset, state.enemyPresets);
+      return p ? { def: p.def, neg: p.neg } : null;
     }
-    sel.value = state.enemyPreset in state.enemyPresets ? state.enemyPreset : "Raw AR (No Defense)";
+    return null;
   }
 
   function updateStatInputsDom() {
@@ -1183,6 +1287,206 @@
     gearBtn.classList.toggle("active-gold", activeCount > 0);
     $("gearBonusSummary").textContent = activeCount > 0 ? `Active: ${sumParts.join(" · ")}` : "No active gear stat or damage modifiers";
     update2hHint();
+  }
+
+  function showErToast(title, detail = "", kind = "info") {
+    const host = $("erToastHost");
+    if (!host || state._selfTest) return;
+    while (host.children.length >= 3) {
+      host.removeChild(host.firstElementChild);
+    }
+    const el = document.createElement("div");
+    el.className = `er-toast ${kind}`;
+    el.innerHTML = `<div class="er-toast-title">${escHtml(title)}</div>${detail ? `<div class="er-toast-body">${escHtml(detail)}</div>` : ""}`;
+    host.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    setTimeout(() => {
+      el.classList.remove("show");
+      setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 220);
+    }, 3200);
+  }
+
+  function toggleFavoriteWeapon(wid, persist = true) {
+    const id = Number(wid);
+    if (!id) return false;
+    if (!state._favSet || !(state._favSet instanceof Set)) {
+      state._favSet = new Set(state.favoriteIds || []);
+    }
+    if (state._favSet.has(id)) state._favSet.delete(id);
+    else state._favSet.add(id);
+    state.favoriteIds = Array.from(state._favSet);
+    if (persist) persistSettings();
+    recalculateAndRender();
+    return state._favSet.has(id);
+  }
+
+  function isWeaponFavorite(wid) {
+    return Boolean(state._favSet && state._favSet.has(Number(wid)));
+  }
+
+  function detectOwnedMaxUpgrades() {
+    const sets = getActiveProgressSets();
+    let maxReg = null;
+    let maxSomber = null;
+    const absorb = (wid, lv) => {
+      const w = state.byId.get(Number(wid));
+      const maxLv = w ? w.maxLv : (Number(lv) > 10 ? 25 : null);
+      if (maxLv === 25) maxReg = maxReg === null ? lv : Math.max(maxReg, lv);
+      else if (maxLv !== null && maxLv > 0) maxSomber = maxSomber === null ? lv : Math.max(maxSomber, lv);
+    };
+    if (sets.weaponLevels && sets.weaponLevels.size > 0) {
+      for (const [wid, lv] of sets.weaponLevels.entries()) absorb(wid, lv);
+    }
+    for (const [wid, lv] of state.equippedMap.entries()) absorb(wid, lv);
+    if (maxReg === null && maxSomber === null) return null;
+    const regLv = maxReg !== null ? maxReg : Math.min(25, Math.round((maxSomber * 25) / 10));
+    const somberLv = maxSomber !== null ? maxSomber : Math.min(10, Math.round((maxReg * 10) / 25));
+    return { regLv, somberLv };
+  }
+
+  function syncInventoryUpgrades(recalc = true, toast = true) {
+    const detected = detectOwnedMaxUpgrades();
+    if (!detected) {
+      if (toast) showErToast("No Owned Upgrades Found", "Load a character save or attach live RAM first.", "warn");
+      return false;
+    }
+    state.regLv = detected.regLv;
+    state.somberLv = detected.somberLv;
+    syncLevelSelectValue();
+    if (recalc) recalculateAndRender();
+    if (toast) showErToast("Upgrade Levels Synced", `Highest owned inventory tiers: +${state.regLv} / +${state.somberLv}`, "ok");
+    return true;
+  }
+
+  function computeEquipLoad(override = null) {
+    const armors = (state.data && state.data.armors) || {};
+    const tals = (state.data && state.data.talismans) || {};
+    const ch = (state.ramLive && state.ramChar) ? state.ramChar : getActiveSaveChar();
+    const baseEnd = (ch && ch.stats && Number(ch.stats.end)) ? Number(ch.stats.end) : 11;
+
+    const rh = ((state.equippedSlots && state.equippedSlots.rh) || [null, null, null]).slice();
+    const lh = ((state.equippedSlots && state.equippedSlots.lh) || [null, null, null]).slice();
+    const armIds = (state.armorIds || [null, null, null, null]).slice();
+    const talIds = (state.talismanIds || [null, null, null, null]).slice();
+
+    // Calculate baseline gear multipliers so we can isolate extra live RAM buffs (Tears, Fortunes, Runes)
+    const calcGearMeta = (aArr, tArr) => {
+      let wt = 0;
+      let endB = 0;
+      let ewM = 1.0;
+      for (let i = 0; i < 4; i++) {
+        const a = aArr[i] ? armors[String(aArr[i])] : null;
+        if (!a) continue;
+        wt += Number(a.w || 0);
+        if (a.end) endB += Number(a.end);
+        if (a.ew) ewM *= Number(a.ew);
+      }
+      for (let i = 0; i < 4; i++) {
+        const t = tArr[i] ? tals[String(tArr[i])] : null;
+        if (!t) continue;
+        wt += Number(t.w || 0);
+        if (t.end) endB += Number(t.end);
+        if (t.ew) ewM *= Number(t.ew);
+      }
+      return { wt, endB, ewM };
+    };
+    const baseMeta = calcGearMeta(armIds, talIds);
+
+    if (override) {
+      if (override.type === "armor" && override.slot >= 0 && override.slot < 4) {
+        armIds[override.slot] = override.id ? Number(override.id) : null;
+      } else if (override.type === "talisman" && override.slot >= 0 && override.slot < 4) {
+        talIds[override.slot] = override.id ? Number(override.id) : null;
+      } else if ((override.kind === "rh" || override.kind === "lh") && override.idx >= 0 && override.idx < 3) {
+        const arr = override.kind === "lh" ? lh : rh;
+        arr[override.idx] = override.weaponId ? { weaponId: Number(override.weaponId), level: 0 } : null;
+      }
+    }
+
+    let curW = 0;
+    for (const s of [...rh, ...lh]) {
+      if (!s || !s.weaponId) continue;
+      const w = state.byId.get(Number(s.weaponId));
+      if (w) curW += Number(w.weight || 0);
+    }
+    const gMeta = calcGearMeta(armIds, talIds);
+    curW += gMeta.wt;
+
+    let extraEnd = 0;
+    let extraEwMult = 1.0;
+    if (state.ramLive && state.ramLiveArBuffs) {
+      extraEnd = (Number(state.ramLiveArBuffs.endBonus || 0)) - baseMeta.endB;
+      const ramEw = Number(state.ramLiveArBuffs.equipWeightMult || 1.0);
+      extraEwMult = baseMeta.ewM > 0.01 ? (ramEw / baseMeta.ewM) : ramEw;
+    }
+
+    const effEnd = Math.max(1, Math.min(199, baseEnd + gMeta.endB + extraEnd));
+    const ccg220 = state.data && state.data.ccg && state.data.ccg["220"];
+    const baseMax = ccg220 ? (calcCorrect(effEnd, ccg220) * 100.0) : 100.0;
+    const totalEwMult = Math.max(0.1, gMeta.ewM * extraEwMult);
+    const maxLoad = Math.max(1.0, baseMax * totalEwMult);
+    const pct = (curW / maxLoad) * 100.0;
+
+    let tier = "Light";
+    let tierCls = "light";
+    if (pct >= 100.0) { tier = "Overloaded"; tierCls = "over"; }
+    else if (pct >= 70.0) { tier = "Heavy"; tierCls = "heavy"; }
+    else if (pct >= 30.0) { tier = "Med"; tierCls = "med"; }
+
+    const toLight = curW - maxLoad * 0.30;
+    const toHeavy = maxLoad * 0.70 - curW;
+    const toOver = maxLoad - curW;
+    let breakpointText = "";
+    if (tierCls === "light") breakpointText = `Med in +${Math.max(0, maxLoad * 0.30 - curW).toFixed(1)}`;
+    else if (tierCls === "med") breakpointText = `Heavy +${toHeavy.toFixed(1)} · Light -${toLight.toFixed(1)}`;
+    else if (tierCls === "heavy") breakpointText = `Med -${(curW - maxLoad * 0.70 + 0.05).toFixed(1)} · Over +${toOver.toFixed(1)}`;
+    else breakpointText = `Over by +${(curW - maxLoad).toFixed(1)}`;
+
+    return {
+      curW,
+      maxLoad,
+      pct,
+      tier,
+      tierCls,
+      totalEwMult,
+      effEnd,
+      breakpointText,
+    };
+  }
+
+  function renderEquipLoadBars() {
+    if (!state.data) return;
+    const cur = computeEquipLoad(null);
+    const hov = state._hoverEquipOverride ? computeEquipLoad(state._hoverEquipOverride) : null;
+    const fillPct = Math.max(0, Math.min(100, cur.pct));
+    const buffTag = Math.abs(cur.totalEwMult - 1.0) > 0.002
+      ? `<span class="er-green" title="Equip load multiplier from Talismans, Armor, Fortunes, Tears, &amp; RAM">(&times;${cur.totalEwMult.toFixed(2)})</span>`
+      : "";
+    let deltaHtml = "";
+    if (hov) {
+      const dw = hov.curW - cur.curW;
+      const dStr = `${dw >= 0 ? "+" : ""}${dw.toFixed(1)}`;
+      const cls = dw > 0.05 ? "up" : (dw < -0.05 ? "dn" : "");
+      const tierChg = hov.tier !== cur.tier ? ` &rarr; ${hov.tier}` : "";
+      deltaHtml = `<span class="el-delta ${cls}">${dStr} wt${tierChg}</span>`;
+    }
+    const html = `
+      <div class="el-hdr">
+        <span><span class="muted">Equip Load</span> <b class="er-num">${cur.curW.toFixed(1)} / ${cur.maxLoad.toFixed(1)}</b> <span class="muted">(${cur.pct.toFixed(1)}%)</span> ${buffTag}</span>
+        <span class="el-tier-pill ${cur.tierCls}">${cur.tier} Roll</span>
+      </div>
+      <div class="el-bar-wrap" title="Ticks at 30% (Light) and 70% (Heavy)">
+        <div class="el-bar-fill ${cur.tierCls}" style="width:${fillPct.toFixed(1)}%"></div>
+        <span class="el-tick t30"></span>
+        <span class="el-tick t70"></span>
+      </div>
+      <div class="el-sub">
+        <span>${cur.breakpointText}</span>
+        ${deltaHtml}
+      </div>
+    `;
+    if ($("eqEquipLoadBox")) $("eqEquipLoadBox").innerHTML = html;
+    if ($("armoryEquipLoadBox")) $("armoryEquipLoadBox").innerHTML = html;
   }
 
   // Table Columns Definition & Header Builder (exact 2-row grouped tclark.io header + Extra Columns)
@@ -1373,8 +1677,16 @@
   let lastComputedList = [];
 
   function sortAndFlattenItems(computed) {
+    const cmpWithFav = (a, b) => {
+      if (state.pinFavTop) {
+        const fa = isWeaponFavorite(a.weapon.id) ? 1 : 0;
+        const fb = isWeaponFavorite(b.weapon.id) ? 1 : 0;
+        if (fa !== fb) return fb - fa;
+      }
+      return compareResults(a, b, state.sortCol, state.sortDesc);
+    };
     if (!state.groupByType) {
-      const sorted = computed.slice().sort((a, b) => compareResults(a, b, state.sortCol, state.sortDesc));
+      const sorted = computed.slice().sort(cmpWithFav);
       state.flatItems = sorted.map((res, idx) => ({ kind: "row", res, stripe: idx % 2 }));
       return;
     }
@@ -1388,7 +1700,7 @@
     const groupNames = Array.from(byType.keys()).sort((a, b) => a.localeCompare(b));
     const flat = [];
     for (const tName of groupNames) {
-      const arr = byType.get(tName).sort((a, b) => compareResults(a, b, state.sortCol, state.sortDesc));
+      const arr = byType.get(tName).sort(cmpWithFav);
       flat.push({ kind: "group", label: `${tName} (${arr.length})` });
       for (let i = 0; i < arr.length; i++) {
         flat.push({ kind: "row", res: arr[i], stripe: i % 2 });
@@ -1397,8 +1709,12 @@
     state.flatItems = flat;
   }
 
-  function matchesPreFilter(w, tokens) {
+  function matchesPreFilter(w, tokens, ownedWeaponsSet = null) {
     if (state.equippedOnly && !state.equippedMap.has(w.id)) return false;
+    if (state.ownedOnly) {
+      if (!ownedWeaponsSet || (!ownedWeaponsSet.has(w.baseId) && !ownedWeaponsSet.has(w.id))) return false;
+    }
+    if (state.favoritesOnly && !isWeaponFavorite(w.id)) return false;
     if (!state.selectedAffs.has(w.aff)) return false;
     if (!state.selectedWts.has(w.wt)) return false;
     if (state.buffableOnly && !w.buffable) return false;
@@ -1413,6 +1729,7 @@
 
   function recalculateAndRender() {
     recomputeActiveBuffs();
+    renderEquipLoadBars();
     state.calcSerial++;
     const t0 = performance.now();
     const tokens = state.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -1425,6 +1742,8 @@
     const buffs = state.activeBuffs;
     const effOnly = state.effectiveOnly;
     const bestOnly = state.bestAffinityOnly;
+    const ownedSets = state.ownedOnly ? getActiveProgressSets() : null;
+    const ownedWeps = ownedSets ? ownedSets.weapons : null;
 
     let computed = [];
     if (state.equippedOnly) {
@@ -1435,7 +1754,7 @@
       for (const s of slotList) {
         if (!s || !s.weaponId) continue;
         const w = state.byId.get(s.weaponId);
-        if (!w || !matchesPreFilter(w, tokens)) continue;
+        if (!w || !matchesPreFilter(w, tokens, ownedWeps)) continue;
         const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, s.level, ep, buffs);
         if (effOnly && !r.met) continue;
         computed.push(r);
@@ -1443,7 +1762,7 @@
       if (!slotList.some(Boolean) && state.equippedMap.size) {
         for (const [wid, eqLv] of state.equippedMap.entries()) {
           const w = state.byId.get(wid);
-          if (!w || !matchesPreFilter(w, tokens)) continue;
+          if (!w || !matchesPreFilter(w, tokens, ownedWeps)) continue;
           const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, eqLv, ep, buffs);
           if (effOnly && !r.met) continue;
           computed.push(r);
@@ -1456,7 +1775,7 @@
         : state.sortCol;
       for (let i = 0; i < weapons.length; i++) {
         const w = weapons[i];
-        if (!matchesPreFilter(w, tokens)) continue;
+        if (!matchesPreFilter(w, tokens, ownedWeps)) continue;
         const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, -1, ep, buffs);
         if (effOnly && !r.met) continue;
         const prev = bestByBase.get(w.baseId);
@@ -1474,7 +1793,7 @@
     } else {
       for (let i = 0; i < weapons.length; i++) {
         const w = weapons[i];
-        if (!matchesPreFilter(w, tokens)) continue;
+        if (!matchesPreFilter(w, tokens, ownedWeps)) continue;
         const r = computeWeapon(w, state.data, state.enemyPresets, stats, regLv, somberLv, twoHand, -1, ep, buffs);
         if (effOnly && !r.met) continue;
         computed.push(r);
@@ -1527,8 +1846,10 @@
 
     const showEff = state.enemyPreset !== "Raw AR (No Defense)";
     const arUnmetCls = r.met ? "" : " ar-unmet";
-    const star = isEq ? '<span class="eq-star" title="Equipped">&#9733;</span>' : "";
-    const dispName = `${star}${escHtml(w.name)} +${r.lv}`;
+    const isFav = isWeaponFavorite(w.id);
+    const favBtn = `<button type="button" class="fav-star-btn${isFav ? " on" : ""}" data-fav-wid="${w.id}" title="${isFav ? "Remove favorite" : "Favorite weapon"}">${isFav ? "&#9733;" : "&#9734;"}</button>`;
+    const star = isEq ? '<span class="eq-star" title="Equipped">E</span>' : "";
+    const dispName = `${favBtn}${star}${escHtml(w.name)} +${r.lv}`;
 
     let cells = `<td class="col-weapon" title="${escHtml(w.name)} +${r.lv} (${escHtml(w.aff)})">${dispName}</td>`;
     if (!state.showDamageSplit) {
@@ -1608,7 +1929,7 @@
     const start = Math.max(0, firstVis - OVERSCAN);
     const end = Math.min(total, firstVis + visCount + OVERSCAN);
 
-    const sliceKey = `${start}:${end}:${total}:${state.calcSerial}:${state.showDamageSplit}:${state.numericScaling}:${state.enemyPreset}:${state.colCrit}:${state.colDType}:${state.colBuff}:${state.colStam}:${state.colStance}:${state.inspectedRes ? state.inspectedRes.weapon.id : -1}`;
+    const sliceKey = `${start}:${end}:${total}:${state.calcSerial}:${state.showDamageSplit}:${state.numericScaling}:${state.enemyPreset}:${state.colCrit}:${state.colDType}:${state.colBuff}:${state.colStam}:${state.colStance}:${state.favoritesOnly}:${state.pinFavTop}:${(state.favoriteIds || []).length}:${state.inspectedRes ? state.inspectedRes.weapon.id : -1}`;
     if (!force && lastRenderSlice.key === sliceKey) return;
     if (!force && start >= lastRenderSlice.start + 2 && end <= lastRenderSlice.end - 2 && lastRenderSlice.total === total) {
       return;
@@ -1992,7 +2313,8 @@
       goal,
       state.enemyPreset,
       res.lv,
-      state.activeBuffs
+      state.activeBuffs,
+      getCustomEnemyPresetForBackend()
     );
     state.optResults = result.entries || [];
     const totalPts = STAT_KEYS.reduce((s, k) => s + state.stats[k], 0) + extra;
@@ -2270,7 +2592,12 @@
       effectiveOnly: state.effectiveOnly,
       bestAffinityOnly: state.bestAffinityOnly,
       buffableOnly: state.buffableOnly,
+      ownedOnly: state.ownedOnly,
+      favoritesOnly: state.favoritesOnly,
+      pinFavTop: state.pinFavTop,
+      favoriteIds: state.favoriteIds,
       enemyPreset: state.enemyPreset,
+      customBossPreset: state.customBossPreset,
       liveWatch: state.liveWatch,
       bannerDismissed: state.bannerDismissed,
       pipOpacity: state.pipOpacity,
@@ -2281,6 +2608,16 @@
       pipBossHud: state.pipBossHud,
       pipMapBossHud: state.pipMapBossHud,
       pipBossDesign: state.pipBossDesign,
+      pipBossResMode: state.pipBossResMode,
+      pipLocked: state.pipLocked,
+      pipAutoHide: state.pipAutoHide,
+      minimizeToTray: state.minimizeToTray,
+      pipSmartFade: state.pipSmartFade,
+      pipIdleOpacity: state.pipIdleOpacity,
+      pipCombatOpacity: state.pipCombatOpacity,
+      pipFadeMs: state.pipFadeMs,
+      pipFadeOnBoss: state.pipFadeOnBoss,
+      pipFadeOnBuffs: state.pipFadeOnBuffs,
       pipBuffHud: state.pipBuffHud,
       pipMapBuffHud: state.pipMapBuffHud,
       buffExpFlash: state.buffExpFlash,
@@ -2294,6 +2631,7 @@
       mapCats: mapState.cats,
       mapShowPlayer: mapState.showPlayer,
       mapShowPins: mapState.showPins,
+      mapAutoClearBeacon: mapState.autoClearBeacon,
       mapShowOffscreenArrow: mapState.showOffscreenArrow,
       mapShowLabels: mapState.showLabels,
       mapPipNearbyLabelsOnly: mapState.pipNearbyLabelsOnly,
@@ -2346,7 +2684,8 @@
       }
     });
 
-    $("topMatchEqBtn").addEventListener("click", () => matchEquippedLevels(true));
+    if ($("topMatchEqBtn")) $("topMatchEqBtn").addEventListener("click", () => matchEquippedLevels(true));
+    if ($("syncInvLvBtn")) $("syncInvLvBtn").addEventListener("click", () => syncInventoryUpgrades(true, true));
     $("maxUpgradeBtn").addEventListener("click", () => {
       state.regLv = 25;
       state.somberLv = 10;
@@ -2391,6 +2730,7 @@
         statusEl.className = "mod-source-status ok";
         statusEl.textContent = `Loaded ${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons from ${srcTxt}`;
       }
+      showErToast("Mod Data Loaded", `${Number(res.weaponCount || res.data.weapons.length).toLocaleString()} weapons from ${modLbl}`, "ok");
       syncModSourceUi(false);
       if (state.activeView === "equip") renderEquipView();
       else if (state.activeView === "pip") renderPipViewerWorkspace();
@@ -2560,6 +2900,11 @@
         renderFooterPrompts();
       });
     }
+    if ($("sysMinTrayRow")) {
+      $("sysMinTrayRow").addEventListener("click", () => {
+        setMinimizeToTray(!state.minimizeToTray, true);
+      });
+    }
     const switchSysSubTab = (tab) => {
       const next = ["hotkeys", "advanced"].includes(tab) ? tab : "mod";
       state.sysSubTab = next;
@@ -2711,10 +3056,83 @@
 
     $("enemySelect").addEventListener("change", (e) => {
       state.enemyPreset = e.target.value;
+      if ($("eqEnemySel") && $("eqEnemySel").value !== state.enemyPreset) {
+        $("eqEnemySel").value = state.enemyPreset;
+      }
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.set_enemy_preset_live) {
+        window.pywebview.api.set_enemy_preset_live(state.enemyPreset === "__LIVE_TARGET__");
+      }
       renderTableHeader();
       persistSettings();
       recalculateAndRender();
     });
+
+    const renderBossPickerList = () => {
+      const listEl = $("bossPickerList");
+      if (!listEl) return;
+      const allBosses = (state.data && Array.isArray(state.data.bossPresets)) ? state.data.bossPresets : [];
+      const q = ($("bossPickerInput")?.value || "").trim().toLowerCase();
+      const bossOnly = Boolean($("bossPickerBossOnlyCb")?.checked);
+      const matches = [];
+      for (const b of allBosses) {
+        if (bossOnly && !b.b) continue;
+        if (q && !b.n.toLowerCase().includes(q)) continue;
+        matches.push(b);
+        if (matches.length >= 80) break;
+      }
+      if (!matches.length) {
+        listEl.innerHTML = `<div class="muted" style="padding:16px;text-align:center;">No matching enemies found.</div>`;
+        return;
+      }
+      const negNames = ["Std", "Sla", "Str", "Pie", "Mag", "Fir", "Ltn", "Hol"];
+      listEl.innerHTML = matches.map((b, idx) => {
+        const negsHtml = (b.g || []).map((val, ni) => {
+          const cls = val < 0 ? "w" : (val >= 40 ? "r" : "");
+          return `<span class="boss-picker-neg-c ${cls}" title="${negNames[ni]} ${val}%">${val > 0 ? `+${val}` : val}</span>`;
+        }).join("");
+        return `<div class="boss-picker-item" data-bp-id="${b.id}">
+          <span class="boss-picker-name">${escHtml(b.n)}${b.b ? '<span class="boss-picker-badge">BOSS</span>' : ""}</span>
+          <span class="boss-picker-negs">${negsHtml}</span>
+        </div>`;
+      }).join("");
+      listEl.querySelectorAll(".boss-picker-item[data-bp-id]").forEach((row) => {
+        row.addEventListener("click", () => {
+          const nid = Number(row.dataset.bpId);
+          const found = allBosses.find((x) => x.id === nid);
+          if (found) {
+            state.customBossPreset = found;
+            state.enemyPreset = "__CUSTOM_BOSS__";
+            populateEnemySelect();
+            if ($("enemySelect")) $("enemySelect").value = "__CUSTOM_BOSS__";
+            if ($("eqEnemySel")) $("eqEnemySel").value = "__CUSTOM_BOSS__";
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.set_enemy_preset_live) {
+              window.pywebview.api.set_enemy_preset_live(false);
+            }
+            $("bossPickerPopover")?.classList.add("hidden");
+            renderTableHeader();
+            persistSettings();
+            recalculateAndRender();
+            showErToast("Enemy Defense Selected", found.n, "info");
+          }
+        });
+      });
+    };
+    const openBossPicker = () => {
+      const pop = $("bossPickerPopover");
+      if (!pop) return;
+      pop.classList.remove("hidden");
+      renderBossPickerList();
+      if ($("bossPickerInput")) {
+        $("bossPickerInput").focus();
+        $("bossPickerInput").select();
+      }
+    };
+    window.__openBossPicker = openBossPicker;
+    $("enemyBossPickerBtn")?.addEventListener("click", openBossPicker);
+    $("eqBossPickerBtn")?.addEventListener("click", openBossPicker);
+    $("bossPickerCloseBtn")?.addEventListener("click", () => $("bossPickerPopover")?.classList.add("hidden"));
+    $("bossPickerInput")?.addEventListener("input", renderBossPickerList);
+    $("bossPickerBossOnlyCb")?.addEventListener("change", renderBossPickerList);
 
     $("twoHandCb").addEventListener("change", (e) => {
       state.twoHand = e.target.checked;
@@ -2762,8 +3180,80 @@
     });
     $("equippedOnlyCb").addEventListener("change", (e) => {
       state.equippedOnly = e.target.checked;
+      syncQuickPresetChips();
       recalculateAndRender();
     });
+    if ($("ownedOnlyCb")) {
+      $("ownedOnlyCb").addEventListener("change", (e) => {
+        state.ownedOnly = e.target.checked;
+        syncQuickPresetChips();
+        persistSettings();
+        recalculateAndRender();
+      });
+    }
+    if ($("favoritesOnlyCb")) {
+      $("favoritesOnlyCb").addEventListener("change", (e) => {
+        state.favoritesOnly = e.target.checked;
+        syncQuickPresetChips();
+        persistSettings();
+        recalculateAndRender();
+      });
+    }
+    if ($("pinFavTopCb")) {
+      $("pinFavTopCb").addEventListener("change", (e) => {
+        state.pinFavTop = e.target.checked;
+        persistSettings();
+        sortAndFlattenItems(lastComputedList);
+        lastRenderSlice.key = "";
+        renderVirtualViewport(true);
+      });
+    }
+    function syncQuickPresetChips() {
+      const qBar = $("armoryQuickPresets");
+      if (!qBar) return;
+      qBar.querySelectorAll(".qp-chip").forEach((c) => {
+        const p = c.dataset.qp;
+        let act = false;
+        if (p === "all") act = !state.equippedOnly && !state.ownedOnly && !state.effectiveOnly && !state.favoritesOnly && !state.buffableOnly && !state.search;
+        else if (p === "equipped") act = state.equippedOnly;
+        else if (p === "owned_eff") act = state.ownedOnly && state.effectiveOnly;
+        else if (p === "favorites") act = state.favoritesOnly;
+        else if (p === "bleed") act = state.search.toLowerCase().trim() === "bleed";
+        else if (p === "buffable") act = state.buffableOnly;
+        c.classList.toggle("active", act);
+      });
+    }
+    if ($("armoryQuickPresets")) {
+      $("armoryQuickPresets").querySelectorAll(".qp-chip").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const p = btn.dataset.qp;
+          state.equippedOnly = false;
+          state.ownedOnly = false;
+          state.effectiveOnly = false;
+          state.favoritesOnly = false;
+          state.buffableOnly = false;
+          if (p === "bleed") {
+            state.search = "bleed";
+          } else if (state.search.toLowerCase().trim() === "bleed") {
+            state.search = "";
+          }
+          if (p === "equipped") state.equippedOnly = true;
+          else if (p === "owned_eff") { state.ownedOnly = true; state.effectiveOnly = true; }
+          else if (p === "favorites") state.favoritesOnly = true;
+          else if (p === "buffable") state.buffableOnly = true;
+          if ($("equippedOnlyCb")) $("equippedOnlyCb").checked = state.equippedOnly;
+          if ($("ownedOnlyCb")) $("ownedOnlyCb").checked = state.ownedOnly;
+          if ($("effectiveOnlyCb")) $("effectiveOnlyCb").checked = state.effectiveOnly;
+          if ($("favoritesOnlyCb")) $("favoritesOnlyCb").checked = state.favoritesOnly;
+          if ($("buffableOnlyCb")) $("buffableOnlyCb").checked = state.buffableOnly;
+          if ($("searchInput")) $("searchInput").value = state.search;
+          if ($("searchClearBtn")) $("searchClearBtn").classList.toggle("visible", Boolean(state.search));
+          syncQuickPresetChips();
+          persistSettings();
+          recalculateAndRender();
+        });
+      });
+    }
 
     let searchTimer = null;
     $("searchInput").addEventListener("input", (e) => {
@@ -2825,6 +3315,12 @@
       });
     }
     $("tableBody").addEventListener("click", (e) => {
+      const favBtn = e.target.closest(".fav-star-btn[data-fav-wid]");
+      if (favBtn) {
+        e.stopPropagation();
+        toggleFavoriteWeapon(Number(favBtn.dataset.favWid), true);
+        return;
+      }
       const tr = e.target.closest("tr.w-row");
       if (!tr) return;
       const wid = Number(tr.dataset.wid);
@@ -2847,6 +3343,22 @@
       renderInspectorDetails(item.res, true);
       openDrawer();
       renderVirtualViewport(true);
+    });
+    $("tableBody").addEventListener("mouseover", (e) => {
+      const tr = e.target.closest("tr.w-row");
+      if (!tr) return;
+      const wid = Number(tr.dataset.wid);
+      const tgt = state.equipPickSlot
+        ? { kind: state.equipPickSlot.kind === "lh" ? "lh" : "rh", idx: Number(state.equipPickSlot.index) || 0 }
+        : (state.equipSelectedSlot || { kind: "rh", idx: 0 });
+      state._hoverEquipOverride = { kind: tgt.kind, idx: tgt.idx, weaponId: wid };
+      renderEquipLoadBars();
+    });
+    $("tableBody").addEventListener("mouseleave", () => {
+      if (state._hoverEquipOverride) {
+        state._hoverEquipOverride = null;
+        renderEquipLoadBars();
+      }
     });
     $("tableBody").addEventListener("dblclick", (e) => {
       const tr = e.target.closest("tr.w-row");
@@ -2916,6 +3428,7 @@
       mapAutoDetect: () => mapState.autoDetect,
       mapShowPlayer: () => mapState.showPlayer,
       mapShowPins: () => mapState.showPins,
+      mapAutoClearBeacon: () => mapState.autoClearBeacon,
       mapShowOffscreenArrow: () => mapState.showOffscreenArrow,
       mapShowLabels: () => mapState.showLabels,
       mapPipNearbyLabelsOnly: () => mapState.pipNearbyLabelsOnly,
@@ -2968,6 +3481,8 @@
         b.classList.toggle("active", b.dataset.design === state.pipBossDesign);
       });
       if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+      if ($("setBossResModeSel")) $("setBossResModeSel").value = state.pipBossResMode;
+      if ($("sysMinTrayVal")) $("sysMinTrayVal").textContent = state.minimizeToTray ? "ON" : "OFF";
       updateHiddenLoopBuffsUi();
       renderLabelCatsGrid();
     };
@@ -3087,6 +3602,11 @@
         if ($("mapCatPins")) $("mapCatPins").checked = v;
         persistSettings();
         renderMapCanvas();
+      } else if (key === "mapAutoClearBeacon") {
+        mapState.autoClearBeacon = v;
+        if (!v) mapState.clearedBeaconKeys.clear();
+        persistSettings();
+        renderMapCanvas();
       } else if (key === "mapShowOffscreenArrow") {
         mapState.showOffscreenArrow = v;
         persistSettings();
@@ -3189,6 +3709,9 @@
         if ($("mapCatPlayer")) $("mapCatPlayer").checked = true;
         mapState.showPins = true;
         if ($("mapCatPins")) $("mapCatPins").checked = true;
+        mapState.autoClearBeacon = true;
+        mapState.clearedBeaconKeys.clear();
+        setPipBossResMode("compact", false);
         mapState.showOffscreenArrow = true;
         mapState.showLabels = true;
         mapState.pipNearbyLabelsOnly = true;
@@ -3233,6 +3756,11 @@
         persistSettings();
         updateMapSearchList();
         renderMapCanvas();
+      });
+    }
+    if ($("setBossResModeSel")) {
+      $("setBossResModeSel").addEventListener("change", (e) => {
+        setPipBossResMode(e.target.value, true);
       });
     }
 
@@ -3289,11 +3817,14 @@
       } else if (e.key === "Escape") {
         const sPop = $("pipSearchPopover");
         const opPop = $("pipOpacityPopover");
+        const bpPop = $("bossPickerPopover");
         const eqPicker = $("eqSlotPicker");
         const pinCard = $("mapPinCard");
         const colsMenu = $("extraColsMenu");
         const gearPnl = $("gearPanel");
-        if (eqPicker && !eqPicker.classList.contains("hidden")) {
+        if (bpPop && !bpPop.classList.contains("hidden")) {
+          bpPop.classList.add("hidden");
+        } else if (eqPicker && !eqPicker.classList.contains("hidden")) {
           eqPicker.classList.add("hidden");
           state.equipPickerTarget = null;
           if (state.activeView === "equip") renderEquipView();
@@ -3487,6 +4018,9 @@
       recalculateAndRender();
       pulseSavePill();
       const ch = getActiveSaveChar();
+      if (ch) {
+        showErToast("Save Synced", `${ch.name} (Lv.${ch.level})`, "ok");
+      }
       if (ch && ch.playerPos) maybeAutoSwitchPlayerLayer(ch.playerPos);
       if (isMapVisible()) {
         const cntEl = $("cnt-pins");
@@ -3521,7 +4055,11 @@
 
   function applyLiveRamCharacter(ch) {
     if (!ch || !ch.stats) return;
+    const wasAttached = state._prevRamAttached;
+    const prevName = state._prevRamCharName;
     state.ramLive = true;
+    state._prevRamAttached = true;
+    state._prevRamCharName = String(ch.name || "");
     state.ramChar = ch;
     state.savedSnapshot = {
       str: ch.stats.str,
@@ -3556,6 +4094,11 @@
     renderPipRamBadges();
     pulseSavePill();
     updateMapPlayerReadout();
+    if (!wasAttached) {
+      showErToast("Live Game Connected", `Attached to ${ch.name} (Lv.${ch.level})`, "ok");
+    } else if (prevName && prevName !== state._prevRamCharName) {
+      showErToast("Character Switched", `Now syncing ${ch.name} (Lv.${ch.level})`, "info");
+    }
   }
 
   function getActiveCharKey() {
@@ -3578,15 +4121,22 @@
     const useRamFlags = Boolean(state.ramLive && Array.isArray(mapState.ramFlags));
     const ow = useRamOwned ? mapState.ramOwned : (ch && ch.owned) || {};
     const fl = useRamFlags ? mapState.ramFlags : (ch && ch.setFlags) || [];
-    const key = `${state.ramLive}|${state.activeSlot}|${fl.length}|${(ow.weapons || []).length}|${(ow.armor || []).length}|${(ow.talismans || []).length}|${(ow.goods || []).length}`;
+    const wlObj = (ow && ow.weaponLevels && typeof ow.weaponLevels === "object") ? ow.weaponLevels : {};
+    const wlCount = Object.keys(wlObj).length;
+    const key = `${state.ramLive}|${state.activeSlot}|${fl.length}|${(ow.weapons || []).length}|${(ow.armor || []).length}|${(ow.talismans || []).length}|${(ow.goods || []).length}|${wlCount}`;
     if (key === _cachedSetsKey && _cachedSetsVal) return _cachedSetsVal;
     _cachedSetsKey = key;
+    const weaponLevels = new Map();
+    for (const [widStr, lv] of Object.entries(wlObj)) {
+      weaponLevels.set(Number(widStr), Number(lv) || 0);
+    }
     _cachedSetsVal = {
       weapons: new Set(ow.weapons || []),
       armor: new Set(ow.armor || []),
       talismans: new Set(ow.talismans || []),
       goods: new Set(ow.goods || []),
       flags: new Set(fl || []),
+      weaponLevels,
     };
     return _cachedSetsVal;
   }
@@ -3664,6 +4214,41 @@
     }
   }
 
+  function checkAutoClearBeaconOnArrival(pos) {
+    if (!mapState.autoClearBeacon || !pos || !mapState.data) return;
+    const lp = resolvePlayerToMapLayer(pos);
+    if (!lp || !lp.layer) return;
+    const cal = (mapState.data.layers && mapState.data.layers[lp.layer]) || { span: 10496.0 };
+    const span = cal.span || 10496.0;
+    const ARRIVAL_RADIUS_M = 15.0;
+
+    if (mapState.selectedPin && mapState.selectedPin.layer === lp.layer) {
+      const distM = Math.hypot(mapState.selectedPin.u - lp.u, mapState.selectedPin.v - lp.v) * span;
+      if (distM <= ARRIVAL_RADIUS_M) {
+        const arrivedName = mapState.selectedPin.name || "Target";
+        showMapPinCard(null);
+        showErToast("Arrived at Marker", `Cleared ${arrivedName}`, "ok");
+      }
+    }
+
+    const pins = getActiveWorldPins();
+    const liveKeys = new Set();
+    for (const pin of pins) {
+      if (pin.kind !== "beacon") continue;
+      const bKey = `${pin.slot || 0}_${Number(pin.u).toFixed(4)}_${Number(pin.v).toFixed(4)}`;
+      liveKeys.add(bKey);
+      if (pin.layer !== lp.layer || mapState.clearedBeaconKeys.has(bKey)) continue;
+      const distM = Math.hypot(pin.u - lp.u, pin.v - lp.v) * span;
+      if (distM <= ARRIVAL_RADIUS_M) {
+        mapState.clearedBeaconKeys.add(bKey);
+        showErToast("Arrived at Beacon", `Cleared blue beacon #${pin.slot || 1}`, "ok");
+      }
+    }
+    for (const k of Array.from(mapState.clearedBeaconKeys)) {
+      if (!liveKeys.has(k)) mapState.clearedBeaconKeys.delete(k);
+    }
+  }
+
   function applyLiveRamPos(pos) {
     if (!pos) return;
     const wasLive = state.ramLive;
@@ -3676,6 +4261,7 @@
     if (!wasLive && window.__syncModSourceUi) window.__syncModSourceUi(false);
     updateMapPlayerReadout();
     maybeAutoSwitchPlayerLayer(pos);
+    checkAutoClearBeaconOnArrival(pos);
     if (isMapVisible()) {
       if (mapState.followPlayer) {
         const lp = resolvePlayerToMapLayer(pos);
@@ -3698,7 +4284,10 @@
   function applyLiveRamStatus(st) {
     if (!st || st.attached) return;
     if (!state.ramLive) return;
+    const hadAttach = state._prevRamAttached;
     state.ramLive = false;
+    state._prevRamAttached = false;
+    state._prevRamCharName = "";
     state.ramChar = null;
     state.ramLiveArBuffs = null;
     state.ramPos = null;
@@ -3709,6 +4298,8 @@
     mapState.ramPins = null;
     mapState.ramOwned = null;
     mapState.ramFlags = null;
+    if (hadAttach) showErToast("Live Game Disconnected", "Reverted to save / manual stats", "warn");
+    scheduleSmartFadeUpdate();
     $("saveStatusPill").classList.remove("ram-live");
     const ch = state.characters.find((c) => c.slot === state.activeSlot) || state.characters[0];
     if (ch) {
@@ -3737,8 +4328,15 @@
   }
 
   function applyLiveRamBosses(bosses) {
+    const prevNpcId = (state.ramBosses && state.ramBosses[0] && state.ramBosses[0].npcParamId) || null;
     state.ramBosses = Array.isArray(bosses) ? bosses : [];
+    const nextNpcId = (state.ramBosses[0] && state.ramBosses[0].npcParamId) || null;
     renderPipBossBoxes();
+    scheduleSmartFadeUpdate();
+    if (state.enemyPreset === "__LIVE_TARGET__" && prevNpcId !== nextNpcId) {
+      populateEnemySelect();
+      recalculateAndRender();
+    }
   }
 
   function applyLiveRamBuffs(buffs, nowMs = null) {
@@ -3746,11 +4344,17 @@
     state.ramBuffsStamp = performance.now();
     ingestPlayerBuffLoopCheck(state.ramBuffs, typeof nowMs === "number" ? nowMs : state.ramBuffsStamp);
     renderPipBuffBoxes();
+    scheduleSmartFadeUpdate();
     if (state.activeView === "pip") renderPipViewerWorkspace();
   }
 
   function applyLiveRamArBuffs(arBuffs) {
+    const prevEw = state.ramLiveArBuffs ? state.ramLiveArBuffs.equipWeightMult : 1.0;
     state.ramLiveArBuffs = (arBuffs && typeof arBuffs === "object") ? arBuffs : null;
+    const nextEw = state.ramLiveArBuffs ? state.ramLiveArBuffs.equipWeightMult : 1.0;
+    if (Math.abs((prevEw || 1.0) - (nextEw || 1.0)) > 1e-4) {
+      renderEquipLoadBars();
+    }
     if (state.pipMode === "stats" || state.pipMode === "hud") renderPipStats();
     if (state.activeView === "pip") renderPipViewerWorkspace();
   }
@@ -3806,6 +4410,10 @@
         const res = await window.pywebview.api.set_overlay_hidden(state.overlayHidden);
         if (res && typeof res.hidden === "boolean") state.overlayHidden = res.hidden;
       }
+    } else if (action === "toggleBossResMode") {
+      const order = ["compact", "full", "off"];
+      const next = order[(order.indexOf(state.pipBossResMode) + 1) % order.length];
+      setPipBossResMode(next, true);
     }
   }
 
@@ -4471,6 +5079,10 @@
       const pins = getActiveWorldPins();
       for (const pin of pins) {
         if (pin.layer !== mapState.layer) continue;
+        if (pin.kind === "beacon" && mapState.autoClearBeacon) {
+          const bKey = `${pin.slot || 0}_${Number(pin.u).toFixed(4)}_${Number(pin.v).toFixed(4)}`;
+          if (mapState.clearedBeaconKeys.has(bKey)) continue;
+        }
         const sx = ox + pin.u * scale;
         const sy = oy + pin.v * scale;
         if (sx < -30 || sx > w + 30 || sy < -30 || sy > h + 30) continue;
@@ -4591,36 +5203,46 @@
       drawPinWithProx(special, sx, sy, iconPx + (isSearching ? 6 : 4), special === mapState.selectedPin, special === mapState.hoveredPin);
     }
 
-    // Live Player marker (official player cursor sprite + heading cone)
+    // Live Player marker (authentic Elden Ring player medallion + directional pointer)
     if (hasPlayerOnLayer) {
       const pScale = pipSearchProx ? computePipPlayerScale(nearestSearchDist) : 1.0;
       ctx.save();
       ctx.translate(playerX, playerY);
-      ctx.beginPath();
-      ctx.arc(0, 0, 12 * pScale, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(77, 240, 136, 0.03)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(77, 240, 136, 0.06)";
-      ctx.lineWidth = Math.max(0.8, 1.0 * pScale);
-      ctx.stroke();
 
+      // Subtle dark backdrop medallion ring so player icon reads crisply on parchment without bright neon glare
+      const haloGrad = ctx.createRadialGradient(0, 0, 2 * pScale, 0, 0, 17 * pScale);
+      haloGrad.addColorStop(0, "rgba(10, 8, 6, 0.56)");
+      haloGrad.addColorStop(0.7, "rgba(10, 8, 6, 0.32)");
+      haloGrad.addColorStop(1, "rgba(10, 8, 6, 0)");
+      ctx.beginPath();
+      ctx.arc(0, 0, 17 * pScale, 0, Math.PI * 2);
+      ctx.fillStyle = haloGrad;
+      ctx.fill();
+
+      const pBase = mapState.iconImgs.player;
+      const pArrow = mapState.iconImgs.player_arrow;
+      if (pBase && pBase.naturalWidth > 0) {
+        const br = pBase.naturalWidth / Math.max(1, pBase.naturalHeight);
+        const bh = 25 * pScale;
+        const bw = bh * br;
+        ctx.drawImage(pBase, -bw * 0.5, -bh * 0.5, bw, bh);
+      }
       ctx.rotate(lp.yaw + Math.PI);
-      const pSprite = mapState.iconImgs.player_arrow || mapState.iconImgs.player;
-      if (pSprite && pSprite.naturalWidth > 0) {
-        const pr = pSprite.naturalWidth / Math.max(1, pSprite.naturalHeight);
-        const ph = 28 * pScale;
+      if (pArrow && pArrow.naturalWidth > 0) {
+        const pr = pArrow.naturalWidth / Math.max(1, pArrow.naturalHeight);
+        const ph = 30 * pScale;
         const pw = Math.max(6, ph * pr);
-        ctx.drawImage(pSprite, -pw * 0.5, -ph * 0.5, pw, ph);
-      } else {
+        ctx.drawImage(pArrow, -pw * 0.5, -ph * 0.5, pw, ph);
+      } else if (!pBase || pBase.naturalWidth <= 0) {
         ctx.beginPath();
         ctx.moveTo(0, -10 * pScale);
         ctx.lineTo(7 * pScale, 8 * pScale);
         ctx.lineTo(0, 4 * pScale);
         ctx.lineTo(-7 * pScale, 8 * pScale);
         ctx.closePath();
-        ctx.fillStyle = "#4df088";
+        ctx.fillStyle = "#e6d29c";
         ctx.fill();
-        ctx.strokeStyle = "#0b120e";
+        ctx.strokeStyle = "#18130c";
         ctx.lineWidth = Math.max(1.0, 1.6 * pScale);
         ctx.stroke();
       }
@@ -4998,9 +5620,91 @@
     }).join("")}</div>`;
   }
 
+  const BOSS_RES_META = [
+    ["Std", "ap_std", "Standard"],
+    ["Sla", "ap_slash", "Slash"],
+    ["Str", "ap_strike", "Strike"],
+    ["Pie", "ap_pierce", "Pierce"],
+    ["Mag", "ap_mag", "Magic"],
+    ["Fir", "ap_fire", "Fire"],
+    ["Ltn", "ap_ltng", "Lightning"],
+    ["Hol", "ap_holy", "Holy"],
+  ];
+
+  function buildBossResistanceStripHtml(negArr) {
+    const mode = state.pipBossResMode || "compact";
+    if (mode === "off" || !Array.isArray(negArr) || negArr.length < 8) return "";
+    const assets = getErMenuAssets();
+    const negs = negArr.slice(0, 8).map((v) => Math.round(Number(v) || 0));
+    let indices = [];
+    const weakSet = new Set();
+    const bestSet = new Set();
+
+    for (let i = 0; i < 8; i++) {
+      if (negs[i] < 0) weakSet.add(i);
+    }
+    if (weakSet.size === 0) {
+      const minVal = Math.min(...negs);
+      for (let i = 0; i < 8 && bestSet.size < 3; i++) {
+        if (negs[i] === minVal) bestSet.add(i);
+      }
+    }
+
+    if (mode === "full") {
+      indices = [0, 1, 2, 3, 4, 5, 6, 7];
+    } else {
+      for (let i = 0; i < 8; i++) {
+        if (weakSet.has(i) || bestSet.has(i) || negs[i] >= 40) {
+          indices.push(i);
+        }
+      }
+    }
+    if (!indices.length) return "";
+
+    return `<div class="er-res-strip">${indices.map((i) => {
+      const v = negs[i];
+      const [shortLbl, icKey, fullLbl] = BOSS_RES_META[i];
+      const icSrc = assets[icKey] || "";
+      let cls = "";
+      if (weakSet.has(i) || v < 0) cls = "res-weak";
+      else if (bestSet.has(i)) cls = "res-best";
+      else if (v >= 40) cls = "res-resist";
+      else if (v >= 20) cls = "res-mid";
+      const valTxt = `${v > 0 ? "" : ""}${v}%`;
+      return `<span class="er-res-pill ${cls}" title="${escHtml(fullLbl)} Negation: ${valTxt}">${icSrc ? `<img src="${icSrc}" alt="" />` : `<span>${shortLbl}</span>`}<span>${valTxt}</span></span>`;
+    }).join("")}</div>`;
+  }
+
+  async function inspectBossInArmory(bossObj) {
+    if (!bossObj) return;
+    const def = Array.isArray(bossObj.def) && bossObj.def.length >= 5 ? bossObj.def : [125, 125, 125, 125, 125];
+    const neg = Array.isArray(bossObj.neg) && bossObj.neg.length >= 8 ? bossObj.neg : [0, 0, 0, 0, 0, 0, 0, 0];
+    state.customBossPreset = {
+      id: bossObj.npcParamId || bossObj.id || 0,
+      n: bossObj.name || "Target Enemy",
+      d: def,
+      g: neg,
+    };
+    state.enemyPreset = "__CUSTOM_BOSS__";
+    populateEnemySelect();
+    if ($("enemySelect")) $("enemySelect").value = "__CUSTOM_BOSS__";
+    if ($("eqEnemySel")) $("eqEnemySel").value = "__CUSTOM_BOSS__";
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_enemy_preset_live) {
+      window.pywebview.api.set_enemy_preset_live(false);
+    }
+    if (state.pipMode !== "off") {
+      await setPipMode("off");
+    }
+    await switchMainView("calc");
+    renderTableHeader();
+    persistSettings();
+    recalculateAndRender();
+    showErToast("Benchmarking Enemy", `${state.customBossPreset.n}`, "info");
+  }
+
   function buildBossCardsHtml(bosses, compact) {
     const design = state.pipBossDesign || "1";
-    return bosses.map((b) => {
+    return bosses.map((b, bIdx) => {
       const hp = Math.max(0, Math.round(b.hp || 0));
       const maxHp = Math.max(1, Math.round(b.maxHp || 1));
       const hpPct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
@@ -5021,8 +5725,10 @@
           </div>`
         : "";
       const stHtml = state.enemyShowStatuses ? renderStatusesForDesign(design, b.statuses) : "";
+      const resStripHtml = buildBossResistanceStripHtml(b.neg);
+      const canInspect = Boolean(Array.isArray(b.neg) && b.neg.length >= 8);
       return `<div class="pip-boss-card${compact ? " compact" : ""}">
-        <div class="er-boss-name">${escHtml(b.name || "Boss")}</div>
+        <div class="er-boss-name"${canInspect ? ` data-boss-inspect-idx="${bIdx}" title="Click to inspect &amp; benchmark ${escHtml(b.name || "Boss")} in Armory"` : ""}>${escHtml(b.name || "Boss")}</div>
         <div class="er-bars-col">
           <div class="er-cap-row">
             <span class="er-cap left"></span>
@@ -5037,6 +5743,7 @@
           </div>
           ${stRow}
         </div>
+        ${resStripHtml}
         ${stHtml}
       </div>`;
     }).join("");
@@ -5214,7 +5921,7 @@
     const iconKey = icEntry ? icEntry[0] : "fex_54";
     const title = (spEntry && spEntry[0]) || (icEntry && icEntry[1]) || `Effect #${b.id}`;
     const desc = (spEntry && spEntry[1]) || (icEntry && icEntry[2]) || "Temporary active status effect.";
-    const debuff = Boolean((spEntry && spEntry[2]) || (icEntry && icEntry[3]));
+    const debuff = spEntry ? Boolean(spEntry[2]) : Boolean(icEntry && icEntry[3]);
     const b64 = icons[iconKey] || icons.fex_54 || "";
     const src = b64 ? `data:image/png;base64,${b64}` : "";
     return { iconKey, title, desc, debuff, src };
@@ -5564,6 +6271,16 @@
     return `<div class="pip-grip-tile ${is2h ? "two-h" : "one-h"}" title="${tip}">${ic ? `<img src="${ic}" alt="${cornerLbl}" />` : ""}${showCornerTag ? `<span class="pip-grip-corner">${cornerLbl}</span>` : ""}</div>`;
   }
 
+  function getLiveRamSlotAr(hand, idx) {
+    if (!state.ramLive) return 0;
+    const sa = (state.ramLiveArBuffs && state.ramLiveArBuffs.slotAr)
+      || (state.ramChar && state.ramChar.slotAr)
+      || null;
+    if (!sa || !Array.isArray(sa[hand])) return 0;
+    const v = Number(sa[hand][idx]);
+    return (Number.isFinite(v) && v > 0 && v <= 99999) ? Math.round(v) : 0;
+  }
+
   function buildPipWeaponRows(maxRows, showEff, gripPlacement = "weapon") {
     const armStyle = typeof state.armStyle === "number" ? state.armStyle : 1;
     const rhSlots = (state.equippedSlots && state.equippedSlots.rh) || [];
@@ -5604,6 +6321,12 @@
           state.regLv, state.somberLv, slotTwoHand, s.level,
           state.enemyPreset, makeSlotBuffs(hand, isActive)
         );
+        const ramAr = getLiveRamSlotAr(hand, idx);
+        if (ramAr > 0) {
+          const prevTot = Number(res.total || 0);
+          res.total = ramAr;
+          res.eff = showEff ? (prevTot > 0 ? res.eff * (ramAr / prevTot) : ramAr) : ramAr;
+        }
         entries.push({ res, heldNow, slotTwoHand, isActive, handLabel: hand === "rh" ? "RH" : "LH" });
       }
     }
@@ -5797,6 +6520,102 @@
     return setPipBossDesign(next, persist);
   }
 
+  function setPipBossResMode(mode, persist = true) {
+    const m = ["compact", "full", "off"].includes(String(mode)) ? String(mode) : "compact";
+    state.pipBossResMode = m;
+    if ($("pvBossResModeSel")) $("pvBossResModeSel").value = m;
+    if ($("setBossResModeSel")) $("setBossResModeSel").value = m;
+    renderPipBossBoxes();
+    if (state.activeView === "pip") renderPipViewerWorkspace();
+    if (persist) persistSettings();
+    return m;
+  }
+
+  function setPipLocked(locked, persist = true) {
+    state.pipLocked = Boolean(locked);
+    document.body.classList.toggle("pip-locked", state.pipLocked);
+    if ($("pvPipLockCb")) $("pvPipLockCb").checked = state.pipLocked;
+    if ($("pipLockBtn")) {
+      $("pipLockBtn").classList.toggle("active", state.pipLocked);
+      $("pipLockBtn").title = state.pipLocked ? "PiP Locked (Position & Size)" : "Lock PiP Position & Size";
+    }
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_locked) {
+      window.pywebview.api.set_pip_locked(state.pipLocked);
+    }
+    if (persist) persistSettings();
+    return state.pipLocked;
+  }
+
+  function setPipAutoHide(enabled, persist = true) {
+    state.pipAutoHide = Boolean(enabled);
+    if ($("pvAutoHideCb")) $("pvAutoHideCb").checked = state.pipAutoHide;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_auto_hide) {
+      window.pywebview.api.set_pip_auto_hide(state.pipAutoHide);
+    }
+    if (persist) persistSettings();
+    return state.pipAutoHide;
+  }
+
+  function setMinimizeToTray(enabled, persist = true) {
+    state.minimizeToTray = Boolean(enabled);
+    if ($("sysMinTrayVal")) $("sysMinTrayVal").textContent = state.minimizeToTray ? "ON" : "OFF";
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.set_minimize_to_tray) {
+      window.pywebview.api.set_minimize_to_tray(state.minimizeToTray);
+    }
+    if (persist) persistSettings();
+    return state.minimizeToTray;
+  }
+
+  function getSmartFadeTargetOpacity() {
+    if (!state.pipSmartFade) return state.pipOpacity || 1.0;
+    if (state._pipMouseHover) return Math.max(0.10, Math.min(1.0, state.pipCombatOpacity || 1.0));
+    const hasBoss = Boolean(state.pipFadeOnBoss && state.ramLive && Array.isArray(state.ramBosses) && state.ramBosses.length > 0);
+    const hasBuff = Boolean(state.pipFadeOnBuffs && state.ramLive && getVisiblePlayerBuffs().length > 0);
+    const active = hasBoss || hasBuff;
+    return active
+      ? Math.max(0.10, Math.min(1.0, state.pipCombatOpacity || 1.0))
+      : Math.max(0.10, Math.min(1.0, state.pipIdleOpacity || 0.45));
+  }
+
+  function scheduleSmartFadeUpdate() {
+    if (state.pipMode === "off" || !state.pipSmartFade || state._selfTest) {
+      if (state._fadeRafId) {
+        cancelAnimationFrame(state._fadeRafId);
+        state._fadeRafId = 0;
+      }
+      return;
+    }
+    if (state._fadeRafId) return;
+    state._fadeLastTs = performance.now();
+    const tick = (now) => {
+      state._fadeRafId = 0;
+      if (state.pipMode === "off" || !state.pipSmartFade) return;
+      const target = getSmartFadeTargetOpacity();
+      const cur = Number.isFinite(state._effectiveOpacity) ? state._effectiveOpacity : (state.pipOpacity || 1.0);
+      const dt = Math.max(0, Math.min(100, now - (state._fadeLastTs || now)));
+      state._fadeLastTs = now;
+      const fadeMs = Math.max(100, Math.min(1500, Number(state.pipFadeMs) || 400));
+      const maxStep = dt / fadeMs;
+      const diff = target - cur;
+      let next = target;
+      if (Math.abs(diff) > 0.006) {
+        const step = Math.sign(diff) * Math.min(Math.abs(diff), Math.max(0.015, maxStep));
+        next = cur + step;
+      }
+      state._effectiveOpacity = next;
+      if ((now - (state._fadeLastPushTs || 0)) >= 28 || Math.abs(target - next) < 0.006) {
+        state._fadeLastPushTs = now;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_opacity) {
+          window.pywebview.api.set_pip_opacity(next);
+        }
+      }
+      if (Math.abs(target - next) >= 0.006) {
+        state._fadeRafId = requestAnimationFrame(tick);
+      }
+    };
+    state._fadeRafId = requestAnimationFrame(tick);
+  }
+
   function syncPipBarHeightVar() {
     const bar = $("pipBar");
     if (!bar) return;
@@ -5847,8 +6666,10 @@
     }
 
     if (window.pywebview && window.pywebview.api && window.pywebview.api.set_pip_mode) {
-      await window.pywebview.api.set_pip_mode(next, state.pipOpacity, state.pipCorner);
+      await window.pywebview.api.set_pip_mode(next, state.pipSmartFade ? getSmartFadeTargetOpacity() : state.pipOpacity, state.pipCorner);
     }
+    state._effectiveOpacity = state.pipSmartFade ? getSmartFadeTargetOpacity() : state.pipOpacity;
+    scheduleSmartFadeUpdate();
     state._pipModeSwitching = false;
     if (next !== "off") {
       syncPipBarHeightVar();
@@ -6265,6 +7086,7 @@
     ) {
       picker.classList.add("hidden");
       state.equipPickerTarget = null;
+      state._hoverEquipOverride = null;
       renderEquipView();
       return;
     }
@@ -6275,8 +7097,17 @@
       : $(`tal${slot}Sel`);
     if (!srcSel) return;
     title.textContent = type === "armor" ? `Select ${slotNames[slot]} Armor` : `Select Talisman Slot ${slot + 1}`;
-    sel.innerHTML = srcSel.innerHTML;
-    sel.value = srcSel.value;
+    const ownedOnly = Boolean($("eqPickerOwnedCb") && $("eqPickerOwnedCb").checked);
+    const sets = ownedOnly ? getActiveProgressSets() : null;
+    const ownSet = sets ? (type === "armor" ? sets.armor : sets.talismans) : null;
+    const curVal = srcSel.value;
+    if (ownedOnly && ownSet) {
+      const opts = Array.from(srcSel.options).filter((o) => !o.value || o.value === curVal || ownSet.has(Number(o.value)));
+      sel.innerHTML = opts.map((o) => `<option value="${escHtml(o.value)}">${escHtml(o.textContent)}</option>`).join("");
+    } else {
+      sel.innerHTML = srcSel.innerHTML;
+    }
+    sel.value = curVal;
     picker.classList.remove("hidden");
     renderEquipView();
     sel.focus();
@@ -6647,6 +7478,7 @@
         <div><span class="muted">MND/END</span> <b class="er-num">${mnd}/${end}</b></div>
       `;
     }
+    renderEquipLoadBars();
     if ($("eqMemTiles")) {
       const spellDb = (state.data && state.data.spells) || {};
       const sList = Array.isArray(state.spellIds) ? state.spellIds : [];
@@ -6763,12 +7595,22 @@
     // Right column Equipped Attack Power clickable list
     if ($("eqAtkSummary")) {
       const slotItems = [];
+      const noManualBuffs = !state.greaseId && !state.condTalismans && !Object.values(state.buffToggles || {}).some(Boolean);
+      const showEff = state.enemyPreset !== "Raw AR (No Defense)";
       for (const [kind, prefix, arr] of [["rh", "R", rhSlots], ["lh", "L", lhSlots]]) {
         for (let i = 0; i < 3; i++) {
           const ent = arr[i];
           const w = ent ? state.byId.get(ent.weaponId) : null;
           if (!w) continue;
           const r = computeWeapon(w, state.data, state.enemyPresets, state.stats, state.regLv, state.somberLv, state.twoHand, ent.level, state.enemyPreset, state.activeBuffs);
+          if (noManualBuffs) {
+            const ramAr = getLiveRamSlotAr(kind, i);
+            if (ramAr > 0) {
+              const prevTot = Number(r.total || 0);
+              r.total = ramAr;
+              r.eff = showEff ? (prevTot > 0 ? r.eff * (ramAr / prevTot) : ramAr) : ramAr;
+            }
+          }
           slotItems.push({ kind, idx: i, tag: `${prefix}${i + 1}`, res: r });
         }
       }
@@ -6819,6 +7661,7 @@
     };
     mirrorClick("eqReloadBtn", "sideReloadBtn");
     mirrorClick("eqBrowseBtn", "sideBrowseBtn");
+    if ($("eqSyncInvLvBtn")) $("eqSyncInvLvBtn").addEventListener("click", () => syncInventoryUpgrades(true, true));
     mirrorClick("eqMatchLvBtn", "topMatchEqBtn");
     mirrorClick("eqMaxLvBtn", "maxUpgradeBtn");
     mirrorClick("eqRevertBtn", "revertStatsBtn");
@@ -6841,7 +7684,32 @@
       $("eqPickerCloseBtn").addEventListener("click", () => {
         $("eqSlotPicker").classList.add("hidden");
         state.equipPickerTarget = null;
+        state._hoverEquipOverride = null;
         renderEquipView();
+      });
+    }
+    if ($("eqPickerOwnedCb")) {
+      $("eqPickerOwnedCb").addEventListener("change", () => {
+        const tgt = state.equipPickerTarget;
+        if (!tgt) return;
+        const t = tgt.type;
+        const s = tgt.slot;
+        state.equipPickerTarget = null;
+        openEquipSlotPicker(t, s);
+      });
+    }
+    if ($("eqPickerMapBtn")) {
+      $("eqPickerMapBtn").addEventListener("click", () => {
+        const tgt = state.equipPickerTarget;
+        if (!tgt) return;
+        const val = Number($("eqPickerSel")?.value || 0);
+        if (!val) {
+          showErToast("Select Item First", "Pick an armor piece or talisman to locate on map.", "warn");
+          return;
+        }
+        const dict = tgt.type === "armor" ? (state.data && state.data.armors) : (state.data && state.data.talismans);
+        const item = dict && dict[String(val)];
+        if (item) locateItemOnMap(tgt.type, { id: val, name: item.n });
       });
     }
     if ($("eqPickerSel")) {
@@ -6928,6 +7796,7 @@
   const PV_SAMPLE_BOSS = [
     {
       slot: 0,
+      npcParamId: 25000800,
       name: "Crucible Knight Ordovis",
       hp: 2840,
       maxHp: 4412,
@@ -6936,6 +7805,8 @@
       stanceReset: 3.8,
       stanceBroken: false,
       stanceKind: "stance",
+      def: [115, 139, 139, 139, 139],
+      neg: [35, 35, 35, 35, 40, 20, -10, 40],
       statuses: [
         { key: "bleed", label: "Bleed", cur: 135, max: 245 },
         { key: "frost", label: "Frost", cur: 85, max: 260 },
@@ -7062,6 +7933,21 @@
     if ($("pvMapBuffCb")) $("pvMapBuffCb").checked = Boolean(state.pipMapBuffHud);
     if ($("pvFollowCb")) $("pvFollowCb").checked = Boolean(mapState.followPlayer);
     if ($("pvDesignSel")) $("pvDesignSel").value = String(state.pipBossDesign || "1");
+    if ($("pvBossResModeSel")) $("pvBossResModeSel").value = state.pipBossResMode || "compact";
+    if ($("pvPipLockCb")) $("pvPipLockCb").checked = Boolean(state.pipLocked);
+    if ($("pvAutoHideCb")) $("pvAutoHideCb").checked = Boolean(state.pipAutoHide);
+    if ($("pvSmartFadeCb")) $("pvSmartFadeCb").checked = Boolean(state.pipSmartFade);
+    if ($("pvSmartFadeGroup")) $("pvSmartFadeGroup").classList.toggle("hidden", !state.pipSmartFade);
+    const idlePct = Math.round((state.pipIdleOpacity ?? 0.45) * 100);
+    const combPct = Math.round((state.pipCombatOpacity ?? 1.0) * 100);
+    if ($("pvIdleOpRng")) $("pvIdleOpRng").value = String(idlePct);
+    if ($("pvIdleOpNum") && document.activeElement !== $("pvIdleOpNum")) $("pvIdleOpNum").value = String(idlePct);
+    if ($("pvCombatOpRng")) $("pvCombatOpRng").value = String(combPct);
+    if ($("pvCombatOpNum") && document.activeElement !== $("pvCombatOpNum")) $("pvCombatOpNum").value = String(combPct);
+    if ($("pvFadeMsRng")) $("pvFadeMsRng").value = String(state.pipFadeMs || 400);
+    if ($("pvFadeMsNum") && document.activeElement !== $("pvFadeMsNum")) $("pvFadeMsNum").value = String(state.pipFadeMs || 400);
+    if ($("pvFadeTrigBossCb")) $("pvFadeTrigBossCb").checked = Boolean(state.pipFadeOnBoss);
+    if ($("pvFadeTrigBuffCb")) $("pvFadeTrigBuffCb").checked = Boolean(state.pipFadeOnBuffs);
     updateHiddenLoopBuffsUi();
     const opPct = Math.round(op * 100);
     if ($("pvOpRng")) $("pvOpRng").value = String(opPct);
@@ -7112,7 +7998,70 @@
     $("pvHideLoopBuffsCb")?.addEventListener("change", (e) => setBuffHideLooping(e.target.checked, true));
     $("pvResetLoopBuffsBtn")?.addEventListener("click", () => resetHiddenLoopBuffs(true));
     $("pvDesignSel")?.addEventListener("change", (e) => { setPipBossDesign(e.target.value, true); renderPipViewerWorkspace(); });
+    $("pvBossResModeSel")?.addEventListener("change", (e) => setPipBossResMode(e.target.value, true));
+    $("pvPipLockCb")?.addEventListener("change", (e) => setPipLocked(e.target.checked, true));
+    $("pvAutoHideCb")?.addEventListener("change", (e) => setPipAutoHide(e.target.checked, true));
+    $("pvSmartFadeCb")?.addEventListener("change", (e) => {
+      state.pipSmartFade = e.target.checked;
+      $("pvSmartFadeGroup")?.classList.toggle("hidden", !state.pipSmartFade);
+      persistSettings();
+      scheduleSmartFadeUpdate();
+    });
+    const bindFadePct = (rngId, numId, stateKey) => {
+      $(rngId)?.addEventListener("input", (e) => {
+        const pct = Math.max(10, Math.min(100, Math.round(Number(e.target.value) || 45)));
+        state[stateKey] = pct / 100;
+        if ($(numId)) $(numId).value = String(pct);
+        persistSettings();
+        scheduleSmartFadeUpdate();
+      });
+      $(numId)?.addEventListener("change", (e) => {
+        const pct = Math.max(10, Math.min(100, Math.round(Number(e.target.value) || 45)));
+        state[stateKey] = pct / 100;
+        if ($(rngId)) $(rngId).value = String(pct);
+        $(numId).value = String(pct);
+        persistSettings();
+        scheduleSmartFadeUpdate();
+      });
+    };
+    bindFadePct("pvIdleOpRng", "pvIdleOpNum", "pipIdleOpacity");
+    bindFadePct("pvCombatOpRng", "pvCombatOpNum", "pipCombatOpacity");
+    $("pvFadeMsRng")?.addEventListener("input", (e) => {
+      state.pipFadeMs = Math.max(100, Math.min(1500, Math.round(Number(e.target.value) || 400)));
+      if ($("pvFadeMsNum")) $("pvFadeMsNum").value = String(state.pipFadeMs);
+      persistSettings();
+    });
+    $("pvFadeMsNum")?.addEventListener("change", (e) => {
+      state.pipFadeMs = Math.max(100, Math.min(1500, Math.round(Number(e.target.value) || 400)));
+      if ($("pvFadeMsRng")) $("pvFadeMsRng").value = String(state.pipFadeMs);
+      $("pvFadeMsNum").value = String(state.pipFadeMs);
+      persistSettings();
+    });
+    $("pvFadeTrigBossCb")?.addEventListener("change", (e) => {
+      state.pipFadeOnBoss = e.target.checked;
+      persistSettings();
+      scheduleSmartFadeUpdate();
+    });
+    $("pvFadeTrigBuffCb")?.addEventListener("change", (e) => {
+      state.pipFadeOnBuffs = e.target.checked;
+      persistSettings();
+      scheduleSmartFadeUpdate();
+    });
     $("pvOpRng")?.addEventListener("input", (e) => { applyPipOpacity(Number(e.target.value), true); renderPipViewerWorkspace(); });
+
+    // Delegate click on Boss HUD enemy name -> jump to Armory defense benchmark
+    const wireBossNameClick = (hostId, getArr) => {
+      $(hostId)?.addEventListener("click", (e) => {
+        const nmEl = e.target.closest(".er-boss-name[data-boss-inspect-idx]");
+        if (!nmEl) return;
+        const arr = getArr();
+        const b = arr[Number(nmEl.dataset.bossInspectIdx)];
+        if (b) inspectBossInArmory(b);
+      });
+    };
+    wireBossNameClick("pipBossBox", () => state.ramBosses || []);
+    wireBossNameClick("pipMapBossBox", () => state.ramBosses || []);
+    wireBossNameClick("pvEnemyBox", () => ((state.ramLive && Array.isArray(state.ramBosses) && state.ramBosses.length) ? state.ramBosses : PV_SAMPLE_BOSS));
   }
 
   async function switchMainView(view) {
@@ -7185,27 +8134,64 @@
     }
   }
 
-  async function locateWeaponOnMap(weapon) {
+  async function locateItemOnMap(cat, itemObj) {
     await switchMainView("map");
-    if (!mapState.loaded || !mapState.data) return;
-    if (!mapState.cats.weapon) {
-      mapState.cats.weapon = true;
-      const cb = document.querySelector(".map-cat-cb[data-cat='weapon']");
+    if (!mapState.loaded || !mapState.data) return null;
+    if (mapState.cats[cat] === false) {
+      mapState.cats[cat] = true;
+      const cb = document.querySelector(`.map-cat-cb[data-cat='${cat}']`);
       if (cb) cb.checked = true;
     }
-    const baseLower = (weapon.baseName || weapon.name || "").toLowerCase();
-    const hit =
-      mapState.data.markers.find((m) => m.cat === "weapon" && m.calcId === weapon.id) ||
-      mapState.data.markers.find((m) => m.cat === "weapon" && (m.baseName || "").toLowerCase() === baseLower) ||
-      mapState.data.markers.find((m) => m.cat === "weapon" && m.name.toLowerCase().includes(baseLower));
-    mapState.search = weapon.baseName || "";
+    const baseLower = String((itemObj && (itemObj.baseName || itemObj.name)) || "").toLowerCase();
+    const itemId = itemObj ? Number(itemObj.id || 0) : 0;
+    const markers = mapState.data.markers || [];
+    let cands = [];
+    if (cat === "weapon" && itemId) {
+      cands = markers.filter((m) => m.cat === "weapon" && (m.calcId === itemId || m.itemId === itemId));
+    } else if (itemId) {
+      cands = markers.filter((m) => m.cat === cat && (m.itemId === itemId || (Array.isArray(m.itemIds) && m.itemIds.includes(itemId))));
+    }
+    if (!cands.length && baseLower) {
+      cands = markers.filter((m) => m.cat === cat && String(m.baseName || m.name || "").toLowerCase() === baseLower);
+    }
+    if (!cands.length && baseLower) {
+      cands = markers.filter((m) => m.cat === cat && String(m.name || "").toLowerCase().includes(baseLower));
+    }
+
+    const lp = getActiveLivePlayerPos();
+    let hit = cands[0] || null;
+    let bestDistM = null;
+    if (cands.length > 0 && lp && lp.layer) {
+      const calMap = mapState.data.layers || {};
+      let bestScore = Infinity;
+      for (const m of cands) {
+        const span = (calMap[m.layer] && calMap[m.layer].span) || 10496.0;
+        const distM = Math.hypot(m.u - lp.u, m.v - lp.v) * span;
+        const score = (m.layer === lp.layer ? 0 : 1e8) + distM;
+        if (score < bestScore) {
+          bestScore = score;
+          hit = m;
+          bestDistM = m.layer === lp.layer ? distM : null;
+        }
+      }
+    }
+
+    mapState.search = (itemObj && (itemObj.baseName || itemObj.name)) || "";
     $("mapSearchInput").value = mapState.search;
     updateMapSearchList();
     if (hit) {
       await focusMarkerOnMap(hit, 4.5);
+      const distTag = bestDistM !== null ? ` (${Math.round(bestDistM)}m away)` : "";
+      showErToast("Located Closest Match", `${hit.name}${distTag}`, "info");
     } else {
       renderMapCanvas();
+      showErToast("Not Found on Map", `No map marker matched ${mapState.search}`, "warn");
     }
+    return hit;
+  }
+
+  async function locateWeaponOnMap(weapon) {
+    return locateItemOnMap("weapon", weapon);
   }
 
   function openWeaponInCalculator(calcId, fallbackSearch) {
@@ -7257,6 +8243,8 @@
       $("mapCompletedModeSel").addEventListener("change", (e) => {
         mapState.completedMode = e.target.value;
         if ($("setCompletedModeSel")) $("setCompletedModeSel").value = mapState.completedMode;
+      if ($("setBossResModeSel")) $("setBossResModeSel").value = state.pipBossResMode;
+      if ($("sysMinTrayVal")) $("sysMinTrayVal").textContent = state.minimizeToTray ? "ON" : "OFF";
         persistSettings();
         updateMapSearchList();
         renderMapCanvas();
@@ -7413,6 +8401,7 @@
       persistSettings();
       recalculateAndRender();
     });
+    $("pipLockBtn")?.addEventListener("click", () => setPipLocked(!state.pipLocked, true));
     $("pipOpacityBtn").addEventListener("click", () => {
       setPipOpacityPopover(false);
       const curPct = Math.round(state.pipOpacity * 100);
@@ -7462,7 +8451,9 @@
 
     const setPipHover = (on) => {
       if (state.pipMode === "off") return;
+      state._pipMouseHover = Boolean(on);
       document.body.classList.toggle("pip-hover", Boolean(on));
+      scheduleSmartFadeUpdate();
     };
     document.documentElement.addEventListener("mouseenter", () => setPipHover(true));
     document.documentElement.addEventListener("mousemove", () => setPipHover(true));
@@ -7677,8 +8668,21 @@
     if (typeof cfg.effectiveOnly === "boolean") state.effectiveOnly = cfg.effectiveOnly;
     if (typeof cfg.bestAffinityOnly === "boolean") state.bestAffinityOnly = cfg.bestAffinityOnly;
     if (typeof cfg.buffableOnly === "boolean") state.buffableOnly = cfg.buffableOnly;
+    if (typeof cfg.ownedOnly === "boolean") state.ownedOnly = cfg.ownedOnly;
+    if (typeof cfg.favoritesOnly === "boolean") state.favoritesOnly = cfg.favoritesOnly;
+    if (typeof cfg.pinFavTop === "boolean") state.pinFavTop = cfg.pinFavTop;
+    if (Array.isArray(cfg.favoriteIds)) {
+      state.favoriteIds = cfg.favoriteIds.map((x) => Number(x)).filter(Boolean);
+      state._favSet = new Set(state.favoriteIds);
+    }
     if (typeof cfg.liveWatch === "boolean") state.liveWatch = cfg.liveWatch;
-    if (cfg.enemyPreset && cfg.enemyPreset in state.enemyPresets) state.enemyPreset = cfg.enemyPreset;
+    if (cfg.customBossPreset && typeof cfg.customBossPreset === "object" && cfg.customBossPreset.n) {
+      state.customBossPreset = cfg.customBossPreset;
+      populateEnemySelect();
+    }
+    if (cfg.enemyPreset && (cfg.enemyPreset in state.enemyPresets || cfg.enemyPreset === "__LIVE_TARGET__" || (cfg.enemyPreset === "__CUSTOM_BOSS__" && state.customBossPreset))) {
+      state.enemyPreset = cfg.enemyPreset;
+    }
     if (cfg.bannerDismissed) state.bannerDismissed = true;
     if (typeof cfg.pipOpacity === "number" && Number.isFinite(cfg.pipOpacity)) {
       applyPipOpacity(Math.round(cfg.pipOpacity * 100), false);
@@ -7686,6 +8690,16 @@
     setPipBossHud(typeof cfg.pipBossHud === "boolean" ? cfg.pipBossHud : true, false);
     setPipMapBossHud(typeof cfg.pipMapBossHud === "boolean" ? cfg.pipMapBossHud : true, false);
     setPipBossDesign(typeof cfg.pipBossDesign === "string" ? cfg.pipBossDesign : "1", false);
+    setPipBossResMode(["compact", "full", "off"].includes(cfg.pipBossResMode) ? cfg.pipBossResMode : "compact", false);
+    setPipLocked(Boolean(cfg.pipLocked), false);
+    setPipAutoHide(Boolean(cfg.pipAutoHide), false);
+    setMinimizeToTray(Boolean(cfg.minimizeToTray), false);
+    state.pipSmartFade = Boolean(cfg.pipSmartFade);
+    if (typeof cfg.pipIdleOpacity === "number" && Number.isFinite(cfg.pipIdleOpacity)) state.pipIdleOpacity = Math.max(0.10, Math.min(1.0, cfg.pipIdleOpacity));
+    if (typeof cfg.pipCombatOpacity === "number" && Number.isFinite(cfg.pipCombatOpacity)) state.pipCombatOpacity = Math.max(0.10, Math.min(1.0, cfg.pipCombatOpacity));
+    if (typeof cfg.pipFadeMs === "number" && Number.isFinite(cfg.pipFadeMs)) state.pipFadeMs = Math.max(100, Math.min(1500, cfg.pipFadeMs));
+    if (typeof cfg.pipFadeOnBoss === "boolean") state.pipFadeOnBoss = cfg.pipFadeOnBoss;
+    if (typeof cfg.pipFadeOnBuffs === "boolean") state.pipFadeOnBuffs = cfg.pipFadeOnBuffs;
     setPipBuffHud(typeof cfg.pipBuffHud === "boolean" ? cfg.pipBuffHud : true, false);
     setPipMapBuffHud(typeof cfg.pipMapBuffHud === "boolean" ? cfg.pipMapBuffHud : true, false);
     state.buffExpFlash = typeof cfg.buffExpFlash === "boolean" ? cfg.buffExpFlash : true;
@@ -7721,6 +8735,7 @@
     }
     if (typeof cfg.mapShowPlayer === "boolean") mapState.showPlayer = cfg.mapShowPlayer;
     if (typeof cfg.mapShowPins === "boolean") mapState.showPins = cfg.mapShowPins;
+    mapState.autoClearBeacon = typeof cfg.mapAutoClearBeacon === "boolean" ? cfg.mapAutoClearBeacon : true;
     if (typeof cfg.mapFollow === "boolean") mapState.followPlayer = cfg.mapFollow;
     if (typeof cfg.mapAutoSwitchLayer === "boolean") mapState.autoSwitchLayer = cfg.mapAutoSwitchLayer;
     if (typeof cfg.mapAutoDetect === "boolean") mapState.autoDetect = cfg.mapAutoDetect;
@@ -7759,8 +8774,11 @@
     $("effectiveOnlyCb").checked = state.effectiveOnly;
     $("bestAffinityOnlyCb").checked = state.bestAffinityOnly;
     $("buffableOnlyCb").checked = state.buffableOnly;
+    if ($("ownedOnlyCb")) $("ownedOnlyCb").checked = state.ownedOnly;
+    if ($("favoritesOnlyCb")) $("favoritesOnlyCb").checked = state.favoritesOnly;
+    if ($("pinFavTopCb")) $("pinFavTopCb").checked = state.pinFavTop;
     $("liveWatchCb").checked = state.liveWatch;
-    $("enemySelect").value = state.enemyPreset;
+    populateEnemySelect();
     if (state.bannerDismissed) $("infoBanner").classList.add("hidden");
     updateExtraColsButtonLabel();
     notifyStreamMode();
@@ -8172,7 +9190,7 @@
         const modalOpen = Boolean(
           state.activeView === "system" &&
           $("sysPaneHotkeys") && !$("sysPaneHotkeys").classList.contains("hidden") &&
-          document.querySelectorAll("#keybindsList .kb-row").length === 6
+          document.querySelectorAll("#keybindsList .kb-row").length === KEYBIND_ACTIONS.length
         );
         switchMainView(prevView);
         const modalClosed = state.activeView === prevView;
@@ -8405,6 +9423,14 @@
         resetHiddenLoopBuffs(false);
         setBuffHideLooping(prevHideLoop, false);
 
+        const dmgBuffsNotDebuffOk = Boolean(
+          !resolveBuffMeta({ id: 1605000, iconId: 20980 }).debuff &&
+          !resolveBuffMeta({ id: 511028, iconId: 20983 }).debuff &&
+          !resolveBuffMeta({ id: 503550, iconId: 20980 }).debuff &&
+          !resolveBuffMeta({ id: 1733000, iconId: 20406 }).debuff &&
+          resolveBuffMeta({ id: 6860, iconId: 20460 }).debuff
+        );
+
         state.ramBuffs = prevBuffs;
         state.ramLive = prevRamLive;
         setPipBuffHud(prevBuffHud, false);
@@ -8422,10 +9448,11 @@
           shownMapOk,
           expFlashOk,
           debuffBadgeOk,
+          dmgBuffsNotDebuffOk,
           sweepDirectionOk,
           countTextOk,
           tooltipOk,
-          settingsRowsOk: togRowsCount === 12 && supQuestionsCount >= 16,
+          settingsRowsOk: togRowsCount === 13 && supQuestionsCount >= 17,
           clampOk: clampHighOk && clampLowOk,
           toggledOffOk,
           resetDefaultsOk,
@@ -8644,12 +9671,6 @@
 
         // Check live 1H/2H auto-detection, all 3 placement modes, and live applied AR buffs
         const assetsRef = getErMenuAssets();
-        const prevEqRh0 = state.equippedSlots?.rh ? state.equippedSlots.rh.slice() : null;
-        if (!state.equippedSlots) state.equippedSlots = { rh: [null, null, null], lh: [null, null, null] };
-        if (!state.equippedSlots.rh || !state.equippedSlots.rh.some((s) => s && s.weaponId)) {
-          const sampleWeapon = state.data.weapons.find((w) => w.baseName === "Claymore") || state.data.weapons[0];
-          state.equippedSlots.rh = [{ weaponId: sampleWeapon.id, level: 15 }, null, null];
-        }
         const defaultGripIsWeapon = state.pipGripPlacement === "weapon";
         state.armStyle = 1;
         state.activeRhSlot = 0;
@@ -8670,6 +9691,18 @@
           activeCount: 2,
         });
         const ar2hBuffed = Number(($("pipWeaponsList")?.querySelector(".pip-wep-row .pip-wep-ar")?.textContent) || 0);
+        window.__onLiveRamArBuffs({
+          statBonus: [0, 0, 0, 0, 0],
+          globalMult: [1.15, 1.15, 1.15, 1.15, 1.15],
+          globalFlat: [0, 0, 0, 0, 0],
+          rhMult: [1, 1, 1, 1, 1],
+          rhFlat: [0, 0, 85, 0, 0],
+          lhMult: [1, 1, 1, 1, 1],
+          lhFlat: [0, 0, 0, 0, 0],
+          activeCount: 2,
+          slotAr: { rh: [448, 422, 320], lh: [267, 422, 426] },
+        });
+        const liveSlotArOk = ar1hText === 0 || Number(($("pipWeaponsList")?.querySelector(".pip-wep-row .pip-wep-ar")?.textContent) || 0) === 448;
         const badge2hEl = document.querySelector("#pipPresetTag .pip-grip-badge.two-h");
         const wTile2h = document.querySelector("#pipWeaponsList .pip-wep-row.featured-grip .pip-grip-tile img");
         const has2hWeapon = Boolean(badge2hEl && badge2hEl.textContent.includes("2") && badge2hEl.textContent.includes("(RH)") && wTile2h && assetsRef.grip_2h && wTile2h.getAttribute("src") === assetsRef.grip_2h);
@@ -8678,7 +9711,6 @@
         setPipGripPlacement("map", false);
         const has2hMap = Boolean(document.querySelector("#pipMapGripBox .pip-grip-tile img")?.getAttribute("src") === assetsRef.grip_2h);
         setPipGripPlacement("weapon", false);
-        if (prevEqRh0) state.equippedSlots.rh = prevEqRh0;
         const presetTxt = ($("pipPresetTag")?.textContent || "");
         const arLabelClean = presetTxt.includes("AR") && !presetTxt.includes("Live AR");
         const pipLiveArAndStanceOk = defaultGripIsWeapon && arLabelClean && has1hIcon && has2hWeapon && has2hHeader && has2hMap && (ar2hBuffed > ar1hText || ar1hText === 0);
@@ -8759,7 +9791,7 @@
           ok: focusPreserved && guardOk && previewCycled && pvHiddenDuringStats && noClip &&
               fEquipVis && fArmory1h && fArmory2h && fMapHidden && fSysHidden &&
               pvRealBossOk && cornerOk && hudSameWinOk && erStatusImgsOk && hudNearbyLabelsOk &&
-              pipBarWrapOk && pip2hDisabledOk && pipLiveArAndStanceOk,
+              pipBarWrapOk && pip2hDisabledOk && pipLiveArAndStanceOk && liveSlotArOk,
           focusPreserved,
           guardOk,
           previewCycled,
@@ -8774,6 +9806,7 @@
           pipBarWrapOk,
           pip2hDisabledOk,
           pipLiveArAndStanceOk,
+          liveSlotArOk,
         };
       },
       startMapImagesTest() {
@@ -8801,6 +9834,148 @@
         })().catch((err) => {
           window.__ERR_MAP_TILES = { error: String(err) };
         });
+      },
+      async testV21Features() {
+        const prevView = state.activeView;
+        const prevMode = state.pipMode;
+        const prevMapBossHud = state.pipMapBossHud;
+        const prevBossPlace = state.pipBossPlacement;
+        const prevResMode = state.pipBossResMode;
+        const prevPreset = state.enemyPreset;
+        const prevCustomBoss = state.customBossPreset;
+        const prevFavs = state.favoriteIds.slice();
+        const prevOwnedOnly = state.ownedOnly;
+        const prevFavOnly = state.favoritesOnly;
+
+        // 1) Boss Resistance Strip (Compact, Full, Off) + Clickable Boss Name -> Armory
+        setPipBossPlacement("inside", false);
+        setPipMapBossHud(true, false);
+        await setPipMode("hud");
+        const prevLive = state.ramLive;
+        const prevBosses = state.ramBosses.slice();
+        state.ramLive = true;
+        window.__onLiveRamBosses([{
+          slot: 0, npcParamId: 21200000, name: "Malenia, Blade of Miquella", hp: 5000, maxHp: 10000,
+          stance: 40, maxStance: 80, stanceReset: 2,
+          def: [140, 139, 139, 139, 139],
+          neg: [0, 0, 0, -10, 0, -20, 0, 40],
+          statuses: [{ key: "bleed", label: "Bleed", cur: 50, max: 400 }],
+        }]);
+        setPipBossResMode("compact", false);
+        const compCount = document.querySelectorAll("#pipMapBossBox .er-res-pill").length;
+        const compWeak = document.querySelectorAll("#pipMapBossBox .er-res-pill.res-weak").length;
+        const compRes = document.querySelectorAll("#pipMapBossBox .er-res-pill.res-resist").length;
+        setPipBossResMode("full", false);
+        const fullCount = document.querySelectorAll("#pipMapBossBox .er-res-pill").length;
+        setPipBossResMode("off", false);
+        const offCount = document.querySelectorAll("#pipMapBossBox .er-res-pill").length;
+        const bossStripOk = compCount === 3 && compWeak === 2 && compRes === 1 && fullCount === 8 && offCount === 0;
+
+        // No-<0% fallback highlights lowest negation in Compact
+        window.__onLiveRamBosses([{
+          slot: 0, npcParamId: 1, name: "Armored Golem", hp: 1000, maxHp: 1000, stance: 0, maxStance: 0,
+          def: [120, 120, 120, 120, 120],
+          neg: [35, 35, 10, 35, 45, 45, 45, 45],
+          statuses: [],
+        }]);
+        setPipBossResMode("compact", false);
+        const bestHlOk = document.querySelectorAll("#pipMapBossBox .er-res-pill.res-best").length >= 1;
+
+        // Live Target + Boss Picker in Armory
+        const bossCnt = (state.data && Array.isArray(state.data.bossPresets)) ? state.data.bossPresets.length : 0;
+        if (window.__openBossPicker) window.__openBossPicker();
+        const pickerPopOk = Boolean($("bossPickerPopover") && !$("bossPickerPopover").classList.contains("hidden") && document.querySelectorAll("#bossPickerList .boss-picker-item").length >= 5);
+        $("bossPickerPopover")?.classList.add("hidden");
+        await inspectBossInArmory({ npcParamId: 21200000, name: "Malenia, Blade of Miquella", def: [140, 139, 139, 139, 139], neg: [0, 0, 0, -10, 0, -20, 0, 40] });
+        const customBossSelectedOk = state.enemyPreset === "__CUSTOM_BOSS__" && state.activeView === "calc";
+        state.enemyPreset = "__LIVE_TARGET__";
+        populateEnemySelect();
+        recalculateAndRender();
+        const liveTargetOk = $("enemySelect").value === "__LIVE_TARGET__";
+
+        // 2) Equip Load Bar + Talisman & Live RAM multiplier support
+        const el0 = computeEquipLoad(null);
+        const prevRamAr = state.ramLiveArBuffs;
+        state.ramLiveArBuffs = { equipWeightMult: 1.25, endBonus: 0 };
+        const elBuff = computeEquipLoad(null);
+        const equipLoadOk = el0.maxLoad >= 80 && elBuff.maxLoad > el0.maxLoad * 1.1 && Boolean($("armoryEquipLoadBox")?.textContent.includes("Roll"));
+        state.ramLiveArBuffs = prevRamAr;
+
+        // 3) Owned Only + Favorites + Quick Filter Presets + Inv Upgrade Sync
+        const uchi = state.data.weapons.find((w) => w.baseName === "Uchigatana") || state.data.weapons[0];
+        toggleFavoriteWeapon(uchi.id, false);
+        $("favoritesOnlyCb").checked = true;
+        $("favoritesOnlyCb").dispatchEvent(new Event("change"));
+        const favOnlyCount = lastComputedList.length;
+        $("favoritesOnlyCb").checked = false;
+        $("favoritesOnlyCb").dispatchEvent(new Event("change"));
+        let ownedOk = true;
+        if (state.characters.length > 0 && state.characters[0].owned && (state.characters[0].owned.weapons || []).length > 0) {
+          $("ownedOnlyCb").checked = true;
+          $("ownedOnlyCb").dispatchEvent(new Event("change"));
+          ownedOk = lastComputedList.length > 0 && lastComputedList.length < state.data.weapons.length;
+          $("ownedOnlyCb").checked = false;
+          $("ownedOnlyCb").dispatchEvent(new Event("change"));
+        }
+
+        // 4) PiP Lock, Auto-Hide, Smart Fade & Locate Closest + Auto-Clear Beacon
+        setPipLocked(true, false);
+        const lockOk = document.body.classList.contains("pip-locked") && $("pipLockBtn").classList.contains("active");
+        setPipLocked(false, false);
+
+        // Locate closest test with two fake markers on m00
+        await switchMainView("map");
+        const lpPrev = state.ramPos;
+        state.ramPos = { area: 60, gridX: 44, gridZ: 36, sub: 0, x: 100.0, y: 0.0, z: 100.0, yaw: 0.0 };
+        const pinBefore = { kind: "beacon", slot: 1, layer: "m00", u: 0.419, v: 0.65, order: 1 };
+        mapState.ramPins = [pinBefore];
+        checkAutoClearBeaconOnArrival({ area: 60, gridX: 44, gridZ: 36, sub: 0, x: 100.0, y: 0.0, z: 100.0, yaw: 0.0 });
+        const beaconKeyCheckOk = mapState.clearedBeaconKeys instanceof Set;
+        mapState.clearedBeaconKeys.clear();
+        state.ramPos = lpPrev;
+
+        // Cleanup
+        state.favoriteIds = prevFavs;
+        state._favSet = new Set(prevFavs);
+        state.ownedOnly = prevOwnedOnly;
+        state.favoritesOnly = prevFavOnly;
+        state.customBossPreset = prevCustomBoss;
+        state.enemyPreset = prevPreset;
+        state.ramLive = prevLive;
+        state.ramBosses = prevBosses;
+        setPipBossResMode(prevResMode, false);
+        setPipBossPlacement(prevBossPlace, false);
+        setPipMapBossHud(prevMapBossHud, false);
+        await setPipMode(prevMode);
+        await switchMainView(prevView);
+        populateEnemySelect();
+        recalculateAndRender();
+
+        return {
+          ok: bossStripOk && bestHlOk && bossCnt >= 200 && pickerPopOk && customBossSelectedOk && liveTargetOk && equipLoadOk && favOnlyCount === 1 && ownedOk && lockOk && beaconKeyCheckOk,
+          bossStripOk,
+          compCount,
+          compWeak,
+          compRes,
+          fullCount,
+          offCount,
+          bestHlOk,
+          bossCnt,
+          pickerPopOk,
+          customBossSelectedOk,
+          liveTargetOk,
+          equipLoadOk,
+          favOnlyCount,
+          ownedOk,
+          lockOk,
+          beaconKeyCheckOk,
+        };
+      },
+      startV21Test() {
+        window.__ERR_V21_RESULT = null;
+        this.testV21Features()
+          .then((r) => { window.__ERR_V21_RESULT = r; })
+          .catch((err) => { window.__ERR_V21_RESULT = { error: String(err) }; });
       },
     };
 

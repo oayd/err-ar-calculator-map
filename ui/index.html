@@ -107,7 +107,14 @@
         <div id="eqSlotPicker" class="eq-slot-picker hidden">
           <div class="eq-picker-hdr">
             <span id="eqPickerTitle">Select Equipment</span>
-            <button id="eqPickerCloseBtn" type="button" class="banner-close" title="Close">&times;</button>
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <label class="cb-row eq-picker-owned" title="Filter to owned items in save or live inventory">
+                <input type="checkbox" id="eqPickerOwnedCb" />
+                <span>Owned</span>
+              </label>
+              <button id="eqPickerMapBtn" type="button" class="mini-link-btn" title="Locate closest on Map">Map</button>
+              <button id="eqPickerCloseBtn" type="button" class="banner-close" title="Close">&times;</button>
+            </span>
           </div>
           <select id="eqPickerSel" class="er-sel" style="width:100%;"></select>
         </div>
@@ -183,12 +190,14 @@
       </div>
 
       <div id="eqCoreVitals" class="eq-core-vitals"></div>
+      <div id="eqEquipLoadBox" class="equip-load-box"></div>
 
       <div id="eqAttrList" class="eq-attr-list"></div>
 
       <div class="eq-lvl-bar">
         <span class="muted" style="font-size:11px;">Upgrade</span>
         <select id="eqLevelSel" class="er-sel" style="flex:1;min-width:0;"></select>
+        <button id="eqSyncInvLvBtn" type="button" class="mini-link-btn" title="Sync +Lv to highest weapon in inventory">Inv +Lv</button>
         <button id="eqMatchLvBtn" type="button" class="mini-link-btn">Match +Lv</button>
         <button id="eqMaxLvBtn" type="button" class="mini-link-btn">Max</button>
       </div>
@@ -201,7 +210,10 @@
       <div class="er-hrule" aria-hidden="true"></div>
 
       <div class="er-sec"><img id="eqIcCutMini" alt="" /><span>Enemy Defense Benchmark</span></div>
-      <select id="eqEnemySel" class="er-sel" style="width:100%;margin-bottom:7px;"></select>
+      <div class="enemy-picker-row" style="margin-bottom:7px;">
+        <select id="eqEnemySel" class="er-sel" style="flex:1;min-width:0;"></select>
+        <button id="eqBossPickerBtn" type="button" class="mini-link-btn" title="Search all bosses &amp; enemies">Bosses...</button>
+      </div>
       <div class="eq-right-ftr">
         <button id="eqTwoHandBtn" type="button" class="er-inline-tog">&#9670; Two-Handing (1.5&times; STR)</button>
         <span class="muted" style="font-size:11px;">Save: <b id="eqSaveName" style="color:#dcd4c2;">Manual</b></span>
@@ -249,6 +261,18 @@
         <label class="cb-row" title="Show only weapons currently equipped by the loaded character">
           <input type="checkbox" id="equippedOnlyCb" />
           <span>Equipped only</span>
+        </label>
+        <label class="cb-row" title="Show only weapons owned in the loaded save or live inventory">
+          <input type="checkbox" id="ownedOnlyCb" />
+          <span>Owned only</span>
+        </label>
+        <label class="cb-row" title="Show only starred favorite weapons">
+          <input type="checkbox" id="favoritesOnlyCb" />
+          <span>Favorites only</span>
+        </label>
+        <label class="cb-row" title="Float starred favorite weapons to the top of the list">
+          <input type="checkbox" id="pinFavTopCb" checked />
+          <span>Pin favorites top</span>
         </label>
       </div>
 
@@ -312,7 +336,10 @@
               </div>
               <div class="m-field enemy-box">
                 <label for="enemySelect">Enemy Defense</label>
-                <select id="enemySelect"></select>
+                <div class="enemy-picker-row">
+                  <select id="enemySelect"></select>
+                  <button id="enemyBossPickerBtn" class="mini-link-btn" type="button" title="Search bosses &amp; enemies">Bosses...</button>
+                </div>
               </div>
             </div>
           </div>
@@ -354,6 +381,7 @@
             <span id="rowCountLabel" class="meta-count">0 weapons</span>
           </div>
           <div class="quick-pills">
+            <button id="syncInvLvBtn" class="mini-link-btn" type="button" title="Set Weapon Level to highest weapon upgrade found in inventory">Inv +Lv</button>
             <button id="topMatchEqBtn" class="mini-link-btn" type="button" title="Match Weapon Level to equipped weapon upgrades">Match +Lv</button>
             <button id="maxUpgradeBtn" class="mini-link-btn" type="button" title="Set weapon level to +25 / +10">Max +25/+10</button>
             <button id="revertStatsBtn" class="mini-link-btn" type="button" title="Revert attributes back to loaded save">Revert Stats</button>
@@ -415,8 +443,19 @@
             <button type="button" class="buff-pill" data-buff="twoHandTal" title="x1.15 all damage when Two handing is checked">2H Sword (x1.15)</button>
           </div>
           <div id="gearBonusSummary" class="gear-summary">No active gear stat or damage modifiers</div>
+          <div id="armoryEquipLoadBox" class="equip-load-box armory-load-box"></div>
         </div>
       </section>
+
+      <div id="armoryQuickPresets" class="quick-presets-bar">
+        <span class="qp-lbl">Presets:</span>
+        <button type="button" class="qp-chip active" data-qp="all">All</button>
+        <button type="button" class="qp-chip" data-qp="equipped">Equipped</button>
+        <button type="button" class="qp-chip" data-qp="owned_eff">Owned + Effective</button>
+        <button type="button" class="qp-chip" data-qp="favorites">Favorites</button>
+        <button type="button" class="qp-chip" data-qp="bleed">Bleed</button>
+        <button type="button" class="qp-chip" data-qp="buffable">Buffable</button>
+      </div>
 
       <div id="infoBanner" class="info-banner">
         <span id="infoBannerText">
@@ -817,8 +856,40 @@
         </select>
       </div>
       <div class="pv-field">
+        <span class="muted">Boss Resistance Strip</span>
+        <select id="pvBossResModeSel" class="er-sel" style="width:100%;">
+          <option value="compact">Compact (Weak &amp; Resist)</option>
+          <option value="full">Full (All 8 Types)</option>
+          <option value="off">Off</option>
+        </select>
+      </div>
+      <label class="cb-row" title="Prevent accidental dragging or resizing of the PiP overlay"><input type="checkbox" id="pvPipLockCb" /><span>Lock PiP Position &amp; Size</span></label>
+      <label class="cb-row" title="Hide PiP only when clicking into another app (stays visible when Alt-Tabbing or clicking PiP)"><input type="checkbox" id="pvAutoHideCb" /><span>Auto-Hide Outside Elden Ring</span></label>
+      <div class="pv-field">
         <span class="muted">Overlay Opacity (<span id="pvOpVal">100%</span>)</span>
         <input type="range" id="pvOpRng" min="15" max="100" step="1" value="100" class="er-slider" style="width:100%;" />
+      </div>
+      <label class="cb-row" title="Smoothly fade between Combat and Idle opacity based on active target/buffs"><input type="checkbox" id="pvSmartFadeCb" /><span>Smart Combat / Idle Fade</span></label>
+      <div id="pvSmartFadeGroup" class="pv-fade-box hidden">
+        <div class="pv-fade-row">
+          <span class="muted">Idle</span>
+          <input type="range" id="pvIdleOpRng" min="10" max="100" step="1" value="45" class="er-slider" style="flex:1;" />
+          <input type="number" id="pvIdleOpNum" min="10" max="100" step="1" value="45" class="er-num pv-mini-num" />%
+        </div>
+        <div class="pv-fade-row">
+          <span class="muted">Combat</span>
+          <input type="range" id="pvCombatOpRng" min="10" max="100" step="1" value="100" class="er-slider" style="flex:1;" />
+          <input type="number" id="pvCombatOpNum" min="10" max="100" step="1" value="100" class="er-num pv-mini-num" />%
+        </div>
+        <div class="pv-fade-row">
+          <span class="muted">Fade ms</span>
+          <input type="range" id="pvFadeMsRng" min="100" max="1500" step="50" value="400" class="er-slider" style="flex:1;" />
+          <input type="number" id="pvFadeMsNum" min="100" max="1500" step="50" value="400" class="er-num pv-mini-num" />
+        </div>
+        <div class="pv-fade-trig-row">
+          <label class="cb-row"><input type="checkbox" id="pvFadeTrigBossCb" checked /><span>On Target</span></label>
+          <label class="cb-row"><input type="checkbox" id="pvFadeTrigBuffCb" /><span>On Buffs</span></label>
+        </div>
       </div>
     </aside>
   </section>
@@ -861,6 +932,10 @@
           <div class="sys-row" id="sysPromptModeRow" data-sys-act="prompts">
             <span class="sys-lbl">On-Screen Prompts (Auto / KB+M / Controller)</span>
             <span class="sys-action-tag" id="sysPromptModeLbl">Auto (Keyboard &amp; Mouse)</span>
+          </div>
+          <div class="sys-row" id="sysMinTrayRow" data-sys-act="tray">
+            <span class="sys-lbl">Minimize to System Tray</span>
+            <span class="sys-action-tag" id="sysMinTrayVal">OFF</span>
           </div>
           <div class="sys-row" id="modClearRegBtn" data-sys-act="clear">
             <span class="sys-lbl">Clear Saved Regulation Path</span>
@@ -979,6 +1054,14 @@
                 <span class="er-opt-lbl">Enemy Stance / Poise Bar<sup class="er-q" data-title="Enemy Stance / Poise Bar" data-tip="Displays how close the boss or enemy is to a stance break or riposte.">?</sup></span>
                 <span class="er-opt-state">&#9670; ON</span>
               </div>
+              <div class="er-opt-row er-opt-static">
+                <span class="er-opt-lbl">Enemy Resistance Strip<sup class="er-q" data-title="Enemy Resistance Strip" data-tip="Shows targeted enemy damage negations (Compact = weaknesses &amp; heavy resistances; Full = all 8 damage types).">?</sup></span>
+                <select id="setBossResModeSel" class="er-select">
+                  <option value="compact">Compact</option>
+                  <option value="full">Full (All 8)</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1003,6 +1086,10 @@
               </div>
               <div class="er-opt-row on" data-tog="mapShowPins">
                 <span class="er-opt-lbl">Native Blue Beacons &amp; Pins<sup class="er-q" data-title="Native Blue Beacons &amp; Pins" data-tip="Syncs your in-game blue light pillars (1–5) and map stamps onto the live map.">?</sup></span>
+                <span class="er-opt-state">&#9670; ON</span>
+              </div>
+              <div class="er-opt-row on" data-tog="mapAutoClearBeacon">
+                <span class="er-opt-lbl">Auto-Clear Blue Beacon on Arrival<sup class="er-q" data-title="Auto-Clear Blue Beacon on Arrival" data-tip="Automatically clears located targets and nearby blue beacons when you walk within 15m of them.">?</sup></span>
                 <span class="er-opt-state">&#9670; ON</span>
               </div>
               <div class="er-opt-row on" data-tog="mapShowOffscreenArrow">
@@ -1053,6 +1140,12 @@
       </span>
       <span id="pipMapRamBadge" class="pip-ram-badge off" title="Live Offline RAM Connection"></span>
       <button id="pipTwoHandBtn" class="pip-pill" type="button" title="Toggle Two-Handed (1.5x STR) AR">2H</button>
+      <button id="pipLockBtn" class="pip-pill pip-icon-pill pip-icon-sq" type="button" title="Lock / Unlock PiP Position &amp; Size" aria-label="Lock PiP Position and Size">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <rect x="3" y="7.5" width="10" height="6.5" rx="1.4"/>
+          <path d="M5 7.5V5a3 3 0 0 1 6 0v2.5"/>
+        </svg>
+      </button>
       <button id="pipOpacityBtn" class="pip-pill" type="button" title="Opacity: left-click to cycle presets, right-click to fine-tune (15%–100%)"><span class="pip-op-lbl">Opacity </span><span id="pipOpacityVal">100%</span></button>
       <button id="pipExitBtn" class="pip-pill gold pip-icon-sq" type="button" title="Return to full window (Esc)"><span class="pip-expand-lbl">Expand</span><span class="pip-expand-ico" aria-hidden="true">&#10530;</span></button>
     </div>
@@ -1123,6 +1216,22 @@
     </div>
     <div id="erFooterHelp" class="er-ftr-help">Select slot to inspect or click Change Equip to browse Armory.</div>
   </footer>
+
+  <!-- Searchable Boss / Enemy Defense Picker Modal -->
+  <div id="bossPickerPopover" class="boss-picker-pop hidden" role="dialog" aria-label="Boss &amp; Enemy Defense Picker">
+    <div class="boss-picker-hdr">
+      <span>Search Boss / Enemy Defenses</span>
+      <button id="bossPickerCloseBtn" class="banner-close" type="button" title="Close">&times;</button>
+    </div>
+    <div class="boss-picker-search-row">
+      <input id="bossPickerInput" type="text" placeholder="Search boss or enemy name (e.g. Malenia, Radagon, Crucible)..." autocomplete="off" />
+      <label class="cb-row" style="font-size:11px;"><input type="checkbox" id="bossPickerBossOnlyCb" checked /><span>Bosses only</span></label>
+    </div>
+    <div id="bossPickerList" class="boss-picker-list"></div>
+  </div>
+
+  <!-- ER-Styled Auto-Sync / Arrival Toast Notifications -->
+  <div id="erToastHost" class="er-toast-host" aria-live="polite"></div>
 
   <!-- Floating Elden Ring Tooltip (Settings Help & Player Buff/Debuff Hover Details) -->
   <div id="erHoverTip" class="er-tip" role="tooltip">

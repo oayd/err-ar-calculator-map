@@ -174,6 +174,7 @@ DEFAULT_KEYBINDS: Dict[str, str] = {
     "toggleFollow": "Ctrl+Shift+F",
     "focusPipSearch": "Ctrl+Shift+K",
     "toggleOverlayHide": "Ctrl+Shift+H",
+    "toggleBossResMode": "",
 }
 
 _VK_SPECIAL: Dict[str, int] = {
@@ -459,6 +460,13 @@ class CalculatorApi:
         d0 = str(cfg0.get("pipBossDesign", "1"))
         self._pip_boss_design: str = d0 if d0 in ("1", "2", "3") else "1"
         self._overlay_hidden: bool = False
+        self._pip_locked: bool = bool(cfg0.get("pipLocked", False))
+        self._pip_auto_hide: bool = bool(cfg0.get("pipAutoHide", False))
+        self._auto_hidden_by_focus: bool = False
+        self._minimize_to_tray: bool = bool(cfg0.get("minimizeToTray", False))
+        self._enemy_preset_live: bool = str(cfg0.get("enemyPreset", "")) == "__LIVE_TARGET__"
+        self._tray_icon = None
+        self._tray_init_done: bool = False
         self._normal_bounds = None
         self._pip_bounds: Dict[str, Any] = _clamp_pip_bounds_dict(cfg0.get("pipBounds"))
         self._pip_boss_ext: int = 0
@@ -755,8 +763,10 @@ class CalculatorApi:
                 if target == "off":
                     self._pip_click_through = False
                     self._overlay_hidden = False
+                    self._auto_hidden_by_focus = False
                     self._apply_click_through_hwnd(bv, False)
                     bv.Visible = True
+                    bv.ShowInTaskbar = True
                     bv.TopMost = False
                     bv.Opacity = 1.0
                     bv.FormBorderStyle = SWinForms.FormBorderStyle.Sizable
@@ -873,6 +883,8 @@ class CalculatorApi:
     def set_overlay_hidden(self, hidden: bool) -> Dict[str, Any]:
         want = bool(hidden) if self._pip_mode != "off" else False
         self._overlay_hidden = want
+        if not want:
+            self._auto_hidden_by_focus = False
         if not self._self_test_mode:
             bv = self._get_winforms_form()
             if bv is not None:
@@ -882,6 +894,191 @@ class CalculatorApi:
                         bv.TopMost = True
                 self._invoke_ui(_vis)
         return {"hidden": self._overlay_hidden}
+
+    def set_pip_locked(self, locked: bool) -> Dict[str, Any]:
+        self._pip_locked = bool(locked)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipLocked"] = self._pip_locked
+            self.save_settings(cfg)
+        return {"pipLocked": self._pip_locked}
+
+    def set_pip_auto_hide(self, enabled: bool) -> Dict[str, Any]:
+        self._pip_auto_hide = bool(enabled)
+        if not self._pip_auto_hide and self._auto_hidden_by_focus:
+            self._auto_hidden_by_focus = False
+            if not self._self_test_mode and self._pip_mode != "off" and not self._overlay_hidden:
+                self._apply_pip_auto_hide(True)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["pipAutoHide"] = self._pip_auto_hide
+            self.save_settings(cfg)
+        return {"pipAutoHide": self._pip_auto_hide}
+
+    def set_minimize_to_tray(self, enabled: bool) -> Dict[str, Any]:
+        self._minimize_to_tray = bool(enabled)
+        if not self._self_test_mode:
+            cfg = self._load_settings()
+            cfg["minimizeToTray"] = self._minimize_to_tray
+            self.save_settings(cfg)
+        return {"minimizeToTray": self._minimize_to_tray}
+
+    def set_enemy_preset_live(self, is_live: bool) -> Dict[str, Any]:
+        self._enemy_preset_live = bool(is_live)
+        return {"liveTarget": self._enemy_preset_live}
+
+    _ALLOWED_AUTO_HIDE_CLASSES = frozenset({
+        "MultitaskingViewFrame",
+        "TaskSwitcherWnd",
+        "XamlExplorerHostIslandWindow",
+        "Shell_TrayWnd",
+        "NotifyIconOverflowWindow",
+        "ForegroundStaging",
+        "Shell_SecondaryTrayWnd",
+    })
+
+    def _is_foreground_allowed_for_pip(self) -> bool:
+        try:
+            import ctypes.wintypes as wt
+
+            user32 = ctypes.windll.user32
+            fg = user32.GetForegroundWindow()
+            if not fg:
+                return True
+            bv = self._get_winforms_form()
+            if bv is not None:
+                own_hwnd = int(bv.Handle.ToInt64())
+                if int(fg) == own_hwnd:
+                    return True
+                root_owner = user32.GetAncestor(wt.HWND(fg), 3)  # GA_ROOTOWNER
+                if root_owner and int(root_owner) == own_hwnd:
+                    return True
+            pid = wt.DWORD(0)
+            user32.GetWindowThreadProcessId(wt.HWND(fg), ctypes.byref(pid))
+            fg_pid = int(pid.value)
+            if fg_pid == os.getpid():
+                return True
+            if self._mem._pid and fg_pid == int(self._mem._pid):
+                return True
+            cls_buf = ctypes.create_unicode_buffer(128)
+            if user32.GetClassNameW(wt.HWND(fg), cls_buf, 128) > 0:
+                if cls_buf.value in self._ALLOWED_AUTO_HIDE_CLASSES:
+                    return True
+            img = memory_reader._get_process_image_path(fg_pid)
+            if img and os.path.basename(img).lower() == "eldenring.exe":
+                return True
+            return False
+        except Exception:
+            return True
+
+    def _apply_pip_auto_hide(self, show: bool) -> None:
+        if self._self_test_mode:
+            return
+        bv = self._get_winforms_form()
+        if bv is None:
+            return
+
+        def _do():
+            user32 = ctypes.windll.user32
+            hwnd = ctypes.c_void_p(int(bv.Handle.ToInt64()))
+            if show:
+                user32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+                user32.SetWindowPos(hwnd, ctypes.c_void_p(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040)
+            else:
+                user32.ShowWindow(hwnd, 0)  # SW_HIDE
+
+        self._invoke_ui(_do)
+
+    def _restore_main_window(self) -> None:
+        bv = self._get_winforms_form()
+        if bv is None:
+            return
+
+        def _show():
+            import System.Windows.Forms as SWinForms
+
+            bv.Show()
+            bv.ShowInTaskbar = True
+            if bv.WindowState == SWinForms.FormWindowState.Minimized:
+                bv.WindowState = SWinForms.FormWindowState.Normal
+            bv.Activate()
+
+        self._invoke_ui(_show)
+
+    def _on_window_shown(self) -> None:
+        self._init_tray_icon()
+        self._start_watcher()
+
+    def _init_tray_icon(self) -> None:
+        if self._self_test_mode or self._tray_init_done:
+            return
+        bv = self._get_winforms_form()
+        if bv is None:
+            return
+        self._tray_init_done = True
+
+        def _setup():
+            try:
+                import System.Drawing as SD
+                import System.Windows.Forms as SWinForms
+
+                ico_path = resource_icon_path()
+                ico_obj = SD.Icon(ico_path) if (ico_path and os.path.isfile(ico_path)) else SD.SystemIcons.Application
+                menu = SWinForms.ContextMenuStrip()
+                item_show = menu.Items.Add("Show Window")
+                item_pip = menu.Items.Add("Toggle PiP Overlay")
+                menu.Items.Add(SWinForms.ToolStripSeparator())
+                item_exit = menu.Items.Add("Exit")
+
+                item_show.Click += lambda _s, _e: self._restore_main_window()
+                item_pip.Click += lambda _s, _e: self._on_global_hotkey("togglePipStats")
+
+                def _exit_click(_s, _e):
+                    self.cleanup()
+                    if self._window:
+                        try:
+                            self._window.destroy()
+                        except Exception:
+                            pass
+
+                item_exit.Click += _exit_click
+
+                ni = SWinForms.NotifyIcon()
+                ni.Icon = ico_obj
+                ni.Text = "Elden Ring Reforged Calculator"
+                ni.ContextMenuStrip = menu
+                ni.Visible = True
+                ni.DoubleClick += lambda _s, _e: self._restore_main_window()
+                self._tray_icon = ni
+
+                def _on_resize(_s, _e):
+                    try:
+                        if self._minimize_to_tray and self._pip_mode == "off" and bv.WindowState == SWinForms.FormWindowState.Minimized:
+                            bv.ShowInTaskbar = False
+                            bv.Hide()
+                    except Exception:
+                        pass
+
+                bv.Resize += _on_resize
+            except Exception:
+                pass
+
+        self._invoke_ui(_setup)
+
+    def cleanup(self) -> None:
+        self._watcher_stop.set()
+        self._hotkeys.stop()
+        self._mem.close()
+        ni = self._tray_icon
+        self._tray_icon = None
+        if ni is not None:
+            def _disp():
+                try:
+                    ni.Visible = False
+                    ni.Dispose()
+                except Exception:
+                    pass
+            self._invoke_ui(_disp)
 
     def set_pip_opacity(self, opacity: float) -> Dict[str, Any]:
         self._pip_opacity = max(0.15, min(1.0, float(opacity)))
@@ -951,6 +1148,8 @@ class CalculatorApi:
         return self._invoke_ui(_do)
 
     def start_window_drag(self) -> bool:
+        if self._pip_locked and self._pip_mode != "off":
+            return False
         return self._win32_nc_hit(2)  # HTCAPTION
 
     @staticmethod
@@ -963,6 +1162,8 @@ class CalculatorApi:
         return int(pt.x), int(pt.y)
 
     def begin_pip_resize(self, edge: str) -> bool:
+        if self._pip_locked and self._pip_mode != "off":
+            return False
         if self._self_test_mode or self._pip_mode == "off" or edge not in ("n", "s", "e", "w", "ne", "nw", "se", "sw"):
             return False
         bv = self._get_winforms_form()
@@ -981,7 +1182,7 @@ class CalculatorApi:
         return True
 
     def step_pip_resize(self) -> bool:
-        if not self._resize_drag or self._self_test_mode or self._pip_mode == "off":
+        if (self._pip_locked and self._pip_mode != "off") or not self._resize_drag or self._self_test_mode or self._pip_mode == "off":
             return False
         bv = self._get_winforms_form()
         if bv is None:
@@ -1133,20 +1334,24 @@ class CalculatorApi:
             last_prog_t = 0.0
             last_buffs_t = 0.0
             last_ar_buffs_t = 0.0
+            last_boss_t = 0.0
             last_save_t = 0.0
+            last_focus_t = 0.0
+            focus_miss_streak = 0
             miss_streak = 0
             while True:
-                want_boss = (
+                want_boss_pip = (
                     (self._pip_mode == "stats" and self._pip_boss_hud)
                     or (self._pip_mode in ("map", "hud") and self._pip_map_boss_hud)
                 )
+                want_boss = want_boss_pip or (self._ram_active and self._enemy_preset_live)
                 want_buffs = (
                     (self._pip_mode == "stats" and self._pip_buff_hud)
                     or (self._pip_mode in ("map", "hud") and self._pip_map_buff_hud)
                 )
-                want_ar_buffs = self._pip_mode in ("stats", "hud")
+                want_ar_buffs = (self._pip_mode in ("stats", "hud")) or self._ram_active
                 if self._ram_active:
-                    if (self._ui_view == "map" and self._map_follow) or want_boss:
+                    if (self._ui_view == "map" and self._map_follow) or want_boss_pip:
                         dt = 0.033
                     elif want_buffs:
                         dt = 0.066
@@ -1156,12 +1361,34 @@ class CalculatorApi:
                         dt = 0.25
                 else:
                     dt = 0.5
+                if self._pip_mode != "off" and self._pip_auto_hide and dt > 0.14:
+                    dt = 0.14
                 if self._watcher_stop.wait(dt):
                     break
-                if not self._live_watch or not self._window:
+                if not self._window:
                     continue
 
                 now = time.monotonic()
+                if self._pip_mode != "off" and self._pip_auto_hide and not self._overlay_hidden:
+                    if (now - last_focus_t) >= 0.12:
+                        last_focus_t = now
+                        if self._is_foreground_allowed_for_pip():
+                            focus_miss_streak = 0
+                            if self._auto_hidden_by_focus:
+                                self._auto_hidden_by_focus = False
+                                self._apply_pip_auto_hide(True)
+                        else:
+                            focus_miss_streak += 1
+                            if focus_miss_streak >= 2 and not self._auto_hidden_by_focus:
+                                self._auto_hidden_by_focus = True
+                                self._apply_pip_auto_hide(False)
+                elif self._auto_hidden_by_focus:
+                    self._auto_hidden_by_focus = False
+                    if self._pip_mode != "off" and not self._overlay_hidden:
+                        self._apply_pip_auto_hide(True)
+
+                if not self._live_watch:
+                    continue
                 try:
                     if self._mem.ensure_attached(min_retry_secs=2.0):
                         pos = self._mem.read_player_pos()
@@ -1235,8 +1462,9 @@ class CalculatorApi:
                                         self._window.evaluate_js(
                                             f"window.__onLiveRamProgress && window.__onLiveRamProgress({prog_key});"
                                         )
-                            if want_boss:
-                                bosses = self._mem.read_active_bosses(self._npc_meta) or []
+                            if want_boss and (want_boss_pip or not was_active or (now - last_boss_t >= 0.35)):
+                                last_boss_t = now
+                                bosses = self._mem.read_active_bosses(self._npc_meta, self._data.get("npcDef")) or []
                                 has_active_boss = bool(bosses)
                                 boss_key = json.dumps(bosses, sort_keys=True)
                                 if not was_active or boss_key != last_boss_key:
@@ -1244,7 +1472,7 @@ class CalculatorApi:
                                     self._window.evaluate_js(
                                         f"window.__onLiveRamBosses && window.__onLiveRamBosses({boss_key});"
                                     )
-                            elif last_boss_key not in (None, "[]"):
+                            elif (not want_boss) and last_boss_key not in (None, "[]"):
                                 has_active_boss = False
                                 last_boss_key = "[]"
                                 self._window.evaluate_js(
@@ -1264,7 +1492,8 @@ class CalculatorApi:
                                 self._window.evaluate_js(
                                     "window.__onLiveRamBuffs && window.__onLiveRamBuffs([]);"
                                 )
-                            if want_ar_buffs and (not was_active or now - last_ar_buffs_t >= 0.22):
+                            ar_cadence = 0.22 if (self._pip_mode in ("stats", "hud")) else 0.50
+                            if want_ar_buffs and (not was_active or now - last_ar_buffs_t >= ar_cadence):
                                 last_ar_buffs_t = now
                                 ar_buffs = self._mem.read_player_live_ar_buffs()
                                 if ar_buffs is not None:
@@ -1388,6 +1617,7 @@ class CalculatorApi:
         enemy_preset: str,
         override_lv: int,
         buffs: Optional[Dict[str, Any]] = None,
+        custom_enemy_preset: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         variants = self._data["_byBase"].get(int(base_id))
         if not variants:
@@ -1407,6 +1637,7 @@ class CalculatorApi:
             enemy_preset=enemy_preset,
             override_lv=int(override_lv),
             buffs=buffs,
+            custom_enemy_preset=custom_enemy_preset,
         )
         ms = (time.perf_counter() - t0) * 1000.0
         out = []
@@ -1626,7 +1857,10 @@ class CalculatorApi:
             live_params = None
             if not running_info.get("eac"):
                 try:
-                    live_params = self._mem.read_live_params(set(regulation_extractor.REQUIRED_PARAM_NAMES) | {"magic.param"})
+                    live_params = self._mem.read_live_params(
+                        set(regulation_extractor.REQUIRED_PARAM_NAMES),
+                        optional_names={"magic.param", "npcparam.param"},
+                    )
                 except Exception:
                     live_params = None
 
@@ -2045,7 +2279,7 @@ def run_self_test(report_path: Optional[str]):
             ])
             assert len(_sp_parsed) == 1 and _sp_parsed[0]["id"] == 5000, f"Finite buff filter failed: {_sp_parsed}"
 
-            def _mk_sp(icon_id=-1, wc=0, atk_attr=254, sp_attr=254, si=0, inv=(0, 0, 0), thr=False, msc1=0, r1=1.0, r2=1.0, th_r1=1.0, th_flat=0, str_b=0):
+            def _mk_sp(icon_id=-1, wc=0, atk_attr=254, sp_attr=254, si=0, inv=(0, 0, 0), thr=False, msc1=0, r1=1.0, r2=1.0, th_r1=1.0, th_flat=0, str_b=0, sp_cat=0, tgt_bits=0x01, arc_b=0):
                 b = bytearray(816)
                 _st.pack_into("<i", b, 0, icon_id)
                 _st.pack_into("<f", b, 4, -1.0)
@@ -2054,21 +2288,24 @@ def run_self_test(report_path: Optional[str]):
                     _st.pack_into("<f", b, _ro, _rv)
                 _st.pack_into("<i", b, 100, th_flat)
                 b[314] = msc1
+                _st.pack_into("<H", b, 318, sp_cat)
                 b[340] = atk_attr
                 b[341] = sp_attr
                 _st.pack_into("<H", b, 342, si)
                 b[344] = wc
+                b[351] = tgt_bits
                 if thr:
                     b[356] |= 0x08
                 _st.pack_into("<3H", b, 696, *inv)
                 _st.pack_into("<b", b, 802, str_b)
+                _st.pack_into("<b", b, 806, arc_b)
                 return bytes(b)
 
             _ar_agg = memory_reader._aggregate_live_ar_speffects([
                 (1660000, _mk_sp(icon_id=20406, wc=0, r2=1.10), 25.0, 50.0, 0),
                 (800, _mk_sp(icon_id=20500, wc=1, th_r1=1.04, th_flat=48), 40.0, 60.0, 0),
                 (1302227, _mk_sp(icon_id=20064, wc=0, inv=(39031, 0, 0), r2=2.0), 3.0, 3.0, 0),
-                (7407090, _mk_sp(icon_id=-1, wc=0, r1=1.95), -1.0, -1.0, 0),
+                (7407090, _mk_sp(icon_id=-1, wc=0, r1=1.95, tgt_bits=0x05), -1.0, -1.0, 0),
                 (320900, _mk_sp(icon_id=20260, wc=0, thr=True, r1=1.24), -1.0, -1.0, 0),
                 (321800, _mk_sp(icon_id=20261, wc=0, msc1=102, r1=1.15), -1.0, -1.0, 0),
                 (330400, _mk_sp(icon_id=20207, wc=3, r1=1.075), -1.0, -1.0, 0),
@@ -2079,6 +2316,20 @@ def run_self_test(report_path: Optional[str]):
             assert abs(_ar_agg["rhMult"][3] - 1.04) < 1e-4 and _ar_agg["rhFlat"][3] == 48, f"Unexpected rh enchant: {_ar_agg}"
             assert abs(_ar_agg["lhMult"][3] - 1.0) < 1e-4 and _ar_agg["lhFlat"][3] == 0, f"RH enchant leaked to LH: {_ar_agg}"
             assert set(_ar_agg["contributors"]) == {1660000, 800, 600}, f"Unexpected contributors: {_ar_agg}"
+
+            _ar_agg2 = memory_reader._aggregate_live_ar_speffects([
+                (5660000, _mk_sp(icon_id=-1, wc=0, si=15660), -1.0, -1.0, 0),
+                (5012001, _mk_sp(icon_id=20006, wc=0, inv=(15090, 15660, 0), r1=1.025), 0.005, 0.1, 0),
+                (6086000, _mk_sp(icon_id=20979, wc=0, sp_cat=10, r1=1.015), -1.0, -1.0, 0),
+                (6086000, _mk_sp(icon_id=20979, wc=0, sp_cat=10, r1=1.015), -1.0, -1.0, 0),
+                (9016060, _mk_sp(icon_id=20693, wc=3, arc_b=2), 120.0, 120.0, 0),
+                (150640, _mk_sp(icon_id=-1, wc=0, si=1502), 0.1, 0.2, 0),
+                (8070530, _mk_sp(icon_id=-1, wc=0, tgt_bits=0x01, inv=(1502, 0, 0), r1=1.03), -1.0, -1.0, 0),
+                (20107010, _mk_sp(icon_id=-1, wc=0, sp_cat=132, tgt_bits=0x05, r1=1.025), -1.0, -1.0, 0),
+            ], hp=1000, hp_max=1000)
+            _exp_gm = 1.025 * (1.015 ** 2) * 1.03 * 1.025
+            assert abs(_ar_agg2["globalMult"][0] - _exp_gm) < 1e-4, f"Expected globalMult ~{_exp_gm:.5f}, got {_ar_agg2}"
+            assert _ar_agg2["statBonus"][4] == 2, f"Expected +2 ARC from wc=3 fortune, got {_ar_agg2}"
             pb_res = w.evaluate_js("window.__ERR_TEST.testPlayerBuffs()")
             assert pb_res and all(pb_res.values()), f"Player buffs/Toggleables test failed: {pb_res}"
             ml_res = w.evaluate_js("window.__ERR_TEST.testMapLabels()")
@@ -2106,10 +2357,37 @@ def run_self_test(report_path: Optional[str]):
             _chars = (api.reload_save(False) or {}).get("characters", [])
             for ch_row in _chars:
                 assert "arrows" in ch_row and "bolts" in ch_row and "spells" in ch_row, f"Missing ammo/spells on char {ch_row.get('name')}"
-                if ch_row.get("playerPos"):
-                    assert abs(ch_row["playerPos"].get("y", 0.0)) < 5000.0, f"Unrealistic playerPos: {ch_row['playerPos']}"
+            iskir = next((c for c in _chars if c.get("name") == "Iskir"), None)
+            if iskir and iskir.get("playerPos"):
+                assert abs(iskir["playerPos"].get("y", 0.0)) < 5000.0, f"Unrealistic Iskir playerPos: {iskir['playerPos']}"
+            # v2.1.0 Python & JS feature checks
+            assert len(api._data.get("npcDef", {})) >= 5000, "Missing npcDef table"
+            assert len(api._data.get("bossPresets", [])) >= 200, "Missing bossPresets list"
+            assert "220" in (api._data.get("ccg") or {}), "Missing ccg 220 (Equip Load)"
+            assert api.set_pip_locked(True).get("pipLocked") is True and api.start_window_drag() is False
+            assert api.set_pip_locked(False).get("pipLocked") is False
+            assert api.set_pip_auto_hide(True).get("pipAutoHide") is True and api.set_pip_auto_hide(False).get("pipAutoHide") is False
+            assert api.set_minimize_to_tray(True).get("minimizeToTray") is True and api.set_minimize_to_tray(False).get("minimizeToTray") is False
+            if _chars:
+                assert isinstance((_chars[0].get("owned") or {}).get("weaponLevels"), dict), "Missing save weaponLevels"
+            _ew_sp = bytearray(816)
+            _st.pack_into("<i", _ew_sp, 0, -1)
+            _st.pack_into("<f", _ew_sp, 4, -1.0)
+            _st.pack_into("<f", _ew_sp, 496, -1.0)
+            _st.pack_into("<f", _ew_sp, 228, 1.15)
+            _ew_res = memory_reader._aggregate_live_ar_speffects([(310300, bytes(_ew_sp), -1.0, -1.0, 0)])
+            assert abs(_ew_res.get("equipWeightMult", 1.0) - 1.15) < 1e-4, f"Expected 1.15 equipWeightMult, got {_ew_res}"
             qa_res = w.evaluate_js("window.__ERR_TEST.testQaAuditFixes()")
             assert qa_res and qa_res.get("ok"), f"QA audit fixes test failed: {qa_res}"
+            w.evaluate_js("window.__ERR_TEST.startV21Test()")
+            v21_res = None
+            v21_deadline = time.time() + 10.0
+            while time.time() < v21_deadline:
+                v21_res = w.evaluate_js("window.__ERR_V21_RESULT")
+                if v21_res is not None:
+                    break
+                time.sleep(0.03)
+            assert v21_res and v21_res.get("ok"), f"v2.1.0 features test failed: {v21_res}"
             w.evaluate_js("window.__ERR_TEST.openCalcTab()")
 
             final_sum = w.evaluate_js("window.__ERR_TEST.getSummary()")
@@ -2189,7 +2467,7 @@ def main():
     api = CalculatorApi(self_test_mode=False)
     html_doc = build_inlined_html()
     win = webview.create_window(
-        "Elden Ring Weapon Calculator v2.0.0 — ERR v2.3.10.1",
+        "Elden Ring Weapon Calculator — ERR v2.3.10.1 (Elden Ring UI)",
         html=html_doc,
         js_api=api,
         width=1500,
@@ -2200,11 +2478,9 @@ def main():
     )
     api._window = win
     try:
-        webview.start(lambda w: api._start_watcher(), win, gui="edgechromium", icon=resource_icon_path(), private_mode=True)
+        webview.start(lambda w: api._on_window_shown(), win, gui="edgechromium", icon=resource_icon_path(), private_mode=True)
     finally:
-        api._watcher_stop.set()
-        api._hotkeys.stop()
-        api._mem.close()
+        api.cleanup()
 
 
 if __name__ == "__main__":

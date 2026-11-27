@@ -160,6 +160,7 @@ def _collect_inv_block(
     armor: Set[int],
     talismans: Set[int],
     goods: Set[int],
+    weapon_levels: Optional[Dict[int, int]] = None,
 ):
     for i in range(cap):
         gh, qty, _idx = struct.unpack_from("<III", sdata, off + i * 12)
@@ -169,7 +170,20 @@ def _collect_inv_block(
         if nib == 0x80000000:
             iid = gmap.get(gh)
             if iid:
-                weapons.add(((iid & 0x0FFFFFFF) // 100) * 100)
+                raw_id = iid & 0x0FFFFFFF
+                base_w = (raw_id // 100) * 100
+                weapons.add(base_w)
+                if weapon_levels is not None:
+                    lv = raw_id % 100
+                    if 0 <= lv <= 25:
+                        prev = weapon_levels.get(base_w, -1)
+                        if lv > prev:
+                            weapon_levels[base_w] = lv
+                        base_root = (raw_id // 10000) * 10000
+                        if base_root > 0:
+                            prev_r = weapon_levels.get(base_root, -1)
+                            if lv > prev_r:
+                                weapon_levels[base_root] = lv
         elif nib == 0x90000000:
             iid = gmap.get(gh)
             if iid:
@@ -212,10 +226,11 @@ def _parse_slot_extras(
     armor: Set[int] = set()
     talismans: Set[int] = set()
     goods: Set[int] = set()
+    weapon_levels: Dict[int, int] = {}
 
     # InventoryHeld(0xA80 common, 0x180 key)
-    _collect_inv_block(sdata, pos + 4, 0xA80, gmap, weapons, armor, talismans, goods)
-    _collect_inv_block(sdata, pos + 4 + 0xA80 * 12 + 4, 0x180, gmap, weapons, armor, talismans, goods)
+    _collect_inv_block(sdata, pos + 4, 0xA80, gmap, weapons, armor, talismans, goods, weapon_levels)
+    _collect_inv_block(sdata, pos + 4 + 0xA80 * 12 + 4, 0x180, gmap, weapons, armor, talismans, goods, weapon_levels)
     pos += 4 + 0xA80 * 12 + 4 + 0x180 * 12 + 8
 
     # EquipMagicData + EquipItemData + GestureEquipData
@@ -233,8 +248,8 @@ def _parse_slot_extras(
     pos += 0x9C + 0xC + 0x12F
 
     # InventoryStorageBox(0x780 common, 0x80 key)
-    _collect_inv_block(sdata, pos + 4, 0x780, gmap, weapons, armor, talismans, goods)
-    _collect_inv_block(sdata, pos + 4 + 0x780 * 12 + 4, 0x80, gmap, weapons, armor, talismans, goods)
+    _collect_inv_block(sdata, pos + 4, 0x780, gmap, weapons, armor, talismans, goods, weapon_levels)
+    _collect_inv_block(sdata, pos + 4 + 0x780 * 12 + 4, 0x80, gmap, weapons, armor, talismans, goods, weapon_levels)
     pos += 4 + 0x780 * 12 + 4 + 0x80 * 12 + 8
 
     # Gestures (0x100) + Regions + Horse (0x28) + control_byte (1) + BloodStainData (0x44) + unk_gdm (8)
@@ -262,6 +277,7 @@ def _parse_slot_extras(
             "armor": sorted(armor),
             "talismans": sorted(talismans),
             "goods": sorted(goods),
+            "weaponLevels": {str(k): v for k, v in weapon_levels.items()},
         },
         "spells": spells,
         "setFlags": set_flags,

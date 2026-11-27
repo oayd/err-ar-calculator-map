@@ -85,15 +85,58 @@ def calc_fromsoft_defense(atk: float, defense: float) -> float:
     return atk * mult
 
 
-def calc_effective_damage(elem_ar: List[float], enemy_preset: str) -> Tuple[float, List[float]]:
-    """Compute effective damage per element after defense and negation for an enemy preset."""
-    preset = ENEMY_PRESETS.get(enemy_preset)
+def _resolve_phys_negation(negs: List[float], phys_types: str = "") -> float:
+    if len(negs) < 8:
+        return float(negs[0]) if negs else 0.0
+    if phys_types:
+        pt = phys_types.lower()
+        idxs: List[int] = []
+        if "standard" in pt:
+            idxs.append(0)
+        if "slash" in pt:
+            idxs.append(1)
+        if "strike" in pt:
+            idxs.append(2)
+        if "pierce" in pt:
+            idxs.append(3)
+        if idxs:
+            return sum(float(negs[i]) for i in idxs) / len(idxs)
+    return float(negs[0])
+
+
+def _normalize_enemy_preset(enemy_preset: str, custom_preset: Optional[Dict] = None, phys_types: str = "") -> Optional[Tuple[Tuple[float, ...], Tuple[float, ...]]]:
+    if enemy_preset == "Raw AR (No Defense)":
+        return None
+    preset = custom_preset if (custom_preset and isinstance(custom_preset, dict)) else ENEMY_PRESETS.get(enemy_preset)
     if preset is None:
+        return None
+    raw_def = preset.get("def") or preset.get("d") or (125.0, 125.0, 125.0, 125.0, 125.0)
+    raw_neg = preset.get("neg") or preset.get("g") or (0.0, 0.0, 0.0, 0.0, 0.0)
+    defs = tuple(float(raw_def[i]) for i in range(5))
+    if len(raw_neg) >= 8:
+        # 8-element integer % array [Std, Sla, Str, Pie, Mag, Fir, Ltn, Hol] (or fractional if all <= 1.0 & any abs < 1 and not int-pct? Wait: custom NPC negs are integer %; normalize cleanly)
+        negs_pct = [float(x) for x in raw_neg[:8]]
+        # Values in ENEMY_PRESETS are 5 floats (0..1); 8-element NPC arrays are percentages (-100..100)
+        p_neg = _resolve_phys_negation(negs_pct, phys_types) / 100.0
+        negs = (p_neg, negs_pct[4] / 100.0, negs_pct[5] / 100.0, negs_pct[6] / 100.0, negs_pct[7] / 100.0)
+    else:
+        negs = tuple(float(raw_neg[i]) for i in range(5))
+    return defs, negs
+
+
+def calc_effective_damage(
+    elem_ar: List[float],
+    enemy_preset: str,
+    custom_preset: Optional[Dict] = None,
+    phys_types: str = "",
+) -> Tuple[float, List[float]]:
+    """Compute effective damage per element after defense and negation for an enemy preset."""
+    resolved = _normalize_enemy_preset(enemy_preset, custom_preset=custom_preset, phys_types=phys_types)
+    if resolved is None:
         elems = list(elem_ar)
         return sum(elems), elems
 
-    defs = preset["def"]
-    negs = preset["neg"]
+    defs, negs = resolved
     dmg = [calc_fromsoft_defense(elem_ar[i], defs[i]) * (1.0 - negs[i]) for i in range(5)]
     return sum(dmg), dmg
 
@@ -128,6 +171,7 @@ def compute_weapon(
     override_lv: int = -1,
     enemy_preset: str = "Raw AR (No Defense)",
     buffs: Optional[Dict] = None,
+    custom_enemy_preset: Optional[Dict] = None,
 ) -> Dict:
     lv = max(0, min(override_lv, weapon["maxLv"])) if override_lv >= 0 else resolve_upgrade_level(weapon, reg_lv, somber_lv)
     reinf_map = data["reinforce"]
@@ -269,7 +313,12 @@ def compute_weapon(
     guard_out.append(int(round(max(0.0, float(raw_guard[5]) * gb_mult))))
 
     total_ar = sum(elem_ar)
-    eff_total, eff_elems = calc_effective_damage(elem_ar, enemy_preset)
+    eff_total, eff_elems = calc_effective_damage(
+        elem_ar,
+        enemy_preset,
+        custom_preset=custom_enemy_preset,
+        phys_types=str(weapon.get("physTypes") or ""),
+    )
     return {
         "weapon": weapon,
         "lv": lv,
@@ -379,6 +428,7 @@ def optimize_stats_for_weapon(
     enemy_preset: str = "Raw AR (No Defense)",
     override_lv: int = -1,
     buffs: Optional[Dict] = None,
+    custom_enemy_preset: Optional[Dict] = None,
 ) -> List[Dict]:
     """Find optimal (STR, DEX, INT, FAI, ARC) allocation across weapon variants for the given point budget."""
     budget = sum(max(1, int(current_stats[k])) for k in STAT_KEYS) + extra_points
@@ -392,7 +442,7 @@ def optimize_stats_for_weapon(
     for w in variants:
         lv = max(0, min(override_lv, w["maxLv"])) if override_lv >= 0 else resolve_upgrade_level(w, reg_lv, somber_lv)
         base_res = compute_weapon(
-            w, data, current_stats, reg_lv, somber_lv, two_hand, override_lv=lv, enemy_preset=enemy_preset, buffs=buffs
+            w, data, current_stats, reg_lv, somber_lv, two_hand, override_lv=lv, enemy_preset=enemy_preset, buffs=buffs, custom_enemy_preset=custom_enemy_preset
         )
 
         req = w["req"]
@@ -432,7 +482,7 @@ def optimize_stats_for_weapon(
         def eval_vec(vec: List[int]) -> Dict:
             st = {STAT_KEYS[i]: vec[i] for i in range(5)}
             return compute_weapon(
-                w, data, st, reg_lv, somber_lv, two_hand, override_lv=lv, enemy_preset=enemy_preset, buffs=buffs
+                w, data, st, reg_lv, somber_lv, two_hand, override_lv=lv, enemy_preset=enemy_preset, buffs=buffs, custom_enemy_preset=custom_enemy_preset
             )
 
         cur_res = eval_vec(cur)

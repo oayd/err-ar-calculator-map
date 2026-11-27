@@ -1,8 +1,21 @@
-# Elden Ring Weapon Calculator & Map — v2.0.0: UI Update (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.1.0 (ERR v2.3.10.1)
 
 A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
 
-## What's New in v2.0.0: UI Update
+## What's New in v2.1.0: Boss Resistances, Live AR, Overlay & QoL Update
+- **Enemy Damage Resistances (Boss HUD & Armory)**:
+  - Displays all 8 damage negations (`Std`, `Sla`, `Str`, `Pie`, `Mag`, `Fir`, `Ltn`, `Hol`) on the Boss HUD across `Classic`, `Compact`, and `Dual` layouts in both **Show Over Map** and **Show Below** placements, with `Compact` (weaknesses `< 0%`, resistances `>= 40%`, or lowest negation fallback), `Full`, and `Off` modes plus a bindable global hotkey.
+  - Added **Current Live Target (Auto)** and a searchable **Boss Picker** (1,152 NPC/boss presets) in Armory — plus one-click jump from any Boss HUD name to inspect that boss directly.
+- **Direct Live Per-Slot AR Reader & Accurate Buff/Debuff Classification**:
+  - Reads Elden Ring's exact computed Attack Power per hand slot directly from offline `PlayerGameData` when attached, and classifies active `SpEffect` damage buffs accurately instead of flagging shared buff icons or tradeoff buffs as debuffs.
+- **PiP Overlay QoL**:
+  - **Lock PiP Position & Size**, **Smart Auto-Hide Outside Elden Ring** (stays visible over Elden Ring, the overlay/app itself, and Alt-Tab / Taskbar shell windows), and **Customizable Combat / Idle Smart Fade & Opacity** (`10–100%` idle/combat opacity, fade timing, and hover-to-brighten).
+- **Equipment & Armory QoL**:
+  - **Owned-Only Filtering**, **Equip Load & Roll Tier Bar** (including live RAM Tears, Fortunes, Great Runes, Talismans, and next-breakpoint preview), **Favorites & Quick Filter Presets** (`All`, `Equipped`, `Owned + Effective`, `Favorites`, `Bleed`, `Buffable`), and **Real Upgrade-Level Sync** (`Inv +Lv`) from your save/RAM inventory.
+- **Map & General QoL**:
+  - **Locate Closest Item on Map**, **Auto-Clear Blue Beacon on Arrival** (`15m` radius), an **Elden Ring-Style Player Map Icon**, **Minimize-to-Tray**, and **ER-Styled Toast Notifications**.
+
+## Highlights from v2.0.0: UI Update
 - **Authentic Elden Ring UI Overhaul**: Rebuilt navigation (`Equipment`, `Armory`, `Map`, `PiP Viewer`, `System`), status effect icons, 24 ERR affinity icons, 44 weapon-class icons, prompt-glyph theme switcher (`Auto`, `Keyboard & Mouse`, `Xbox`, `PS5`), and contextual footer prompts.
 - **Equipment Tab**: Native 3-column Elden Ring equipment screen showing `R1–R3`, `L1–L3`, Arrows, Bolts, Armor, Talismans, and Memorized Spells with an Armament Detail card (Attack Power, Guarded Damage Negation, Scaling & Passive Effects), Status Summary panel (`F` to cycle), Slot Picker, and one-click `Open in Armory`.
 - **Stacked HUD Overlay & Dynamic Boss Bar**:

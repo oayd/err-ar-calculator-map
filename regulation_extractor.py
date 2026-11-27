@@ -171,7 +171,11 @@ def unpack_regulation_params(
     bnd = decompress_dcx_auto(dec, oodle_fn=oodle_fn)
     entries = game_map_extractor._parse_bnd4_entries(bnd)
     wanted = set(wanted_names) if wanted_names is not None else set(REQUIRED_PARAM_NAMES)
-    optional = set(optional_names) if optional_names is not None else ({"magic.param"} if wanted_names is None else set())
+    optional = (
+        set(optional_names)
+        if optional_names is not None
+        else ({"magic.param", "npcparam.param"} if wanted_names is None else set())
+    )
     all_wanted = wanted | optional
 
     out: Dict[str, bytes] = {}
@@ -427,6 +431,42 @@ def _extract_sp_bonuses(sid: int, sp_map: Dict[int, bytes]) -> Tuple[List[int], 
     return stats, mult, stance_rate, (cond_id if cond_id > 0 else 0)
 
 
+def _extract_sp_equip_load(sid: int, sp_map: Dict[int, bytes]) -> Tuple[int, float]:
+    sr = sp_map.get(sid)
+    if sr is None:
+        return 0, 1.0
+    end_b = _s8(sr, 800)
+    ew_raw = _f32(sr, 228)
+    ew = ew_raw if (math.isfinite(ew_raw) and 0.05 < ew_raw < 20.0) else 1.0
+    return int(end_b), float(ew)
+
+
+def _load_npc_meta_for_extractor() -> Tuple[Dict[int, str], Set[str]]:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for cand in (
+        os.path.join(base_dir, "err_map_data.json.gz"),
+        os.path.join(os.path.dirname(base_dir), "err_map_data.json.gz"),
+    ):
+        if os.path.isfile(cand):
+            try:
+                with gzip.open(cand, "rt", encoding="utf-8") as fh:
+                    md = json.load(fh)
+                npc_meta = {
+                    int(k): str(v[0] or "").strip()
+                    for k, v in (md.get("npcMeta") or {}).items()
+                    if isinstance(v, (list, tuple)) and v and v[0]
+                }
+                boss_names = {
+                    str(m.get("name") or "").strip().lower()
+                    for m in (md.get("markers") or [])
+                    if m.get("cat") == "boss" and m.get("name")
+                }
+                return npc_meta, boss_names
+            except Exception:
+                pass
+    return {}, set()
+
+
 def _detect_mod_label(mod_dir: Optional[str], fallback_data: Optional[Dict[str, Any]], explicit_label: Optional[str]) -> str:
     if explicit_label:
         return explicit_label
@@ -544,7 +584,7 @@ def build_weapon_payload_from_params(
     weapons: List[Dict[str, Any]] = []
     used_sp_ids: Set[int] = set()
     used_reinf_ids: Set[int] = set()
-    used_ccg_ids: Set[int] = set()
+    used_ccg_ids: Set[int] = {220}
     used_aec_ids: Set[int] = set()
 
     for rid, r, nm in raw_valid:
@@ -758,6 +798,8 @@ def build_weapon_payload_from_params(
         tot_st = [0, 0, 0, 0, 0]
         tot_mult = [1.0, 1.0, 1.0, 1.0, 1.0]
         tot_sa = 1.0
+        tot_end = 0
+        tot_ew = 1.0
         for off in (40, 44, 48):
             sid = _s32(r, off)
             if sid <= 0:
@@ -767,14 +809,24 @@ def build_weapon_payload_from_params(
                 tot_st[k] += st_b[k]
                 tot_mult[k] *= m_b[k]
             tot_sa *= sa_b
+            eb, ewr = _extract_sp_equip_load(sid, sp_map)
+            tot_end += eb
+            tot_ew *= ewr
 
+        w_val = round(_f32(r, 36), 2)
         entry: Dict[str, Any] = {"n": nm, "s": slot_idx}
+        if math.isfinite(w_val) and w_val > 0.0:
+            entry["w"] = w_val
         if any(x != 0 for x in tot_st):
             entry["st"] = tot_st
         if any(abs(m - 1.0) > 1e-4 for m in tot_mult):
             entry["m"] = [round(m, 6) for m in tot_mult]
         if abs(tot_sa - 1.0) > 1e-4:
             entry["sa"] = round(tot_sa, 6)
+        if tot_end != 0:
+            entry["end"] = tot_end
+        if abs(tot_ew - 1.0) > 1e-4:
+            entry["ew"] = round(tot_ew, 4)
         armors[str(rid)] = entry
 
     talismans: Dict[str, Dict[str, Any]] = {}
@@ -784,6 +836,7 @@ def build_weapon_payload_from_params(
             continue
         sid = _s32(r, 4)
         st_b, m_b, sa_b, cond_id = _extract_sp_bonuses(sid, sp_map)
+        end_b, ew_r = _extract_sp_equip_load(sid, sp_map)
         cm = None
         if cond_id > 0:
             c_st, c_m, c_sa, _ = _extract_sp_bonuses(cond_id, sp_map)
@@ -793,13 +846,20 @@ def build_weapon_payload_from_params(
                 st_b[k] += c_st[k]
             sa_b *= c_sa
 
+        w_val = round(_f32(r, 12), 2)
         entry = {"n": nm}
+        if math.isfinite(w_val) and w_val > 0.0:
+            entry["w"] = w_val
         if any(x != 0 for x in st_b):
             entry["st"] = st_b
         if any(abs(m - 1.0) > 1e-4 for m in m_b):
             entry["m"] = m_b
         if abs(sa_b - 1.0) > 1e-4:
             entry["sa"] = round(sa_b, 6)
+        if end_b != 0:
+            entry["end"] = end_b
+        if abs(ew_r - 1.0) > 1e-4:
+            entry["ew"] = round(ew_r, 4)
         if cm:
             entry["cm"] = cm
         talismans[str(rid)] = entry
@@ -854,6 +914,50 @@ def build_weapon_payload_from_params(
             continue
         spells[str(gid)] = {"n": snm, "ic": _u16(gr, 48)}
 
+    npc_def: Dict[str, List[int]] = {}
+    boss_presets: List[Dict[str, Any]] = []
+    if "npcparam.param" in params:
+        npc_rows = parse_param_rows(params["npcparam.param"], 736)
+        npc_map_meta, boss_marker_names = _load_npc_meta_for_extractor()
+        bad_terms = ("dummy", "buddystone", "human", "test")
+        by_clean_name: Dict[str, Tuple[int, int, List[int], List[int]]] = {}
+        for nid, nr in npc_rows:
+            defs = [_u16(nr, o) for o in (364, 368, 370, 372, 374)]
+            negs: List[int] = []
+            for o in (420, 424, 428, 432, 436, 440, 444, 448):
+                cut = _f32(nr, o)
+                pct = int(round((1.0 - cut) * 100.0)) if math.isfinite(cut) else 0
+                negs.append(max(-200, min(100, pct)))
+            npc_def[str(nid)] = defs + negs
+
+            nm = npc_map_meta.get(nid, "")
+            if not nm or len(nm) < 3:
+                continue
+            nl = nm.lower()
+            if any(bt in nl for bt in bad_terms):
+                continue
+            is_boss = 1 if (nl in boss_marker_names or "(boss)" in nl) else 0
+            # Prefer boss-tagged or higher-defense variant when multiple NPC rows share a display name
+            score = (is_boss * 10000) + sum(defs)
+            prev = by_clean_name.get(nm)
+            if prev is None or score > prev[0]:
+                by_clean_name[nm] = (score, nid, defs, negs)
+
+        for nm, (score, nid, defs, negs) in sorted(
+            by_clean_name.items(),
+            key=lambda kv: (0 if kv[1][0] >= 10000 else 1, kv[0].lower()),
+        ):
+            boss_presets.append({
+                "id": nid,
+                "n": nm,
+                "b": 1 if score >= 10000 else 0,
+                "d": defs,
+                "g": negs,
+            })
+    elif fallback_data:
+        npc_def = dict(fallback_data.get("npcDef") or {})
+        boss_presets = list(fallback_data.get("bossPresets") or [])
+
     return {
         "mod": _detect_mod_label(mod_dir, fallback_data, mod_label),
         "weaponTypes": {str(k): v for k, v in sorted(weapon_types.items())},
@@ -869,6 +973,8 @@ def build_weapon_payload_from_params(
         "greases": greases,
         "ammo": ammo,
         "spells": spells,
+        "npcDef": npc_def,
+        "bossPresets": boss_presets,
     }
 
 
