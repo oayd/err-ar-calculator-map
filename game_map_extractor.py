@@ -611,7 +611,8 @@ def extract_maps_and_icons(
         sbmp.close()
 
     report(90, "Extracting collectible & bell bearing icons from 00_solo...")
-    want_good_icons = {383, 384, 400, 553, 3020, 3021, 3022, 3023, 3090, 3142, 3143, 3144, 3146, 3816, 3817} | set(range(400, 446))
+    stone_icon_ids = {2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2020}
+    want_good_icons = {383, 384, 400, 553, 3020, 3021, 3022, 3023, 3090, 3142, 3143, 3144, 3146, 3816, 3817} | set(range(400, 446)) | stone_icon_ids
     for cand_base in (out_base_dir, os.path.dirname(os.path.abspath(__file__))):
         mp_json = os.path.join(cand_base, "err_map_data.json.gz")
         if os.path.isfile(mp_json):
@@ -665,6 +666,8 @@ def extract_maps_and_icons(
         ("crystal_tear", 400),
         ("memory_stone", 553),
         ("whetblade", 3020),
+        ("smithing_stone", 2008),
+        ("somber_stone", 2018),
     ):
         gkey = f"good_{default_id}"
         if gkey in icons and cat_key not in icons:

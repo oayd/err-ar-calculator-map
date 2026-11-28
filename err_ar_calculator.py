@@ -2177,6 +2177,7 @@ def run_self_test(report_path: Optional[str]):
                 "grace", "weapon", "talisman", "armor", "boss", "merchant", "poi",
                 "bell_bearing", "golden_seed", "sacred_tear", "scadutree",
                 "revered_ash", "crystal_tear", "memory_stone", "whetblade",
+                "smithing_stone", "somber_stone",
             ):
                 assert map_state["counts"].get(req_cat, 0) > 0, f"Empty map category {req_cat}: {map_state['counts']}"
             if has_local_maps:
@@ -2245,6 +2246,8 @@ def run_self_test(report_path: Optional[str]):
             assert pip_res["mapBody"] and pip_res["statsBody"] and pip_res["statsCells"] == 8 and pip_res["offClean"] and pip_res["hoverClean"] and pip_res["opacityClampedLow"] == 15 and pip_res["proxShrinkOk"] and pip_res["pipSearchOk"] and pip_res["offscreenArrowOk"], f"PiP modes failed: {pip_res}"
             v15_res = w.evaluate_js("window.__ERR_TEST.testV15Features()")
             assert v15_res["manualToggleOk"] and v15_res["modalOk"] and v15_res["bbWithIcon"] >= 50, f"v1.5 features failed: {v15_res}"
+            stone_res = w.evaluate_js("window.__ERR_TEST.testSmithingStones()")
+            assert stone_res and stone_res.get("ok"), f"Smithing stones test failed: {stone_res}"
             assert isinstance(memory_reader._is_eac_running(), bool)
             assert len(api._npc_meta) >= 500, f"Expected ERR npcMeta >= 500, got {len(api._npc_meta)}"
             import struct as _st
@@ -2421,7 +2424,8 @@ def run_self_test(report_path: Optional[str]):
                 f"OPTIMIZER_TOP={opt_res['topAff']}|{opt_res['topEff']:.1f}|count={opt_res['count']}",
                 f"COMPARE_TRAY_COUNT={cmp_n}",
                 f"MAP_TOTAL_MARKERS={map_state['totalCount']}",
-                f"MAP_CATS_OK=15",
+                f"MAP_CATS_OK=17",
+                f"STONE_COUNTS={stone_res['regCount']}/{stone_res['somCount']}",
                 f"MAP_IMAGES={','.join(k for k, v in img_check.items() if v)}",
                 f"MAP_ICONS_LOADED={map_state['iconsLoaded']}",
                 f"MAP_TILES_OK={bool(tile_check and tile_check.get('m00') and tile_check.get('m10'))}",

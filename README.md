@@ -1,6 +1,13 @@
-# Elden Ring Weapon Calculator & Map — v2.1.1 (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.1.2 (ERR v2.3.10.1)
 
 A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
+
+## What's New in v2.1.2: Smithing Stones & Somber Stones on World Map
+- **Two Separate Upgrade Material Categories (Unchecked by Default)**:
+  - **Smithing Stones** (`802` markers) and **Somber Stones** (`183` markers) across The Lands Between, Underground, and Shadow of the Erdtree.
+  - Covers ground/chest/corpse pickups (with quantities and save/RAM completion tracking), merchant shops (Gostoc, Iji, Kalé, regional merchants, and Twin Maiden Husks Bell-Bearing stock at Roundtable Hold), guaranteed drops, and clustered repeatable enemy farm drops with drop `%`.
+- **Authentic Elden Ring Icons**: Uses `+25` Ancient Dragon Smithing Stone and Somber Ancient Dragon Smithing Stone icons for the sidebar toggles, while each map pin and search result renders its individual tier icon.
+- **Smart `+value` Map & PiP Search**: Search any upgrade level directly (such as `+7`, `+18`, `+24`, `+25`, `somber +7`, `regular +7`, `shop +25`, or `farm +6`), even while the stone categories are unchecked.
 
 ## What's New in v2.1.1: Authentic Elden Ring Player Map Icon
 - Redesigned the live player marker on the World Map and PiP Minimap using the official in-game Elden Ring map sprites (`MENU_MAP_Player_01` rotating directional ring & spear underneath, `MENU_MAP_Player_02` upright Tarnished bust centered cleanly inside the hollow ring) with exact sub-pixel centering across every heading.
@@ -29,7 +36,7 @@ A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** s
 
 ## Core Features
 - **Exact ERR Weapon & Build Calculator (Armory)**: Calculates raw AR, effective AR vs. boss defenses, spell scaling, and status buildup across all 6,478 unmodded ERR weapons & 25 affinities — plus Respec Optimizer, Scaling Curves, and side-by-side Compare Tray.
-- **Interactive Live Map (Base Game, Underground & DLC)**: Over 4,200 searchable markers across The Lands Between, Underground, and Shadow of the Erdtree with 30 Hz live player tracking, automatic progress dimming/hiding from your save or live RAM, and in-game Blue Beacon & Green Stamp pins.
+- **Interactive Live Map (Base Game, Underground & DLC)**: Over 4,700 searchable markers across The Lands Between, Underground, and Shadow of the Erdtree with 30 Hz live player tracking, automatic progress dimming/hiding from your save or live RAM, and in-game Blue Beacon & Green Stamp pins.
 - **Live Boss & Enemy HUD (30 Hz)**: Elden Ring–style enemy bar displaying live HP, Stance/Poise (including Stance Broken state), and status buildup (Poison, Scarlet Rot, Bleed, Frost, Sleep, Madness) across 3 switchable layouts. Read-only offline RAM only; automatically disabled when EAC is running.
 - **Live Player Buff & Debuff Timers**: Strictly finite buffs/debuffs with clockwise sweep timers, crimson `▼` debuff indicators, ≤10s expiring pulse alerts, hover tooltips, and automatic suppression of rapidly looping passive effects (`>3×/10s`).
 - **Built-In `regulation.bin` Picker & Live-Game Mod Refresh**: Ships with **unmodded ERR v2.3.10.1** weapon & map data by default, while allowing you to browse any custom/modded `regulation.bin` or pull active params directly from a running Elden Ring session under **System → Mod / Regulation Source**.

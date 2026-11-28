@@ -96,7 +96,7 @@ CALIBRATIONS = {
 }
 
 # Known merchant/vendor aliases matching Community Row Names ShopLineupParam "[Vendor]" blocks
-KNOWN_VENDOR_MODELS = {"c3200", "c3210", "c3220"}
+KNOWN_VENDOR_MODELS = {"c3200", "c3220"}
 VENDOR_REGEX = re.compile(
     r"\b("
     r"merchant|kalé|kale|patches|gostoc|sellen|bernahl|boggart|gowry|"
@@ -113,6 +113,7 @@ BAD_VENDOR_KEYWORDS = (
     "incantation",
     "sorcery",
     "dragon communion",
+    "donkey",
 )
 
 
@@ -673,8 +674,9 @@ def extract_game_icons(vfs=None, needed_good_icons=None):
     for sbmp in sheets.values():
         sbmp.Dispose()
 
-    # Extract individual Goods collectible icons (Bell Bearings, Golden Seeds, Tears, Whetblades, etc.)
-    want_icons = set(needed_good_icons or ()) | {383, 384, 400, 553, 3020, 3142, 3816, 3817}
+    # Extract individual Goods collectible icons (Bell Bearings, Golden Seeds, Tears, Whetblades, Smithing Stones, etc.)
+    stone_icon_ids = {2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2020}
+    want_icons = set(needed_good_icons or ()) | {383, 384, 400, 553, 3020, 3142, 3816, 3817} | stone_icon_ids
     if want_icons:
         import game_map_extractor as gme
 
@@ -734,6 +736,8 @@ def extract_game_icons(vfs=None, needed_good_icons=None):
             ("crystal_tear", 400),
             ("memory_stone", 553),
             ("whetblade", 3020),
+            ("smithing_stone", 2008),
+            ("somber_stone", 2018),
         ):
             gkey = f"good_{default_id}"
             if gkey in icons and cat_key not in icons:
@@ -845,7 +849,41 @@ def main():
     npc_rows = {int(r.ID): r for r in npc_param.Rows}
     sp_rows = {int(r.ID): r for r in sp_param.Rows}
 
-    GOOD_CATS = ("bell_bearing", "golden_seed", "sacred_tear", "scadutree", "revered_ash", "crystal_tear", "memory_stone", "whetblade")
+    # goodId -> (cat, tier_label, plus_min, plus_max, plus_range_str)
+    STONE_META = {
+        10100: ("smithing_stone", "[1]", 1, 3, "+1\u2013+3"),
+        10101: ("smithing_stone", "[2]", 4, 6, "+4\u2013+6"),
+        10102: ("smithing_stone", "[3]", 7, 9, "+7\u2013+9"),
+        10103: ("smithing_stone", "[4]", 10, 12, "+10\u2013+12"),
+        10104: ("smithing_stone", "[5]", 13, 15, "+13\u2013+15"),
+        10105: ("smithing_stone", "[6]", 16, 18, "+16\u2013+18"),
+        10106: ("smithing_stone", "[7]", 19, 21, "+19\u2013+21"),
+        10107: ("smithing_stone", "[8]", 22, 24, "+22\u2013+24"),
+        10140: ("smithing_stone", "Ancient", 25, 25, "+25"),
+        10160: ("somber_stone", "[1]", 1, 1, "+1"),
+        10161: ("somber_stone", "[2]", 2, 2, "+2"),
+        10162: ("somber_stone", "[3]", 3, 3, "+3"),
+        10163: ("somber_stone", "[4]", 4, 4, "+4"),
+        10164: ("somber_stone", "[5]", 5, 5, "+5"),
+        10165: ("somber_stone", "[6]", 6, 6, "+6"),
+        10166: ("somber_stone", "[7]", 7, 7, "+7"),
+        10167: ("somber_stone", "[8]", 8, 8, "+8"),
+        10200: ("somber_stone", "[9]", 9, 9, "+9"),
+        10168: ("somber_stone", "Ancient", 10, 10, "+10"),
+    }
+    STONE_CATS = ("smithing_stone", "somber_stone")
+    GOOD_CATS = (
+        "bell_bearing",
+        "golden_seed",
+        "sacred_tear",
+        "scadutree",
+        "revered_ash",
+        "crystal_tear",
+        "memory_stone",
+        "whetblade",
+        "smithing_stone",
+        "somber_stone",
+    )
     good_cache = {}
     needed_good_icons = set()
     for gid, gr in gds_rows.items():
@@ -855,7 +893,10 @@ def main():
         nl = gname.lower()
         gt = safe_int(gr, "goodsType", -1)
         gcat = None
-        if "bell bearing" in nl:
+        smeta = STONE_META.get(gid)
+        if smeta is not None:
+            gcat = smeta[0]
+        elif "bell bearing" in nl:
             gcat = "bell_bearing"
         elif nl == "golden seed":
             gcat = "golden_seed"
@@ -875,7 +916,13 @@ def main():
             gicon = safe_int(gr, "iconId", 0)
             if gicon > 0:
                 needed_good_icons.add(gicon)
-            good_cache[gid] = {"cat": gcat, "id": gid, "goodId": gid, "goodIcon": gicon, "name": gname}
+            entry = {"cat": gcat, "id": gid, "goodId": gid, "goodIcon": gicon, "name": gname}
+            if smeta is not None:
+                entry["tierLabel"] = smeta[1]
+                entry["plusMin"] = smeta[2]
+                entry["plusMax"] = smeta[3]
+                entry["plusRange"] = smeta[4]
+            good_cache[gid] = entry
 
     available_icons = extract_game_icons(vfs, needed_good_icons) if (args.maps or args.icons) else set()
     if not available_icons and os.path.exists(ICONS_OUT_PATH):
@@ -938,14 +985,23 @@ def main():
 
     def extract_lot_items(row) -> list:
         out = []
-        seen = set()
+        by_key = {}
         lot_flag = safe_int(row, "getItemFlagId", 0)
+        total_wt = sum(max(0, safe_int(row, f"lotItemBasePoint0{s}", 0)) for s in range(1, 9))
         for slot in range(1, 9):
             cat = int(row[f"lotItemCategory0{slot}"].Value)
             iid = int(row[f"lotItemId0{slot}"].Value)
-            if iid <= 0 or (cat, iid) in seen:
+            if iid <= 0:
                 continue
-            seen.add((cat, iid))
+            qty = max(1, safe_int(row, f"lotItemNum0{slot}", 1))
+            wt = max(0, safe_int(row, f"lotItemBasePoint0{slot}", 0))
+            if (cat, iid) in by_key:
+                prev = by_key[(cat, iid)]
+                prev["qty"] = max(prev.get("qty", 1), qty)
+                prev["_wt"] = prev.get("_wt", 0) + wt
+                if total_wt > 0 and prev["_wt"] > 0:
+                    prev["dropPct"] = round((prev["_wt"] / total_wt) * 100.0, 1)
+                continue
             info = None
             if cat == 1:
                 info = resolve_good_info(iid)
@@ -962,6 +1018,11 @@ def main():
                 ef = sf if sf > 0 else (lot_flag if lot_flag > 0 else 0)
                 if ef > 0:
                     info["eventFlag"] = ef
+                info["qty"] = qty
+                info["_wt"] = wt
+                if total_wt > 0 and wt > 0:
+                    info["dropPct"] = round((wt / total_wt) * 100.0, 1)
+                by_key[(cat, iid)] = info
                 out.append(info)
         return out
 
@@ -1019,6 +1080,28 @@ def main():
 
     il_map_rows = {int(r.ID): r for r in il_map.Rows}
     il_enemy_rows = {int(r.ID): r for r in il_enemy.Rows}
+
+    all_npc_base_enemy_lots = {
+        int(nr["itemLotId_enemy"].Value)
+        for nr in npc_rows.values()
+        if int(nr["itemLotId_enemy"].Value) > 0
+    }
+    all_npc_base_map_lots = {
+        int(nr["itemLotId_map"].Value)
+        for nr in npc_rows.values()
+        if int(nr["itemLotId_map"].Value) > 0
+    }
+
+    def iter_consecutive_lot_rows(base_id: int, lot_dict: dict, base_set: set, max_span: int = 24):
+        cur = base_id
+        for _ in range(max_span):
+            row = lot_dict.get(cur)
+            if row is None:
+                break
+            if cur != base_id and cur in base_set:
+                break
+            yield cur, row, (cur == base_id)
+            cur += 1
 
     markers = []
     map_layers = {}
@@ -1214,21 +1297,60 @@ def main():
     # ------------------------------------------------------------------
     # 3. BUILD MERCHANT SHOP INVENTORIES FROM ShopLineupParam + CRN
     # ------------------------------------------------------------------
+    NPC_ID_TO_SHOP_BLOCK = {
+        32000010: 100500,  # Merchant Kale (Church of Elleh)
+        32001110: 100525,  # Nomadic Merchant (North Limgrave)
+        32001210: 100550,  # Nomadic Merchant (East Limgrave)
+        32001310: 100575,  # Nomadic Merchant (Coastal Cave)
+        32001412: 100600,  # Nomadic Merchant (East Weeping Peninsula)
+        32001520: 100625,  # Nomadic Merchant (Liurnia of the Lakes)
+        32001612: 100650,  # Isolated Merchant (Weeping Peninsula)
+        32001720: 100675,  # Isolated Merchant (Academy of Raya Lucaria)
+        32001820: 100700,  # Nomadic Merchant (North Liurnia)
+        32001933: 100725,  # Hermit Merchant (Leyndell Outer Wall)
+        32002030: 100750,  # Nomadic Merchant (Altus Plateau)
+        32002132: 100775,  # Nomadic Merchant (Mt. Gelmir)
+        32002240: 100800,  # Nomadic Merchant (Caelid Aeonia Swamp)
+        32002340: 100825,  # Nomadic Merchant (South Caelid)
+        32002766: 100850,  # Abandoned Merchant (Deeproot / Underground)
+        32002542: 100875,  # Isolated Merchant (Dragonbarrow)
+        32002650: 100900,  # Hermit Merchant (Mountaintops)
+        32002764: 100925,  # Abandoned Merchant (Siofra River)
+        32002860: 100950,  # Hermit Merchant (Ainsel River)
+        32002968: 100975,  # Imprisoned Merchant (Mohgwyn)
+        36650014: 100000,  # Gatekeeper Gostoc (Stormveil Main Gate)
+        46040020: 100225,  # Smithing Master / War Counselor Iji (Road to the Manor)
+    }
+
     vendor_shops = defaultdict(list)
+    shop_stones_by_block = defaultdict(list)
+    twin_maiden_stones = []
     for r in shop_param.Rows:
         sid = int(r.ID)
         if not (100000 <= sid < 200000):
+            continue
+        et = int(r["equipType"].Value)
+        eid = int(r["equipId"].Value)
+        cost = int(r["value"].Value)
+        if eid <= 0:
+            continue
+        if et == 3 and eid in STONE_META:
+            s_item = resolve_good_info(eid)
+            if s_item:
+                s_item["cost"] = cost
+                s_item["sellQty"] = safe_int(r, "sellQuantity", -1)
+                s_item["stockFlag"] = safe_int(r, "eventFlag_forStock", 0)
+                s_item["relFlag"] = safe_int(r, "eventFlag_forRelease", 0)
+                if 111875 <= sid <= 111893:
+                    twin_maiden_stones.append(s_item)
+                else:
+                    shop_stones_by_block[(sid // 25) * 25].append(s_item)
             continue
         crn_name = crn_shop.get(sid, "")
         m = re.match(r"^\[([^\]]+)\]", crn_name)
         if not m:
             continue
         vtag = m.group(1).split(" - ")[0].strip()
-        et = int(r["equipType"].Value)
-        eid = int(r["equipId"].Value)
-        cost = int(r["value"].Value)
-        if eid <= 0:
-            continue
         item = None
         if et == 0:
             item = resolve_weapon_info(eid, False)
@@ -1250,7 +1372,7 @@ def main():
                 continue
             cl = candidate.lower().strip()
             for vkey, items in vendor_shops.items():
-                if vkey == cl or (len(vkey) >= 5 and (vkey in cl or cl in vkey)):
+                if vkey == cl or ((len(vkey) >= 5 or vkey == "iji") and (vkey in cl or cl in vkey)):
                     for it in items:
                         k = (it["cat"], it["id"])
                         if k not in seen_items:
@@ -1266,6 +1388,8 @@ def main():
 
     seen_boss = set()
     seen_merch = set()
+    emitted_stone_blocks = set()
+    farm_clusters = {}
     treasure_items_count = defaultdict(int)
 
     for mp in msb_files:
@@ -1283,17 +1407,15 @@ def main():
             for p in plist:
                 parts_by_name[p.Name] = p
 
-        # A. MSBE Treasures (chests, corpses, pickups) -> Weapons, Armor, Talismans
+        # A. MSBE Treasures (chests, corpses, pickups) -> Weapons, Armor, Talismans, Stones
+        all_msb_treasure_lids = {int(t.ItemLotID) for t in msb.Events.Treasures if int(t.ItemLotID) > 0} | all_npc_base_map_lots
         grouped_treasures = defaultdict(list)  # (u, v, layer, cat) -> list of item dicts
         for t in msb.Events.Treasures:
             lot_id = int(t.ItemLotID)
             if lot_id <= 0:
                 continue
-            lot_row = il_map_rows.get(lot_id) or il_enemy_rows.get(lot_id)
-            if not lot_row:
-                continue
-            items = extract_lot_items(lot_row)
-            if not items:
+            use_dict = il_map_rows if lot_id in il_map_rows else (il_enemy_rows if lot_id in il_enemy_rows else None)
+            if use_dict is None:
                 continue
             part = parts_by_name.get(t.TreasurePartName)
             if not part:
@@ -1302,11 +1424,18 @@ def main():
             if not pos:
                 continue
             src_kind = "Chest / Object" if "AEG" in (t.TreasurePartName or "") and not any(x in (t.Name or "") for x in ("死体", "Corpse")) else "Treasure / Corpse"
-            for it in items:
-                it_copy = dict(it)
-                it_copy["source"] = src_kind
-                it_copy["lotId"] = lot_id
-                grouped_treasures[(pos["layer"], pos["u"], pos["v"], pos["wx"], pos["wy"], pos["wz"], it["cat"])].append(it_copy)
+            base_flag = safe_int(use_dict[lot_id], "getItemFlagId", 0)
+            for _clid, crow, is_base in iter_consecutive_lot_rows(lot_id, use_dict, all_msb_treasure_lids, max_span=16):
+                citems = extract_lot_items(crow)
+                for it in citems:
+                    if not is_base and it["cat"] not in STONE_CATS:
+                        continue
+                    it_copy = dict(it)
+                    it_copy["source"] = src_kind
+                    it_copy["lotId"] = _clid
+                    if not it_copy.get("eventFlag") and base_flag > 0:
+                        it_copy["eventFlag"] = base_flag
+                    grouped_treasures[(pos["layer"], pos["u"], pos["v"], pos["wx"], pos["wy"], pos["wz"], it_copy["cat"])].append(it_copy)
 
         for (layer, u, v, wx, wy, wz, cat), items in grouped_treasures.items():
             # Deduplicate identical IDs at exact same spot
@@ -1350,6 +1479,9 @@ def main():
             else:
                 for it in uniq:
                     treasure_items_count[cat] += 1
+                    is_stone = cat in STONE_CATS
+                    qty_str = f" \u00d7{it['qty']}" if (is_stone and it.get("qty", 1) > 1) else ""
+                    sub_txt = f"{it['source']}{qty_str} ({it['plusRange']})" if is_stone else it["source"]
                     m_obj = {
                         "id": f"tr:{map_code}:{cat}:{it['id']}:{round(u,4)}",
                         "cat": cat,
@@ -1357,12 +1489,16 @@ def main():
                         "layer": layer,
                         "u": u,
                         "v": v,
-                        "sub": it["source"],
+                        "sub": sub_txt,
                         "mapId": map_code,
                         "wx": wx,
                         "wy": wy,
                         "wz": wz,
                     }
+                    if is_stone:
+                        m_obj["src"] = "pickup"
+                        m_obj["plusMin"] = int(it["plusMin"])
+                        m_obj["plusMax"] = int(it["plusMax"])
                     if it.get("calcId") is not None:
                         m_obj["calcId"] = it["calcId"]
                         m_obj["baseName"] = it["baseName"]
@@ -1379,7 +1515,7 @@ def main():
                         m_obj["eventFlag"] = int(it["eventFlag"])
                     markers.append(m_obj)
 
-        # B. MSBE Enemies -> Bosses, Merchants, Guaranteed NPC/Scarab drops
+        # B. MSBE Enemies -> Bosses, Merchants, Guaranteed & Repeatable Stone Drops
         for e in msb.Parts.Enemies:
             npc_id = int(e.NPCParamID)
             if npc_id <= 0 or npc_id == 10000300 or e.ModelName == "c1000":
@@ -1406,23 +1542,78 @@ def main():
             if not pos:
                 continue
 
-            # 1) Guaranteed drops on NpcParam (map lot or one-time enemy lot)
+            # 1) Drops on NpcParam (guaranteed map/enemy lots, plus repeatable farm stone lots)
             drop_items = []
-            for lot_col, lot_dict, is_guaranteed_col in (
-                ("itemLotId_map", il_map_rows, True),
-                ("itemLotId_enemy", il_enemy_rows, False),
+            for lot_col, lot_dict, is_guaranteed_col, base_set in (
+                ("itemLotId_map", il_map_rows, True, all_npc_base_map_lots),
+                ("itemLotId_enemy", il_enemy_rows, False, all_npc_base_enemy_lots),
             ):
                 lid = int(nr[lot_col].Value)
                 if lid <= 0:
                     continue
-                lrow = lot_dict.get(lid) or il_map_rows.get(lid) or il_enemy_rows.get(lid)
-                if not lrow:
+                use_dict = lot_dict if lid in lot_dict else (il_map_rows if lid in il_map_rows else (il_enemy_rows if lid in il_enemy_rows else None))
+                if use_dict is None:
                     continue
-                if not is_guaranteed_col and int(lrow["getItemFlagId"].Value) <= 0:
-                    continue
-                for it in extract_lot_items(lrow):
-                    it["source"] = f"Drop — {disp_name or e.ModelName}"
-                    drop_items.append(it)
+                base_flag = safe_int(use_dict[lid], "getItemFlagId", 0)
+                for _clid, crow, is_base in iter_consecutive_lot_rows(lid, use_dict, base_set, max_span=28):
+                    row_flag = safe_int(crow, "getItemFlagId", 0)
+                    eff_flag = row_flag if row_flag > 0 else base_flag
+                    is_repeatable_lot = (not is_guaranteed_col) and eff_flag <= 0
+                    if is_repeatable_lot:
+                        if not disp_name or is_dummy_name(disp_name):
+                            continue
+                        for it in extract_lot_items(crow):
+                            if it["cat"] not in STONE_CATS:
+                                continue
+                            pct = float(it.get("dropPct") or 0.0)
+                            if pct <= 0.0:
+                                continue
+                            cx = int(math.floor(pos["wx"] / 120.0))
+                            cz = int(math.floor(pos["wz"] / 120.0))
+                            ckey = (it["cat"], int(it["id"]), disp_name, pos["layer"], cx, cz)
+                            cl = farm_clusters.get(ckey)
+                            if cl is None:
+                                farm_clusters[ckey] = {
+                                    "cat": it["cat"],
+                                    "gid": int(it["id"]),
+                                    "name": it["name"],
+                                    "enemy": disp_name,
+                                    "layer": pos["layer"],
+                                    "cx": cx,
+                                    "cz": cz,
+                                    "u_sum": pos["u"],
+                                    "v_sum": pos["v"],
+                                    "wx_sum": pos["wx"],
+                                    "wy_sum": pos["wy"],
+                                    "wz_sum": pos["wz"],
+                                    "n": 1,
+                                    "pct": pct,
+                                    "qty": int(it.get("qty", 1)),
+                                    "mapId": map_code,
+                                    "goodIcon": int(it.get("goodIcon") or 0),
+                                    "plusMin": int(it["plusMin"]),
+                                    "plusMax": int(it["plusMax"]),
+                                    "plusRange": it["plusRange"],
+                                }
+                            else:
+                                cl["u_sum"] += pos["u"]
+                                cl["v_sum"] += pos["v"]
+                                cl["wx_sum"] += pos["wx"]
+                                cl["wy_sum"] += pos["wy"]
+                                cl["wz_sum"] += pos["wz"]
+                                cl["n"] += 1
+                                if pct > cl["pct"]:
+                                    cl["pct"] = pct
+                                if int(it.get("qty", 1)) > cl["qty"]:
+                                    cl["qty"] = int(it.get("qty", 1))
+                        continue
+                    for it in extract_lot_items(crow):
+                        if not is_base and it["cat"] not in STONE_CATS:
+                            continue
+                        it["source"] = f"Drop \u2014 {disp_name or e.ModelName}"
+                        if not it.get("eventFlag") and eff_flag > 0:
+                            it["eventFlag"] = eff_flag
+                        drop_items.append(it)
 
             if drop_items:
                 armor_drops = [it for it in drop_items if it["cat"] == "armor"]
@@ -1435,7 +1626,7 @@ def main():
                         "layer": pos["layer"],
                         "u": pos["u"],
                         "v": pos["v"],
-                        "sub": f"Drop — {disp_name or 'Enemy'}" if len(armor_drops) == 1 else f"Drop ({disp_name or 'Enemy'}): " + ", ".join(x["name"] for x in armor_drops[:4]),
+                        "sub": f"Drop \u2014 {disp_name or 'Enemy'}" if len(armor_drops) == 1 else f"Drop ({disp_name or 'Enemy'}): " + ", ".join(x["name"] for x in armor_drops[:4]),
                         "items": [x["name"] for x in armor_drops],
                         "itemIds": [int(x["id"]) for x in armor_drops],
                         "itemId": int(armor_drops[0]["id"]),
@@ -1450,6 +1641,9 @@ def main():
                 for it in drop_items:
                     if it["cat"] in ("weapon", "talisman") or it["cat"] in GOOD_CATS:
                         treasure_items_count[it["cat"]] += 1
+                        is_stone = it["cat"] in STONE_CATS
+                        qty_str = f" \u00d7{it['qty']}" if (is_stone and it.get("qty", 1) > 1) else ""
+                        sub_txt = f"{it['source']}{qty_str} ({it['plusRange']})" if is_stone else it["source"]
                         m_obj = {
                             "id": f"drop:{map_code}:{npc_id}:{it['cat']}:{it['id']}",
                             "cat": it["cat"],
@@ -1457,12 +1651,16 @@ def main():
                             "layer": pos["layer"],
                             "u": pos["u"],
                             "v": pos["v"],
-                            "sub": it["source"],
+                            "sub": sub_txt,
                             "mapId": map_code,
                             "wx": pos["wx"],
                             "wy": pos["wy"],
                             "wz": pos["wz"],
                         }
+                        if is_stone:
+                            m_obj["src"] = "drop"
+                            m_obj["plusMin"] = int(it["plusMin"])
+                            m_obj["plusMax"] = int(it["plusMax"])
                         if it.get("calcId") is not None:
                             m_obj["calcId"] = it["calcId"]
                             m_obj["baseName"] = it["baseName"]
@@ -1479,13 +1677,13 @@ def main():
                             m_obj["eventFlag"] = int(it["eventFlag"])
                         markers.append(m_obj)
 
-            # 2) Merchant detection (strictly exclude bosses / whole-word match so 'Malenia' never matches 'enia')
+            # 2) Merchant detection (strictly exclude bosses / donkeys / whole-word match so 'Malenia' never matches 'enia')
             lower_all = f"{fmg_name} {crn_name}".lower()
             is_merchant = False
-            if not is_boss_flag:
+            if not is_boss_flag and not any(bk in lower_all for bk in BAD_VENDOR_KEYWORDS):
                 if 180000 <= nid <= 180999 or e.ModelName in KNOWN_VENDOR_MODELS:
                     is_merchant = True
-                elif talk_id > 0 and VENDOR_REGEX.search(lower_all) and not any(bk in lower_all for bk in BAD_VENDOR_KEYWORDS):
+                elif talk_id > 0 and VENDOR_REGEX.search(lower_all):
                     is_merchant = True
 
             if is_merchant and disp_name:
@@ -1493,6 +1691,16 @@ def main():
                 if mk not in seen_merch:
                     seen_merch.add(mk)
                     shop_items = match_vendor_shop(fmg_name, crn_name)
+                    s_block = NPC_ID_TO_SHOP_BLOCK.get(npc_id)
+                    npc_stones = []
+                    if s_block is not None and s_block not in emitted_stone_blocks:
+                        npc_stones = shop_stones_by_block.get(s_block, [])
+                        if npc_stones:
+                            emitted_stone_blocks.add(s_block)
+                    merch_items_list = [f"{x['name']} ({x['cost']} Runes)" if x.get("cost") else x["name"] for x in shop_items]
+                    for sit in npc_stones:
+                        stock_txt = "Unlimited" if sit["sellQty"] < 0 else f"Stock \u00d7{sit['sellQty']}"
+                        merch_items_list.append(f"{sit['name']} ({sit['cost']:,} Runes, {stock_txt})")
                     markers.append(
                         {
                             "id": f"merch:{map_code}:{npc_id}:{round(pos['u'],4)}",
@@ -1501,8 +1709,8 @@ def main():
                             "layer": pos["layer"],
                             "u": pos["u"],
                             "v": pos["v"],
-                            "sub": f"Merchant ({len(shop_items)} equip items)" if shop_items else "Merchant / Vendor",
-                            "items": [f"{x['name']} ({x['cost']} Runes)" if x.get("cost") else x["name"] for x in shop_items],
+                            "sub": f"Merchant ({len(merch_items_list)} items)" if merch_items_list else "Merchant / Vendor",
+                            "items": merch_items_list,
                             "mapId": map_code,
                             "wx": pos["wx"],
                             "wy": pos["wy"],
@@ -1520,7 +1728,7 @@ def main():
                                 "layer": pos["layer"],
                                 "u": pos["u"],
                                 "v": pos["v"],
-                                "sub": f"Sold by {disp_name}" + (f" · {sit['cost']} Runes" if sit.get("cost") else ""),
+                                "sub": f"Sold by {disp_name}" + (f" \u00b7 {sit['cost']} Runes" if sit.get("cost") else ""),
                                 "mapId": map_code,
                                 "wx": pos["wx"],
                                 "wy": pos["wy"],
@@ -1534,6 +1742,32 @@ def main():
                             elif sit["cat"] in ("armor", "talisman"):
                                 sm["itemId"] = int(sit["id"])
                             markers.append(sm)
+                    for sit in npc_stones:
+                        treasure_items_count[sit["cat"]] += 1
+                        stock_txt = "Unlimited" if sit["sellQty"] < 0 else f"Stock \u00d7{sit['sellQty']}"
+                        sm = {
+                            "id": f"shop:{npc_id}:{sit['cat']}:{sit['id']}",
+                            "cat": sit["cat"],
+                            "name": sit["name"],
+                            "layer": pos["layer"],
+                            "u": pos["u"],
+                            "v": pos["v"],
+                            "sub": f"Shop \u00b7 {disp_name} \u00b7 {sit['cost']:,} Runes \u00b7 {stock_txt} ({sit['plusRange']})",
+                            "src": "shop",
+                            "plusMin": int(sit["plusMin"]),
+                            "plusMax": int(sit["plusMax"]),
+                            "goodId": int(sit["goodId"]),
+                            "mapId": map_code,
+                            "wx": pos["wx"],
+                            "wy": pos["wy"],
+                            "wz": pos["wz"],
+                        }
+                        if sit.get("goodIcon"):
+                            sm["goodIcon"] = int(sit["goodIcon"])
+                            sm["icon"] = f"good_{int(sit['goodIcon'])}"
+                        if sit.get("sellQty", -1) > 0 and sit.get("stockFlag", 0) > 0:
+                            sm["eventFlag"] = int(sit["stockFlag"])
+                        markers.append(sm)
                 continue
 
             # 3) Boss detection (isSoulGetByBoss, FMG healthbar nid>=900M, or named boss in CRN with high HP/drops)
@@ -1572,11 +1806,70 @@ def main():
                             bm["eventFlags"] = bflags
                     markers.append(bm)
 
+    # Emit clustered repeatable farmable enemy stone drops
+    for ckey, cl in farm_clusters.items():
+        n = cl["n"]
+        pct_val = cl["pct"]
+        pct_str = f"{int(pct_val)}" if abs(pct_val - round(pct_val)) < 0.05 else f"{pct_val:.1f}"
+        spawn_str = f" \u00d7{n} spawns" if n > 1 else ""
+        qty_str = f" \u00b7 \u00d7{cl['qty']}" if cl["qty"] > 1 else ""
+        fm = {
+            "id": f"farm:{cl['layer']}:{cl['cat']}:{cl['gid']}:{cl['cx']}_{cl['cz']}:{abs(hash(cl['enemy'])) % 100000}",
+            "cat": cl["cat"],
+            "name": cl["name"],
+            "layer": cl["layer"],
+            "u": round(cl["u_sum"] / n, 6),
+            "v": round(cl["v_sum"] / n, 6),
+            "sub": f"Farm Drop (~{pct_str}%) \u2014 {cl['enemy']}{spawn_str}{qty_str} ({cl['plusRange']})",
+            "src": "farm",
+            "plusMin": cl["plusMin"],
+            "plusMax": cl["plusMax"],
+            "goodId": cl["gid"],
+            "mapId": cl["mapId"],
+            "wx": round(cl["wx_sum"] / n, 2),
+            "wy": round(cl["wy_sum"] / n, 2),
+            "wz": round(cl["wz_sum"] / n, 2),
+        }
+        if cl["goodIcon"]:
+            fm["goodIcon"] = cl["goodIcon"]
+            fm["icon"] = f"good_{cl['goodIcon']}"
+        markers.append(fm)
+
+    # Emit Twin Maiden Husks (Roundtable Hold) Bell-Bearing infinite stone listings
+    if twin_maiden_stones:
+        rt_grace = next(
+            (m for m in markers if m["cat"] == "grace" and "table of lost grace" in m["name"].lower()),
+            None,
+        )
+        if rt_grace:
+            for sit in twin_maiden_stones:
+                tm = {
+                    "id": f"shop:twin_maiden:{sit['cat']}:{sit['id']}",
+                    "cat": sit["cat"],
+                    "name": sit["name"],
+                    "layer": rt_grace["layer"],
+                    "u": rt_grace["u"],
+                    "v": rt_grace["v"],
+                    "sub": f"Shop \u00b7 Twin Maiden Husks (Bell Bearing) \u00b7 {sit['cost']:,} Runes \u00b7 Unlimited ({sit['plusRange']})",
+                    "src": "shop",
+                    "plusMin": int(sit["plusMin"]),
+                    "plusMax": int(sit["plusMax"]),
+                    "goodId": int(sit["goodId"]),
+                    "mapId": rt_grace["mapId"],
+                    "wx": rt_grace["wx"],
+                    "wy": rt_grace["wy"],
+                    "wz": rt_grace["wz"],
+                }
+                if sit.get("goodIcon"):
+                    tm["goodIcon"] = int(sit["goodIcon"])
+                    tm["icon"] = f"good_{int(sit['goodIcon'])}"
+                markers.append(tm)
+
     # Deduplicate overlapping identical items placed twice by alternate map layers (_00 vs _01/_02)
     final_markers = []
     seen_global = set()
     for m in markers:
-        key = (m["cat"], m["layer"], m["name"].lower(), round(m["u"], 3), round(m["v"], 3))
+        key = (m["cat"], m.get("src", ""), m["layer"], m["name"].lower(), round(m["u"], 3), round(m["v"], 3))
         if key in seen_global:
             continue
         seen_global.add(key)

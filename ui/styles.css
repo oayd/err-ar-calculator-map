@@ -1633,6 +1633,8 @@ table.subtable tbody td.center {
 .map-dot.crystal_tear { background: #7ad7f0; }
 .map-dot.memory_stone { background: #b48eff; }
 .map-dot.whetblade { background: #c8d2dc; }
+.map-dot.smithing_stone { background: #e0b868; }
+.map-dot.somber_stone { background: #d6dde8; }
 
 .map-auto-layer-lbl {
   font-size: 10.5px;

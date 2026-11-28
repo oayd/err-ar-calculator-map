@@ -674,6 +674,8 @@
     crystal_tear: { label: "Crystal Tear", color: "#7ad7f0", shape: "circle" },
     memory_stone: { label: "Memory Stone", color: "#b48eff", shape: "hex" },
     whetblade: { label: "Whetblade", color: "#c8d2dc", shape: "square" },
+    smithing_stone: { label: "Smithing Stone", color: "#e0b868", shape: "diamond" },
+    somber_stone: { label: "Somber Stone", color: "#d6dde8", shape: "diamond" },
   };
 
   const MAP_COLLECTIBLE_CATS = [
@@ -685,6 +687,8 @@
     "crystal_tear",
     "memory_stone",
     "whetblade",
+    "smithing_stone",
+    "somber_stone",
   ];
 
   const MAP_LABEL_CAT_ORDER = [
@@ -703,6 +707,8 @@
     ["crystal_tear", "Crystal Tears"],
     ["memory_stone", "Memory Stones"],
     ["whetblade", "Whetblades"],
+    ["smithing_stone", "Smithing Stones"],
+    ["somber_stone", "Somber Stones"],
   ];
 
   function defaultMapLabelCats() {
@@ -722,6 +728,8 @@
       crystal_tear: false,
       memory_stone: false,
       whetblade: false,
+      smithing_stone: false,
+      somber_stone: false,
     };
   }
 
@@ -764,6 +772,8 @@
       crystal_tear: false,
       memory_stone: false,
       whetblade: false,
+      smithing_stone: false,
+      somber_stone: false,
     },
     showPlayer: true,
     showPins: true,
@@ -4168,7 +4178,7 @@
       if (Array.isArray(m.itemIds) && m.itemIds.length > 0 && m.itemIds.every((id) => sets.armor.has(id))) return true;
       if (m.itemId && sets.armor.has(m.itemId)) return true;
     }
-    if (m.goodId && sets.goods.has(m.goodId)) return true;
+    if (m.goodId && m.cat !== "smithing_stone" && m.cat !== "somber_stone" && sets.goods.has(m.goodId)) return true;
     return false;
   }
 
@@ -4771,8 +4781,66 @@
     renderMapCanvas();
   }
 
-  function markerMatchesSearch(m, q) {
+  function parseStoneSearchQuery(q) {
+    if (!q) return null;
+    const tokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let plusVal = null;
+    let wantSomber = false;
+    let wantRegular = false;
+    let sawStoneWord = false;
+    const restTokens = [];
+    for (const tok of tokens) {
+      const pm = tok.match(/^\+(\d{1,2})$/);
+      if (pm) {
+        const v = Number(pm[1]);
+        if (v >= 1 && v <= 25 && plusVal === null) {
+          plusVal = v;
+          continue;
+        }
+      }
+      if (tok === "somber") {
+        wantSomber = true;
+        sawStoneWord = true;
+        continue;
+      }
+      if (tok === "regular" || tok === "standard") {
+        wantRegular = true;
+        sawStoneWord = true;
+        continue;
+      }
+      if (tok === "smithing" || tok === "stone" || tok === "stones") {
+        sawStoneWord = true;
+        if (tok === "smithing") restTokens.push(tok);
+        continue;
+      }
+      restTokens.push(tok);
+    }
+    const isStoneQuery = plusVal !== null || wantSomber || wantRegular || q.includes("smithing") || q.includes("ancient dragon");
+    return { plusVal, wantSomber, wantRegular, sawStoneWord, restTokens, isStoneQuery };
+  }
+
+  function markerMatchesSearch(m, q, parsed = null) {
     if (!q) return true;
+    const isStone = m.cat === "smithing_stone" || m.cat === "somber_stone";
+    if (parsed && (parsed.plusVal !== null || (isStone && (parsed.wantSomber || parsed.wantRegular)))) {
+      if (!isStone) return false;
+      if (parsed.wantSomber && !parsed.wantRegular && m.cat !== "somber_stone") return false;
+      if (parsed.wantRegular && !parsed.wantSomber && m.cat !== "smithing_stone") return false;
+      if (parsed.plusVal !== null) {
+        if (typeof m.plusMin !== "number" || typeof m.plusMax !== "number") return false;
+        if (parsed.plusVal < m.plusMin || parsed.plusVal > m.plusMax) return false;
+      }
+      if (parsed.restTokens.length > 0) {
+        const hay = `${m.name || ""} ${m.sub || ""}`.toLowerCase();
+        for (const rt of parsed.restTokens) {
+          if (!hay.includes(rt)) return false;
+        }
+      }
+      return true;
+    }
+    if (parsed && (parsed.plusVal !== null || parsed.wantRegular)) {
+      return false;
+    }
     if (m.name && m.name.toLowerCase().includes(q)) return true;
     if (m.sub && m.sub.toLowerCase().includes(q)) return true;
     if (m.baseName && m.baseName.toLowerCase().includes(q)) return true;
@@ -4790,12 +4858,14 @@
       return [];
     }
     const q = mapState.search.trim().toLowerCase();
+    const stoneQ = q ? parseStoneSearchQuery(q) : null;
     const hideCompleted = mapState.completedMode === "hide";
     const out = [];
     for (const m of mapState.data.markers) {
       if (m.layer !== mapState.layer) continue;
-      if (!mapState.cats[m.cat]) continue;
-      if (!markerMatchesSearch(m, q)) continue;
+      const catEnabled = mapState.cats[m.cat] || (stoneQ && stoneQ.isStoneQuery && (m.cat === "smithing_stone" || m.cat === "somber_stone"));
+      if (!catEnabled) continue;
+      if (!markerMatchesSearch(m, q, stoneQ)) continue;
       if (hideCompleted && m.cat !== "grace" && isMarkerCompleted(m)) continue;
       out.push(m);
     }
@@ -5055,6 +5125,7 @@
 
     const drawOrder = [
       "poi", "armor", "talisman", "weapon",
+      "smithing_stone", "somber_stone",
       "crystal_tear", "golden_seed", "sacred_tear", "scadutree", "revered_ash", "memory_stone", "whetblade",
       "bell_bearing", "merchant", "boss", "grace",
     ];
@@ -5466,11 +5537,13 @@
     }
     if (!listEl || !mapState.data) return;
     const hideComp = mapState.completedMode === "hide";
+    const stoneQ = q ? parseStoneSearchQuery(q) : null;
     const matches = [];
     for (const m of mapState.data.markers) {
-      if (!mapState.cats[m.cat]) continue;
+      const catEnabled = mapState.cats[m.cat] || (stoneQ && stoneQ.isStoneQuery && (m.cat === "smithing_stone" || m.cat === "somber_stone"));
+      if (!catEnabled) continue;
       if (hideComp && m.cat !== "grace" && isMarkerCompleted(m)) continue;
-      if (q && !markerMatchesSearch(m, q)) continue;
+      if (q && !markerMatchesSearch(m, q, stoneQ)) continue;
       matches.push(m);
       if (!q && matches.length >= 40) break;
     }
@@ -9490,7 +9563,7 @@
         switchMainView("system");
         if (window.__switchSysSubTab) window.__switchSysSubTab("hotkeys");
         const catCells = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell");
-        const catCellsCountOk = catCells.length === 15;
+        const catCellsCountOk = catCells.length === 17;
         const defaultOnCountOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 3 &&
           Boolean(mapState.labelCats.grace && mapState.labelCats.boss && mapState.labelCats.merchant && !mapState.labelCats.weapon);
 
@@ -9499,7 +9572,7 @@
         const singleToggleOk = Boolean(mapState.labelCats.weapon);
 
         $("setLabelCatsAllBtn").click();
-        const allBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 15;
+        const allBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 17;
         $("setLabelCatsNoneBtn").click();
         const noneBtnOk = document.querySelectorAll("#setLabelCatsGrid .er-cat-cell.on").length === 0;
         $("setLabelCatsDefBtn").click();
@@ -9994,6 +10067,93 @@
           ownedOk,
           lockOk,
           beaconKeyCheckOk,
+        };
+      },
+      testSmithingStones() {
+        const markers = (mapState.data && mapState.data.markers) || [];
+        const reg = markers.filter((m) => m.cat === "smithing_stone");
+        const som = markers.filter((m) => m.cat === "somber_stone");
+        const regIcons = new Set(reg.map((m) => m.icon).filter(Boolean));
+        const somIcons = new Set(som.map((m) => m.icon).filter(Boolean));
+        const hasPickup = markers.some((m) => (m.cat === "smithing_stone" || m.cat === "somber_stone") && m.src === "pickup");
+        const hasShop = markers.some((m) => (m.cat === "smithing_stone" || m.cat === "somber_stone") && m.src === "shop");
+        const hasFarm = markers.some((m) => (m.cat === "smithing_stone" || m.cat === "somber_stone") && m.src === "farm");
+        const legReg = $("icon-legend-smithing_stone");
+        const legSom = $("icon-legend-somber_stone");
+        const hasIcons = Object.keys(mapState.icons || {}).length > 0;
+        const legendIconsOk = !hasIcons || Boolean(
+          legReg && legReg.classList.contains("loaded") && mapState.icons.smithing_stone &&
+          mapState.icons.smithing_stone === mapState.icons.good_2008 &&
+          legSom && legSom.classList.contains("loaded") && mapState.icons.somber_stone &&
+          mapState.icons.somber_stone === mapState.icons.good_2018
+        );
+
+        const prevSearch = mapState.search;
+        const prevSearchInput = $("mapSearchInput") ? $("mapSearchInput").value : "";
+        const prevReg = mapState.cats.smithing_stone;
+        const prevSom = mapState.cats.somber_stone;
+        mapState.cats.smithing_stone = false;
+        mapState.cats.somber_stone = false;
+
+        const runQ = (q) => {
+          const parsed = parseStoneSearchQuery(q);
+          return markers.filter((m) => {
+            const catEn = mapState.cats[m.cat] || (parsed && parsed.isStoneQuery && (m.cat === "smithing_stone" || m.cat === "somber_stone"));
+            return catEn && markerMatchesSearch(m, q, parsed);
+          });
+        };
+
+        const q25 = runQ("+25");
+        const q24 = runQ("+24");
+        const q7 = runQ("+7");
+        const qSom7 = runQ("somber +7");
+        const qReg7 = runQ("regular +7");
+        const qShop25 = runQ("shop +25");
+
+        const search25Ok = q25.length >= 2 && q25.every((m) => m.cat === "smithing_stone" && m.plusMin === 25);
+        const search24Ok = q24.length >= 2 && q24.every((m) => m.cat === "smithing_stone" && m.plusMin === 22 && m.plusMax === 24);
+        const search7Ok = q7.some((m) => m.cat === "smithing_stone" && m.plusMin === 7) && q7.some((m) => m.cat === "somber_stone" && m.plusMin === 7);
+        const searchSom7Ok = qSom7.length >= 1 && qSom7.every((m) => m.cat === "somber_stone" && m.plusMin === 7);
+        const searchReg7Ok = qReg7.length >= 1 && qReg7.every((m) => m.cat === "smithing_stone" && m.plusMin === 7);
+        const searchShop25Ok = qShop25.length >= 2 && qShop25.every((m) => m.src === "shop" && m.plusMin === 25);
+
+        // Ensure owning a stackable stone in inventory never marks all stones / farm spots as completed
+        const farmSample = reg.find((m) => m.src === "farm" && !m.eventFlag && m.goodId);
+        const prevOwned = mapState.ramOwned;
+        const prevAutoDetect = mapState.autoDetect;
+        mapState.autoDetect = true;
+        mapState.ramOwned = { weapons: [], armor: [], talismans: [], goods: farmSample ? [farmSample.goodId] : [10100] };
+        const noFalseComplete = farmSample ? !isMarkerCompleted(farmSample) : false;
+        mapState.ramOwned = prevOwned;
+        mapState.autoDetect = prevAutoDetect;
+
+        mapState.cats.smithing_stone = prevReg;
+        mapState.cats.somber_stone = prevSom;
+        mapState.search = prevSearch;
+        if ($("mapSearchInput")) $("mapSearchInput").value = prevSearchInput;
+        updateMapSearchList();
+        renderMapCanvas();
+
+        return {
+          ok: reg.length >= 100 && som.length >= 50 && regIcons.size >= 9 && somIcons.size >= 10 &&
+              hasPickup && hasShop && hasFarm && legendIconsOk &&
+              search25Ok && search24Ok && search7Ok && searchSom7Ok && searchReg7Ok && searchShop25Ok &&
+              noFalseComplete,
+          regCount: reg.length,
+          somCount: som.length,
+          regIcons: regIcons.size,
+          somIcons: somIcons.size,
+          hasPickup,
+          hasShop,
+          hasFarm,
+          legendIconsOk,
+          search25Ok,
+          search24Ok,
+          search7Ok,
+          searchSom7Ok,
+          searchReg7Ok,
+          searchShop25Ok,
+          noFalseComplete,
         };
       },
       startV21Test() {
