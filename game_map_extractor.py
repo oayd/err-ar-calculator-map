@@ -18,10 +18,11 @@ import json
 import os
 import re
 import struct
+import sys
 import xml.etree.ElementTree as ET
 import zlib
 from collections import defaultdict
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from PIL import Image
 import texture2ddecoder
@@ -30,6 +31,126 @@ try:
     import winreg
 except ImportError:
     winreg = None
+
+STONE_GOOD_ICONS: Set[int] = {
+    2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
+    2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2020,
+}
+
+GOOD_CATEGORY_DEFAULTS = (
+    ("bell_bearing", 3142),
+    ("golden_seed", 383),
+    ("sacred_tear", 384),
+    ("scadutree", 3816),
+    ("revered_ash", 3817),
+    ("crystal_tear", 400),
+    ("memory_stone", 553),
+    ("whetblade", 3020),
+    ("smithing_stone", 2008),
+    ("somber_stone", 2018),
+)
+
+
+def find_missing_good_icon_ids(icons: Dict[str, str], needed_good_ids: Set[int]) -> Set[int]:
+    """Return all goodIcon IDs needed on map pins or sidebar categories that are missing from icons."""
+    all_want = set(needed_good_ids or ()) | {did for _, did in GOOD_CATEGORY_DEFAULTS}
+    return {int(iid) for iid in all_want if isinstance(iid, int) and iid > 0 and f"good_{iid}" not in icons}
+
+
+def apply_good_category_defaults(icons: Dict[str, str]) -> bool:
+    """Populate missing sidebar category icon keys from their default good_<id> sprite."""
+    changed = False
+    for cat_key, default_id in GOOD_CATEGORY_DEFAULTS:
+        gkey = f"good_{default_id}"
+        if gkey in icons and cat_key not in icons:
+            icons[cat_key] = icons[gkey]
+            changed = True
+    return changed
+
+
+def _extract_good_icons_from_solo(
+    bdt,
+    solo_bhd_raw: bytes,
+    solo_bdt_base: int,
+    want_ids: Set[int],
+    icons: Dict[str, str],
+    oodle_fn,
+) -> int:
+    """Decode requested MENU_Knowledge_<id> entries from 00_solo into icons dict."""
+    added = 0
+    for name, d_off, c_sz, _u_sz in _parse_bnd4_entries(solo_bhd_raw):
+        m = re.search(r"MENU_Knowledge_(\d+)", name, re.I)
+        if not m:
+            continue
+        iid = int(m.group(1))
+        if iid not in want_ids or f"good_{iid}" in icons:
+            continue
+        bdt.seek(solo_bdt_base + d_off)
+        blob = bdt.read(c_sz)
+        if blob[:4] == b"DCX\x00":
+            blob = _dcx_decompress(blob, oodle_fn)
+        tpf_texs = _parse_tpf(blob)
+        if not tpf_texs:
+            continue
+        im = _decode_dds_rgba(next(iter(tpf_texs.values())))
+        if im is None:
+            continue
+        scale = min(1.0, 48.0 / max(im.width, im.height))
+        dw, dh = max(1, int(round(im.width * scale))), max(1, int(round(im.height * scale)))
+        if (dw, dh) != im.size:
+            resized = im.resize((dw, dh), Image.Resampling.LANCZOS)
+            im.close()
+            im = resized
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        im.close()
+        icons[f"good_{iid}"] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        added += 1
+    return added
+
+
+def patch_missing_good_icons(
+    game_dir: str,
+    icons_out_path: str,
+    needed_good_ids: Set[int],
+    icons: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Incrementally patch newly added good icons & category aliases into an existing icon cache."""
+    if icons is None:
+        if os.path.isfile(icons_out_path):
+            with gzip.open(icons_out_path, "rt", encoding="utf-8") as fh:
+                icons = json.load(fh)
+        else:
+            icons = {}
+
+    missing = find_missing_good_icon_ids(icons, needed_good_ids)
+    changed = False
+
+    if missing and game_dir and os.path.isdir(game_dir):
+        bhd_path = os.path.join(game_dir, "Data0.bhd")
+        bdt_path = os.path.join(game_dir, "Data0.bdt")
+        if os.path.isfile(bhd_path) and os.path.isfile(bdt_path):
+            oodle_fn = _load_oodle(game_dir)
+            bhd_raw = _decrypt_bhd5(bhd_path, DATA0_RSA_PEM)
+            entries = _find_bhd_entries(bhd_raw, ("/menu/hi/00_solo.tpfbhd", "/menu/hi/00_solo.tpfbdt"))
+            if "/menu/hi/00_solo.tpfbhd" in entries and "/menu/hi/00_solo.tpfbdt" in entries:
+                with open(bdt_path, "rb") as bdt:
+                    solo_bhd_raw = _read_bdt_entry(bdt, entries["/menu/hi/00_solo.tpfbhd"])
+                    solo_bdt_base = entries["/menu/hi/00_solo.tpfbdt"]["offset"]
+                    if _extract_good_icons_from_solo(bdt, solo_bhd_raw, solo_bdt_base, missing, icons, oodle_fn) > 0:
+                        changed = True
+
+    if apply_good_category_defaults(icons):
+        changed = True
+
+    if changed:
+        os.makedirs(os.path.dirname(os.path.abspath(icons_out_path)), exist_ok=True)
+        tmp_path = icons_out_path + ".tmp"
+        with gzip.open(tmp_path, "wt", encoding="utf-8", compresslevel=6) as fh:
+            json.dump(icons, fh, separators=(",", ":"))
+        os.replace(tmp_path, icons_out_path)
+
+    return icons
 
 
 DATA0_RSA_PEM = """-----BEGIN RSA PUBLIC KEY-----
@@ -611,9 +732,10 @@ def extract_maps_and_icons(
         sbmp.close()
 
     report(90, "Extracting collectible & bell bearing icons from 00_solo...")
-    stone_icon_ids = {2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2020}
-    want_good_icons = {383, 384, 400, 553, 3020, 3021, 3022, 3023, 3090, 3142, 3143, 3144, 3146, 3816, 3817} | set(range(400, 446)) | stone_icon_ids
-    for cand_base in (out_base_dir, os.path.dirname(os.path.abspath(__file__))):
+    want_good_icons = {383, 384, 400, 553, 3020, 3021, 3022, 3023, 3090, 3142, 3143, 3144, 3146, 3816, 3817} | set(range(400, 446)) | STONE_GOOD_ICONS
+    for cand_base in (out_base_dir, os.path.dirname(os.path.abspath(__file__)), getattr(sys, "_MEIPASS", "")):
+        if not cand_base:
+            continue
         mp_json = os.path.join(cand_base, "err_map_data.json.gz")
         if os.path.isfile(mp_json):
             try:
@@ -629,49 +751,9 @@ def extract_maps_and_icons(
     with open(bdt_path, "rb") as bdt:
         solo_bhd_raw = _read_bdt_entry(bdt, entries["/menu/hi/00_solo.tpfbhd"])
         solo_bdt_base = entries["/menu/hi/00_solo.tpfbdt"]["offset"]
-        for name, d_off, c_sz, _u_sz in _parse_bnd4_entries(solo_bhd_raw):
-            m = re.search(r"MENU_Knowledge_(\d+)", name, re.I)
-            if not m:
-                continue
-            iid = int(m.group(1))
-            if iid not in want_good_icons or f"good_{iid}" in icons:
-                continue
-            bdt.seek(solo_bdt_base + d_off)
-            blob = bdt.read(c_sz)
-            if blob[:4] == b"DCX\x00":
-                blob = _dcx_decompress(blob, oodle_fn)
-            tpf_texs = _parse_tpf(blob)
-            if not tpf_texs:
-                continue
-            im = _decode_dds_rgba(next(iter(tpf_texs.values())))
-            if im is None:
-                continue
-            scale = min(1.0, 48.0 / max(im.width, im.height))
-            dw, dh = max(1, int(round(im.width * scale))), max(1, int(round(im.height * scale)))
-            if (dw, dh) != im.size:
-                resized = im.resize((dw, dh), Image.Resampling.LANCZOS)
-                im.close()
-                im = resized
-            buf = io.BytesIO()
-            im.save(buf, format="PNG")
-            im.close()
-            icons[f"good_{iid}"] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        _extract_good_icons_from_solo(bdt, solo_bhd_raw, solo_bdt_base, want_good_icons, icons, oodle_fn)
 
-    for cat_key, default_id in (
-        ("bell_bearing", 3142),
-        ("golden_seed", 383),
-        ("sacred_tear", 384),
-        ("scadutree", 3816),
-        ("revered_ash", 3817),
-        ("crystal_tear", 400),
-        ("memory_stone", 553),
-        ("whetblade", 3020),
-        ("smithing_stone", 2008),
-        ("somber_stone", 2018),
-    ):
-        gkey = f"good_{default_id}"
-        if gkey in icons and cat_key not in icons:
-            icons[cat_key] = icons[gkey]
+    apply_good_category_defaults(icons)
 
     with gzip.open(icons_out_path, "wt", encoding="utf-8", compresslevel=6) as fh:
         json.dump(icons, fh, separators=(",", ":"))

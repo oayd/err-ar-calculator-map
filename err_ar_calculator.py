@@ -25,7 +25,7 @@ import memory_reader
 import regulation_extractor
 import save_reader
 
-APP_VERSION = "2.1.3"
+APP_VERSION = "2.1.4"
 GITHUB_REPO = "oayd/err-ar-calculator-map"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
@@ -1751,6 +1751,25 @@ class CalculatorApi:
             else:
                 with gzip.open(p, "rt", encoding="utf-8") as fh:
                     self._map_icons = json.load(fh)
+            if self._map_icons and not self._self_test_mode:
+                needed_ids = set(game_map_extractor.STONE_GOOD_ICONS)
+                if self._map_data and isinstance(self._map_data.get("markers"), list):
+                    for mk in self._map_data["markers"]:
+                        gi = mk.get("goodIcon")
+                        if isinstance(gi, int) and gi > 0:
+                            needed_ids.add(gi)
+                missing_ids = game_map_extractor.find_missing_good_icon_ids(self._map_icons, needed_ids)
+                missing_cats = any(c not in self._map_icons for c, _ in game_map_extractor.GOOD_CATEGORY_DEFAULTS)
+                if missing_ids or missing_cats:
+                    game_dir = game_map_extractor.detect_elden_ring_game_dir()
+                    if game_dir:
+                        try:
+                            out_p = os.path.join(app_base_dir(), "err_map_icons.json.gz")
+                            game_map_extractor.patch_missing_good_icons(game_dir, out_p, needed_ids, self._map_icons)
+                        except Exception:
+                            pass
+                    else:
+                        game_map_extractor.apply_good_category_defaults(self._map_icons)
         return dict(self._map_icons)
 
     def optimize_weapon(
@@ -2867,10 +2886,18 @@ def run_self_test(report_path: Optional[str]):
             qa_res = w.evaluate_js("window.__ERR_TEST.testQaAuditFixes()")
             assert qa_res and qa_res.get("ok"), f"QA audit fixes test failed: {qa_res}"
             # Auto-updater pure logic + UI state verification (zero network calls)
-            assert _is_newer_version("2.1.4", "2.1.3") is True
-            assert _is_newer_version("v2.2.0", "2.1.3") is True
-            assert _is_newer_version("2.1.3", "2.1.3") is False
-            assert _is_newer_version("2.1.2", "2.1.3") is False
+            assert _is_newer_version("2.1.5", "2.1.4") is True
+            assert _is_newer_version("v2.2.0", "2.1.4") is True
+            assert _is_newer_version("2.1.4", "2.1.4") is False
+            assert _is_newer_version("2.1.3", "2.1.4") is False
+            # Incremental map icon patcher helper verification
+            _stale_icons = {"good_3142": "x"}
+            _missing_stones = game_map_extractor.find_missing_good_icon_ids(_stale_icons, game_map_extractor.STONE_GOOD_ICONS)
+            assert game_map_extractor.STONE_GOOD_ICONS.issubset(_missing_stones), f"Missing stone icons detection failed: {_missing_stones}"
+            _stale_icons["good_2008"] = "d2008"
+            _stale_icons["good_2018"] = "d2018"
+            assert game_map_extractor.apply_good_category_defaults(_stale_icons) is True
+            assert _stale_icons.get("smithing_stone") == "d2008" and _stale_icons.get("somber_stone") == "d2018"
             _fake_sha = "a" * 64
             assert _parse_sha256sums(f"{_fake_sha}  ERR_AR_Calculator.exe\n", "ERR_AR_Calculator.exe") == _fake_sha
             assert _is_trusted_github_url("https://github.com/oayd/err-ar-calculator-map/releases/download/v2.1.3/ERR_AR_Calculator.exe") is True
