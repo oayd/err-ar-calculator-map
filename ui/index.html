@@ -44,6 +44,7 @@
         <button id="tabSysBtn" class="main-tab" data-view="system" type="button">
           <img id="erNavIcSys" class="er-nav-ic" alt="" />
           <span>System</span>
+          <span id="sysUpdateTabDot" class="sys-update-dot hidden" title="Update available"></span>
           <img class="er-nav-cur hidden" alt="" />
         </button>
         <img id="erKeyE" class="er-kg-key" alt="E" title="Next Menu" />
@@ -943,10 +944,18 @@
             <span class="sys-lbl">Clear Saved Regulation Path</span>
             <span class="sys-action-tag">Revert to Bundled Data</span>
           </div>
+          <div class="sys-row" id="sysUpdateRow" data-sys-act="update" title="Check GitHub Releases and automatically update to the latest version">
+            <span class="sys-lbl">App Update <span id="sysAppVerLbl" class="sys-ver-pill">v2.1.3</span></span>
+            <span class="sys-action-tag" id="sysUpdateActionTag">Check for Updates</span>
+          </div>
           <div class="sys-row" id="sysOpenSettingsModalBtn" data-sys-act="hotkeys">
             <span class="sys-lbl">Hotkeys, Map Labels &amp; Toggleables...</span>
             <span class="sys-action-tag">Open Sub-Tab</span>
           </div>
+        </div>
+        <div id="sysUpdateProgressWrap" class="sys-update-progress hidden">
+          <div class="sys-update-bar"><div id="sysUpdateProgressFill" class="sys-update-fill"></div></div>
+          <div id="sysUpdateStatus" class="sys-update-status"></div>
         </div>
         <div id="modSourceStatus" class="mod-source-status">Ready.</div>
       </div>
@@ -956,6 +965,7 @@
       <aside class="sys-right">
         <div class="er-sec"><img id="sysInfoIc" alt="" /><span>Extraction &amp; Input Diagnostics</span></div>
         <div class="sys-diag-list">
+          <div class="eq-kv"><span>App Version</span><span id="sysDiagAppVer" class="er-num">v2.1.3</span></div>
           <div class="eq-kv"><span>Live RAM Reader</span><span id="sysDiagRamMark" class="err-mark">&#10005;</span></div>
           <div class="eq-kv"><span>Running Game Process</span><span id="sysDiagProc" class="er-num muted">Not Running</span></div>
           <div class="eq-kv"><span>Weapons Loaded</span><span id="sysDiagWeapons" class="er-num">6,478</span></div>

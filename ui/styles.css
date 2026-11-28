@@ -4824,6 +4824,51 @@ body.pip-active .pip-wep-row {
 .mod-source-status.ok { color: #84c978; }
 .mod-source-status.err { color: #df6961; }
 
+.sys-update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f2cf7e;
+  box-shadow: 0 0 6px rgba(242, 207, 126, 0.85);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+.sys-ver-pill {
+  font-size: 11px;
+  color: #b7ad96;
+  margin-left: 6px;
+}
+.sys-action-tag.update-ready {
+  color: #ffe48a;
+  border-color: rgba(242, 207, 126, 0.78);
+  background: rgba(242, 207, 126, 0.14);
+}
+.sys-update-progress {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.sys-update-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(22, 19, 14, 0.9);
+  border: 1px solid rgba(176, 154, 102, 0.35);
+  overflow: hidden;
+}
+.sys-update-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #b89448, #f2cf7e);
+  transition: width 160ms ease;
+}
+.sys-update-status {
+  font-size: 12px;
+  color: #cfc6b2;
+}
+.sys-update-status.ok { color: #84c978; }
+.sys-update-status.err { color: #df6961; }
+
 /* Dynamic Prompt Footer */
 .er-footer {
   background: rgba(12, 11, 8, 0.82);

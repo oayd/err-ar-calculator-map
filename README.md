@@ -1,6 +1,9 @@
-# Elden Ring Weapon Calculator & Map — v2.1.2 (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.1.3 (ERR v2.3.10.1)
 
 A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
+
+## What's New in v2.1.3: 1-Click Auto-Updater
+- **Built-In Self-Updater (`System → App Update`)**: Silently checks GitHub Releases on launch (showing an indicator dot on the `System` tab and toast alert when a newer release is out) and adds a single-click **App Update** button that downloads the latest `ERR_AR_Calculator.exe`, verifies its `SHA256SUMS.txt` checksum, safely replaces the running executable, and relaunches automatically while preserving your settings, map cache, and extracted icons.
 
 ## What's New in v2.1.2: Smithing Stones & Somber Stones on World Map
 - **Two Separate Upgrade Material Categories (Unchecked by Default)**:

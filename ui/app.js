@@ -649,6 +649,9 @@
     domColsSpec: [],
     erUiIcons: null,
     modSource: null,
+    appVersion: "2.1.3",
+    updateState: null,
+    _updateToastShownVer: "",
     promptMode: "auto",
     activePromptDevice: "kbm",
     equipPickSlot: null,
@@ -2937,6 +2940,72 @@
     });
     if ($("sysOpenSettingsModalBtn")) {
       $("sysOpenSettingsModalBtn").addEventListener("click", () => switchSysSubTab("hotkeys"));
+    }
+    const applyAppUpdateState = (st) => {
+      if (!st || typeof st !== "object") return;
+      state.updateState = st;
+      const curVer = String(st.currentVersion || state.appVersion || "2.1.3");
+      state.appVersion = curVer;
+      if ($("sysAppVerLbl")) $("sysAppVerLbl").textContent = `v${curVer}`;
+      if ($("sysDiagAppVer")) $("sysDiagAppVer").textContent = `v${curVer}`;
+      const tabDot = $("sysUpdateTabDot");
+      if (tabDot) tabDot.classList.toggle("hidden", !(st.updateAvailable && !st.applying));
+
+      const tag = $("sysUpdateActionTag");
+      const statusKind = String(st.status || "idle");
+      if (tag) {
+        tag.classList.toggle("update-ready", Boolean(st.updateAvailable && statusKind === "available"));
+        if (st.checking || statusKind === "checking") tag.textContent = "Checking...";
+        else if (st.downloading || statusKind === "downloading") tag.textContent = `Downloading ${Math.round(Number(st.pct || 0))}%...`;
+        else if (st.applying || statusKind === "applying") tag.textContent = "Restarting...";
+        else if (st.updateAvailable && st.latestVersion) tag.textContent = `Update to v${st.latestVersion}`;
+        else if (statusKind === "up_to_date") tag.textContent = "Up to Date";
+        else if (statusKind === "dev_mode") tag.textContent = st.latestVersion ? `Dev Mode (v${st.latestVersion})` : "Running from Source";
+        else if (statusKind === "error") tag.textContent = "Retry Update Check";
+        else tag.textContent = "Check for Updates";
+      }
+
+      const wrap = $("sysUpdateProgressWrap");
+      const fill = $("sysUpdateProgressFill");
+      const bar = wrap ? wrap.querySelector(".sys-update-bar") : null;
+      const msgEl = $("sysUpdateStatus");
+      const msg = String(st.message || "").trim();
+      const showWrap = Boolean(
+        st.downloading || st.applying ||
+        (!st.silent && msg && ["available", "up_to_date", "dev_mode", "error", "checking"].includes(statusKind))
+      );
+      if (wrap) wrap.classList.toggle("hidden", !showWrap);
+      if (bar) bar.classList.toggle("hidden", !(st.downloading || st.applying));
+      if (fill) fill.style.width = `${Math.max(0, Math.min(100, Number(st.pct || 0)))}%`;
+      if (msgEl) {
+        msgEl.textContent = msg;
+        msgEl.className = "sys-update-status" + (statusKind === "error" ? " err" : (statusKind === "up_to_date" || statusKind === "available" ? " ok" : ""));
+      }
+
+      if (
+        statusKind === "available" &&
+        st.updateAvailable &&
+        st.latestVersion &&
+        !state._selfTest &&
+        state._updateToastShownVer !== st.latestVersion
+      ) {
+        state._updateToastShownVer = st.latestVersion;
+        showErToast("Update Available", `v${st.latestVersion} is ready — open System → App Update to install.`, "info");
+      }
+    };
+    window.__onAppUpdateState = applyAppUpdateState;
+
+    if ($("sysUpdateRow")) {
+      $("sysUpdateRow").addEventListener("click", async () => {
+        if (!window.pywebview || !window.pywebview.api) return;
+        const cur = state.updateState || {};
+        if (cur.checking || cur.downloading || cur.applying) return;
+        if (cur.updateAvailable) {
+          await window.pywebview.api.start_app_update();
+        } else {
+          await window.pywebview.api.check_for_updates(false, true);
+        }
+      });
     }
     if ($("ramHeaderBadge")) {
       $("ramHeaderBadge").addEventListener("click", () => { switchMainView("system"); switchSysSubTab("mod"); });
@@ -8728,6 +8797,8 @@
     state.buffIcons = payload.buffIcons || { icons: {}, iconMap: {}, spMeta: {} };
     state.erUiIcons = payload.erUiIcons || { icons: {}, wep: {}, arm: {}, tal: {}, good: {}, count: 0 };
     state.modSource = payload.modSource || null;
+    if (payload.appVersion) state.appVersion = String(payload.appVersion);
+    if (payload.updateState && window.__onAppUpdateState) window.__onAppUpdateState(payload.updateState);
     buildSearchTags(state.data);
     buildAffinitySidebar();
     buildWeaponTypeTree();
@@ -10154,6 +10225,78 @@
           searchReg7Ok,
           searchShop25Ok,
           noFalseComplete,
+        };
+      },
+      testAppUpdaterUi() {
+        const prevState = state.updateState ? Object.assign({}, state.updateState) : null;
+        const row = $("sysUpdateRow");
+        const verLbl = $("sysAppVerLbl");
+        const diagVer = $("sysDiagAppVer");
+        const tag = $("sysUpdateActionTag");
+        const dot = $("sysUpdateTabDot");
+        const wrap = $("sysUpdateProgressWrap");
+        const fill = $("sysUpdateProgressFill");
+        const initVerOk = Boolean(
+          row && verLbl && diagVer && tag && dot && wrap &&
+          verLbl.textContent.includes(state.appVersion) &&
+          diagVer.textContent.includes(state.appVersion)
+        );
+        window.__onAppUpdateState({
+          currentVersion: state.appVersion,
+          frozen: true,
+          checking: false,
+          downloading: false,
+          applying: false,
+          pct: 0,
+          updateAvailable: true,
+          latestVersion: "2.1.4",
+          status: "available",
+          silent: true,
+          message: "Update v2.1.4 is available.",
+        });
+        const availOk = Boolean(
+          !dot.classList.contains("hidden") &&
+          tag.classList.contains("update-ready") &&
+          tag.textContent.includes("2.1.4")
+        );
+        window.__onAppUpdateState({
+          currentVersion: state.appVersion,
+          frozen: true,
+          checking: false,
+          downloading: true,
+          applying: false,
+          pct: 55,
+          updateAvailable: true,
+          latestVersion: "2.1.4",
+          status: "downloading",
+          silent: false,
+          message: "Downloading v2.1.4... 12.0 / 22.0 MB (55%)",
+        });
+        const dlOk = Boolean(
+          !wrap.classList.contains("hidden") &&
+          fill && fill.style.width === "55%" &&
+          tag.textContent.includes("55%")
+        );
+        window.__onAppUpdateState(prevState || {
+          currentVersion: state.appVersion,
+          frozen: false,
+          checking: false,
+          downloading: false,
+          applying: false,
+          pct: 0,
+          updateAvailable: false,
+          latestVersion: "",
+          status: "idle",
+          silent: true,
+          message: "",
+        });
+        const resetOk = Boolean(dot.classList.contains("hidden") && wrap.classList.contains("hidden"));
+        return {
+          ok: initVerOk && availOk && dlOk && resetOk,
+          initVerOk,
+          availOk,
+          dlOk,
+          resetOk,
         };
       },
       startV21Test() {

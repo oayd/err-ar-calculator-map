@@ -1,13 +1,19 @@
 import base64
 import ctypes
 import gzip
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
+import webbrowser
 from typing import Any, Dict, List, Optional, Set
 
 import webview
@@ -18,6 +24,116 @@ import game_map_extractor
 import memory_reader
 import regulation_extractor
 import save_reader
+
+APP_VERSION = "2.1.3"
+GITHUB_REPO = "oayd/err-ar-calculator-map"
+GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
+
+
+def _parse_semver(ver: str) -> tuple:
+    cleaned = str(ver or "").strip().lstrip("vV")
+    nums = [int(x) for x in re.findall(r"\d+", cleaned.split("-", 1)[0])]
+    return tuple(nums) if nums else (0,)
+
+
+def _is_newer_version(latest: str, current: str) -> bool:
+    a = list(_parse_semver(latest))
+    b = list(_parse_semver(current))
+    n = max(len(a), len(b))
+    a.extend([0] * (n - len(a)))
+    b.extend([0] * (n - len(b)))
+    return tuple(a) > tuple(b)
+
+
+def _parse_sha256sums(text: str, filename: str) -> Optional[str]:
+    target = str(filename or "").strip().lower()
+    valid_hashes: List[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = re.match(r"^([a-fA-F0-9]{64})\s+\*?(.+)$", line)
+        if not m:
+            continue
+        digest = m.group(1).lower()
+        name = os.path.basename(m.group(2).strip()).lower()
+        valid_hashes.append(digest)
+        if target and name == target:
+            return digest
+    if len(valid_hashes) == 1:
+        return valid_hashes[0]
+    return None
+
+
+def _is_trusted_github_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(str(url or "").strip())
+    except Exception:
+        return False
+    if parsed.scheme.lower() != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in ("github.com", "api.github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"):
+        return True
+    return host.endswith(".githubusercontent.com") or host.endswith(".github.com")
+
+
+def _dir_is_writable(dir_path: str) -> bool:
+    try:
+        probe = os.path.join(dir_path, f".err_write_probe_{os.getpid()}.tmp")
+        with open(probe, "wb") as fh:
+            fh.write(b"1")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+def _build_updater_batch_script(pid: int, staged_path: str, target_path: str) -> str:
+    dst_dir = os.path.dirname(os.path.abspath(target_path))
+    return (
+        "@echo off\r\n"
+        "setlocal EnableExtensions\r\n"
+        f"set \"PID={int(pid)}\"\r\n"
+        f"set \"SRC={staged_path}\"\r\n"
+        f"set \"DST={target_path}\"\r\n"
+        f"set \"DST_DIR={dst_dir}\"\r\n"
+        "set /a WAIT_N=0\r\n"
+        ":wait_proc\r\n"
+        "tasklist /FI \"PID eq %PID%\" 2>nul | findstr /R /C:\"\\<%PID%\\>\" >nul\r\n"
+        "if %errorlevel%==0 (\r\n"
+        "  set /a WAIT_N+=1\r\n"
+        "  if %WAIT_N% GEQ 120 goto done_cleanup\r\n"
+        "  ping -n 2 127.0.0.1 >nul\r\n"
+        "  goto wait_proc\r\n"
+        ")\r\n"
+        "set /a MOVE_N=0\r\n"
+        ":try_move\r\n"
+        "move /Y \"%SRC%\" \"%DST%\" >nul 2>&1\r\n"
+        "if exist \"%SRC%\" (\r\n"
+        "  set /a MOVE_N+=1\r\n"
+        "  if %MOVE_N% GEQ 40 goto done_cleanup\r\n"
+        "  ping -n 2 127.0.0.1 >nul\r\n"
+        "  goto try_move\r\n"
+        ")\r\n"
+        "set \"_MEIPASS2=\"\r\n"
+        "set \"PYINSTALLER_RESET_ENVIRONMENT=1\"\r\n"
+        "start \"\" /D \"%DST_DIR%\" \"%DST%\"\r\n"
+        ":done_cleanup\r\n"
+        "del /F /Q \"%~f0\" >nul 2>&1\r\n"
+    )
+
+
+def _cleanup_stale_update_files(base_dir: str) -> None:
+    try:
+        tmp = os.path.join(base_dir, "_err_update_new.tmp")
+        if os.path.isfile(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
 
 
 def app_base_dir() -> str:
@@ -483,6 +599,30 @@ class CalculatorApi:
             "ok": False,
             "error": "",
         }
+        if not self._self_test_mode:
+            _cleanup_stale_update_files(app_base_dir())
+        self._update_lock = threading.Lock()
+        self._update_state: Dict[str, Any] = {
+            "currentVersion": APP_VERSION,
+            "frozen": bool(getattr(sys, "frozen", False)),
+            "checking": False,
+            "downloading": False,
+            "applying": False,
+            "pct": 0,
+            "updateAvailable": False,
+            "latestVersion": "",
+            "releaseName": "",
+            "releaseUrl": GITHUB_RELEASES_URL,
+            "assetUrl": "",
+            "assetName": "",
+            "assetSize": 0,
+            "sha256Url": "",
+            "status": "idle",
+            "message": "",
+            "error": "",
+            "silent": True,
+            "checkedOnce": False,
+        }
 
     def _load_flag_meta(self):
         p = map_data_path()
@@ -584,6 +724,8 @@ class CalculatorApi:
             "erMenuAssets": load_er_menu_assets(),
             "erUiIcons": self.get_er_ui_icons(),
             "modSource": self.get_mod_source_info(),
+            "appVersion": APP_VERSION,
+            "updateState": self.get_update_status(),
             "selfTestMode": self._self_test_mode,
         }
 
@@ -1008,6 +1150,13 @@ class CalculatorApi:
     def _on_window_shown(self) -> None:
         self._init_tray_icon()
         self._start_watcher()
+        if not self._self_test_mode:
+            def _delayed_update_check():
+                time.sleep(3.0)
+                if not self._watcher_stop.is_set():
+                    self.check_for_updates(silent=True, auto_install=False)
+
+            threading.Thread(target=_delayed_update_check, daemon=True, name="StartupUpdateCheck").start()
 
     def _init_tray_icon(self) -> None:
         if self._self_test_mode or self._tray_init_done:
@@ -1954,6 +2103,335 @@ class CalculatorApi:
             except Exception:
                 return False
 
+    def get_update_status(self) -> Dict[str, Any]:
+        with self._update_lock:
+            return dict(self._update_state)
+
+    def _push_update_status(self) -> None:
+        if not self._window or self._self_test_mode:
+            return
+        st = self.get_update_status()
+        try:
+            self._window.evaluate_js(f"window.__onAppUpdateState && window.__onAppUpdateState({json.dumps(st)});")
+        except Exception:
+            pass
+
+    def _fetch_latest_release_info(self) -> Dict[str, Any]:
+        req = urllib.request.Request(
+            GITHUB_LATEST_RELEASE_API,
+            headers={
+                "User-Agent": f"ERR-AR-Calculator/{APP_VERSION}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            rel = json.loads(resp.read().decode("utf-8"))
+        tag = str(rel.get("tag_name") or "").strip()
+        latest_ver = tag.lstrip("vV")
+        if not latest_ver:
+            raise ValueError("Latest GitHub release had no version tag.")
+        rel_name = str(rel.get("name") or tag).strip()
+        rel_url = str(rel.get("html_url") or GITHUB_RELEASES_URL).strip()
+        if not _is_trusted_github_url(rel_url):
+            rel_url = GITHUB_RELEASES_URL
+        assets = rel.get("assets") or []
+        exe_asset = None
+        sha_asset = None
+        for a in assets:
+            nm = str(a.get("name") or "").strip()
+            nl = nm.lower()
+            if nl == "err_ar_calculator.exe":
+                exe_asset = a
+            elif nl.endswith(".exe") and exe_asset is None:
+                exe_asset = a
+            elif nl == "sha256sums.txt":
+                sha_asset = a
+        asset_url = str((exe_asset or {}).get("browser_download_url") or "").strip()
+        sha_url = str((sha_asset or {}).get("browser_download_url") or "").strip()
+        if asset_url and not _is_trusted_github_url(asset_url):
+            asset_url = ""
+        if sha_url and not _is_trusted_github_url(sha_url):
+            sha_url = ""
+        return {
+            "latestVersion": latest_ver,
+            "releaseName": rel_name,
+            "releaseUrl": rel_url,
+            "assetUrl": asset_url,
+            "assetName": str((exe_asset or {}).get("name") or "ERR_AR_Calculator.exe"),
+            "assetSize": int((exe_asset or {}).get("size") or 0),
+            "sha256Url": sha_url,
+            "updateAvailable": _is_newer_version(latest_ver, APP_VERSION),
+        }
+
+    def check_for_updates(self, silent: bool = False, auto_install: bool = False) -> Dict[str, Any]:
+        if self._self_test_mode:
+            return self.get_update_status()
+        with self._update_lock:
+            if self._update_state["checking"] or self._update_state["downloading"] or self._update_state["applying"]:
+                return dict(self._update_state)
+            self._update_state.update({
+                "checking": True,
+                "silent": bool(silent),
+                "error": "",
+                "status": "checking",
+                "message": "" if silent else "Checking GitHub Releases for updates...",
+            })
+        self._push_update_status()
+
+        def _worker():
+            trigger_install = False
+            try:
+                info = self._fetch_latest_release_info()
+                avail = bool(info["updateAvailable"])
+                with self._update_lock:
+                    self._update_state.update({
+                        "checking": False,
+                        "checkedOnce": True,
+                        "silent": bool(silent),
+                        "updateAvailable": avail,
+                        "latestVersion": info["latestVersion"],
+                        "releaseName": info["releaseName"],
+                        "releaseUrl": info["releaseUrl"],
+                        "assetUrl": info["assetUrl"],
+                        "assetName": info["assetName"],
+                        "assetSize": info["assetSize"],
+                        "sha256Url": info["sha256Url"],
+                        "error": "",
+                        "pct": 0,
+                        "status": "available" if avail else "up_to_date",
+                        "message": (
+                            f"Update v{info['latestVersion']} is available."
+                            if avail
+                            else ("" if silent else f"You are running the latest version (v{APP_VERSION}).")
+                        ),
+                    })
+                    if avail and auto_install:
+                        trigger_install = True
+                self._push_update_status()
+                if trigger_install:
+                    self.start_app_update()
+            except Exception as exc:
+                with self._update_lock:
+                    self._update_state.update({
+                        "checking": False,
+                        "checkedOnce": True,
+                        "silent": bool(silent),
+                        "status": "idle" if silent else "error",
+                        "error": "" if silent else str(exc),
+                        "message": "" if silent else f"Update check failed: {exc}",
+                    })
+                self._push_update_status()
+
+        threading.Thread(target=_worker, daemon=True, name="AppUpdateChecker").start()
+        return self.get_update_status()
+
+    def start_app_update(self) -> Dict[str, Any]:
+        if self._self_test_mode:
+            return {"started": False, "error": "Disabled in self-test mode."}
+        with self._update_lock:
+            if self._update_state["downloading"] or self._update_state["applying"]:
+                return {"started": False, "reason": "already_updating"}
+
+        if not getattr(sys, "frozen", False):
+            with self._update_lock:
+                lv = self._update_state.get("latestVersion") or ""
+                msg = (
+                    f"Update v{lv} is available, but 1-click update only applies to the packaged .exe build."
+                    if lv and _is_newer_version(lv, APP_VERSION)
+                    else "Running from Python source — rebuild or download the release .exe from GitHub."
+                )
+                self._update_state.update({
+                    "downloading": False,
+                    "applying": False,
+                    "silent": False,
+                    "status": "dev_mode",
+                    "error": "",
+                    "message": msg,
+                })
+            self._push_update_status()
+            return {"started": False, "devMode": True, "message": msg}
+
+        target_exe = os.path.abspath(sys.executable)
+        exe_dir = os.path.dirname(target_exe)
+        if not _dir_is_writable(exe_dir):
+            rel_url = self.get_update_status().get("releaseUrl") or GITHUB_RELEASES_URL
+            try:
+                webbrowser.open(rel_url)
+            except Exception:
+                pass
+            msg = "This folder requires Administrator permission. Opened GitHub Releases in your browser instead."
+            with self._update_lock:
+                self._update_state.update({
+                    "downloading": False,
+                    "applying": False,
+                    "silent": False,
+                    "status": "error",
+                    "error": "folder_not_writable",
+                    "message": msg,
+                })
+            self._push_update_status()
+            return {"started": False, "error": msg}
+
+        with self._update_lock:
+            self._update_state.update({
+                "checking": False,
+                "downloading": True,
+                "applying": False,
+                "silent": False,
+                "pct": 2,
+                "error": "",
+                "status": "downloading",
+                "message": "Preparing update download...",
+            })
+        self._push_update_status()
+
+        def _updater_worker():
+            staged_path = os.path.join(exe_dir, "_err_update_new.tmp")
+            try:
+                st = self.get_update_status()
+                if not st.get("assetUrl"):
+                    info = self._fetch_latest_release_info()
+                    with self._update_lock:
+                        self._update_state.update({
+                            "updateAvailable": info["updateAvailable"],
+                            "latestVersion": info["latestVersion"],
+                            "releaseName": info["releaseName"],
+                            "releaseUrl": info["releaseUrl"],
+                            "assetUrl": info["assetUrl"],
+                            "assetName": info["assetName"],
+                            "assetSize": info["assetSize"],
+                            "sha256Url": info["sha256Url"],
+                        })
+                    st = self.get_update_status()
+
+                if not st.get("updateAvailable"):
+                    with self._update_lock:
+                        self._update_state.update({
+                            "downloading": False,
+                            "pct": 0,
+                            "status": "up_to_date",
+                            "message": f"You are already running v{APP_VERSION}.",
+                        })
+                    self._push_update_status()
+                    return
+
+                asset_url = str(st.get("assetUrl") or "")
+                sha_url = str(st.get("sha256Url") or "")
+                latest_ver = str(st.get("latestVersion") or "latest")
+                asset_name = str(st.get("assetName") or "ERR_AR_Calculator.exe")
+                if not asset_url or not _is_trusted_github_url(asset_url):
+                    raise ValueError("No trusted .exe download URL found on latest GitHub release.")
+
+                expected_sha = None
+                if sha_url and _is_trusted_github_url(sha_url):
+                    sha_req = urllib.request.Request(sha_url, headers={"User-Agent": f"ERR-AR-Calculator/{APP_VERSION}"})
+                    with urllib.request.urlopen(sha_req, timeout=15) as sresp:
+                        sha_txt = sresp.read().decode("utf-8", errors="replace")
+                    expected_sha = _parse_sha256sums(sha_txt, asset_name)
+
+                dl_req = urllib.request.Request(
+                    asset_url,
+                    headers={"User-Agent": f"ERR-AR-Calculator/{APP_VERSION}", "Accept": "application/octet-stream"},
+                )
+                hasher = hashlib.sha256()
+                total_bytes = int(st.get("assetSize") or 0)
+                downloaded = 0
+                last_push_t = 0.0
+                last_push_pct = -1
+
+                with urllib.request.urlopen(dl_req, timeout=120) as dresp:
+                    cl_hdr = dresp.headers.get("Content-Length")
+                    if cl_hdr and cl_hdr.isdigit():
+                        total_bytes = int(cl_hdr)
+                    with open(staged_path, "wb") as out_fh:
+                        while True:
+                            chunk = dresp.read(65536)
+                            if not chunk:
+                                break
+                            out_fh.write(chunk)
+                            hasher.update(chunk)
+                            downloaded += len(chunk)
+                            now = time.monotonic()
+                            pct = 5 + int(87 * downloaded / total_bytes) if total_bytes > 0 else 50
+                            pct = max(5, min(92, pct))
+                            if pct - last_push_pct >= 3 or (now - last_push_t) >= 0.2:
+                                last_push_t = now
+                                last_push_pct = pct
+                                dl_mb = downloaded / (1024.0 * 1024.0)
+                                tot_str = f" / {total_bytes / (1024.0 * 1024.0):.1f} MB" if total_bytes > 0 else ""
+                                with self._update_lock:
+                                    self._update_state.update({
+                                        "pct": pct,
+                                        "status": "downloading",
+                                        "message": f"Downloading v{latest_ver}... {dl_mb:.1f}{tot_str} ({pct}%)",
+                                    })
+                                self._push_update_status()
+
+                if downloaded < 5 * 1024 * 1024:
+                    raise ValueError(f"Downloaded file too small ({downloaded:,} bytes); update aborted.")
+
+                if expected_sha:
+                    actual_sha = hasher.hexdigest().lower()
+                    if actual_sha != expected_sha.lower():
+                        raise ValueError("SHA-256 checksum mismatch; update aborted.")
+
+                with self._update_lock:
+                    self._update_state.update({
+                        "downloading": False,
+                        "applying": True,
+                        "pct": 98,
+                        "status": "applying",
+                        "message": f"Verified v{latest_ver}. Installing and restarting...",
+                    })
+                self._push_update_status()
+
+                script_txt = _build_updater_batch_script(os.getpid(), staged_path, target_exe)
+                bat_path = os.path.join(tempfile.gettempdir(), f"err_ar_updater_{os.getpid()}.cmd")
+                with open(bat_path, "w", encoding="utf-8", newline="") as bfh:
+                    bfh.write(script_txt)
+
+                cflags = (
+                    getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                )
+                subprocess.Popen(
+                    ["cmd.exe", "/C", bat_path],
+                    cwd=tempfile.gettempdir(),
+                    creationflags=cflags,
+                    close_fds=True,
+                )
+
+                with self._update_lock:
+                    self._update_state["pct"] = 100
+                self._push_update_status()
+                time.sleep(0.35)
+                self.cleanup()
+                if self._window:
+                    try:
+                        self._window.destroy()
+                    except Exception:
+                        pass
+            except Exception as exc:
+                try:
+                    if os.path.exists(staged_path):
+                        os.remove(staged_path)
+                except Exception:
+                    pass
+                with self._update_lock:
+                    self._update_state.update({
+                        "downloading": False,
+                        "applying": False,
+                        "pct": 0,
+                        "status": "error",
+                        "error": str(exc),
+                        "message": f"Update failed: {exc}",
+                    })
+                self._push_update_status()
+
+        threading.Thread(target=_updater_worker, daemon=True, name="AppUpdater").start()
+        return {"started": True}
+
 
 def _pick_parity_weapons(weapons: List[Dict]) -> List[Dict]:
     picked = []
@@ -2388,6 +2866,22 @@ def run_self_test(report_path: Optional[str]):
             assert abs(_ew_res.get("equipWeightMult", 1.0) - 1.15) < 1e-4, f"Expected 1.15 equipWeightMult, got {_ew_res}"
             qa_res = w.evaluate_js("window.__ERR_TEST.testQaAuditFixes()")
             assert qa_res and qa_res.get("ok"), f"QA audit fixes test failed: {qa_res}"
+            # Auto-updater pure logic + UI state verification (zero network calls)
+            assert _is_newer_version("2.1.4", "2.1.3") is True
+            assert _is_newer_version("v2.2.0", "2.1.3") is True
+            assert _is_newer_version("2.1.3", "2.1.3") is False
+            assert _is_newer_version("2.1.2", "2.1.3") is False
+            _fake_sha = "a" * 64
+            assert _parse_sha256sums(f"{_fake_sha}  ERR_AR_Calculator.exe\n", "ERR_AR_Calculator.exe") == _fake_sha
+            assert _is_trusted_github_url("https://github.com/oayd/err-ar-calculator-map/releases/download/v2.1.3/ERR_AR_Calculator.exe") is True
+            assert _is_trusted_github_url("https://objects.githubusercontent.com/github-production-release-asset/123") is True
+            assert _is_trusted_github_url("http://github.com/oayd/x.exe") is False
+            assert _is_trusted_github_url("https://evil.example.com/x.exe") is False
+            _bat = _build_updater_batch_script(4242, r"C:\App\_err_update_new.tmp", r"C:\App\ERR_AR_Calculator.exe")
+            assert "4242" in _bat and "move /Y" in _bat and "PYINSTALLER_RESET_ENVIRONMENT=1" in _bat
+            assert api.get_update_status().get("currentVersion") == APP_VERSION
+            upd_res = w.evaluate_js("window.__ERR_TEST.testAppUpdaterUi()")
+            assert upd_res and upd_res.get("ok"), f"App updater UI test failed: {upd_res}"
             w.evaluate_js("window.__ERR_TEST.startV21Test()")
             v21_res = None
             v21_deadline = time.time() + 10.0
@@ -2438,6 +2932,7 @@ def run_self_test(report_path: Optional[str]):
                 f"MAP_LABELS_OK=True",
                 f"ER_MENU_ASSETS={er_assets_n}",
                 f"EQUIP_TAB_OK=True",
+                f"APP_UPDATER_OK=True",
                 f"JS_ERRORS={len(final_sum['jsErrors'])}",
                 "ERR_AR_CALCULATOR_V4_SELF_TEST_PASSED",
             ]
