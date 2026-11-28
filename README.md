@@ -1,6 +1,9 @@
-# Elden Ring Weapon Calculator & Map — v2.1.4 (ERR v2.3.10.1)
+# Elden Ring Weapon Calculator & Map — v2.1.5 (ERR v2.3.10.1)
 
 A standalone Windows companion app for **ELDEN RING Reforged (ERR v2.3.10.1)** styled in native **Elden Ring UI**, combining a full Equipment screen, exact Armory weapon & AR calculator, interactive live World Map, and an always-on-top in-game HUD overlay.
+
+## What's New in v2.1.5: Fix 1-Click Auto-Updater Swap & Relaunch
+- Fixed a Windows process-spawning bug in the 1-click updater (`DETACHED_PROCESS | CREATE_NO_WINDOW` without `DEVNULL` stdio handles caused `cmd.exe` to exit silently before moving the new EXE and restarting), flattened batch retry flow for paths with spaces/parentheses, and added an end-to-end updater subprocess test. *(Once you replace an older build with `v2.1.5`, future updates will swap and relaunch automatically.)*
 
 ## What's New in v2.1.4: Auto-Patch Missing Map & Stone Icons
 - **Automatic Incremental Icon Cache Patching**: When upgrading from older versions (`v2.1.1` or earlier) with an existing `err_map_icons.json.gz`, the app now detects newly added map icons (including all 19 Smithing Stone / Somber Smithing Stone sprites and sidebar category icons) and patches them directly from your local Elden Ring install in ~2 seconds — no manual map re-extraction needed.

@@ -649,7 +649,7 @@
     domColsSpec: [],
     erUiIcons: null,
     modSource: null,
-    appVersion: "2.1.4",
+    appVersion: "2.1.5",
     updateState: null,
     _updateToastShownVer: "",
     promptMode: "auto",
@@ -2944,7 +2944,7 @@
     const applyAppUpdateState = (st) => {
       if (!st || typeof st !== "object") return;
       state.updateState = st;
-      const curVer = String(st.currentVersion || state.appVersion || "2.1.4");
+      const curVer = String(st.currentVersion || state.appVersion || "2.1.5");
       state.appVersion = curVer;
       if ($("sysAppVerLbl")) $("sysAppVerLbl").textContent = `v${curVer}`;
       if ($("sysDiagAppVer")) $("sysDiagAppVer").textContent = `v${curVer}`;
@@ -10249,15 +10249,15 @@
           applying: false,
           pct: 0,
           updateAvailable: true,
-          latestVersion: "2.1.5",
+          latestVersion: "2.1.6",
           status: "available",
           silent: true,
-          message: "Update v2.1.5 is available.",
+          message: "Update v2.1.6 is available.",
         });
         const availOk = Boolean(
           !dot.classList.contains("hidden") &&
           tag.classList.contains("update-ready") &&
-          tag.textContent.includes("2.1.5")
+          tag.textContent.includes("2.1.6")
         );
         window.__onAppUpdateState({
           currentVersion: state.appVersion,
@@ -10267,10 +10267,10 @@
           applying: false,
           pct: 55,
           updateAvailable: true,
-          latestVersion: "2.1.5",
+          latestVersion: "2.1.6",
           status: "downloading",
           silent: false,
-          message: "Downloading v2.1.5... 12.0 / 22.0 MB (55%)",
+          message: "Downloading v2.1.6... 12.0 / 22.0 MB (55%)",
         });
         const dlOk = Boolean(
           !wrap.classList.contains("hidden") &&

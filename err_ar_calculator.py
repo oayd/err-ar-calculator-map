@@ -25,7 +25,7 @@ import memory_reader
 import regulation_extractor
 import save_reader
 
-APP_VERSION = "2.1.4"
+APP_VERSION = "2.1.5"
 GITHUB_REPO = "oayd/err-ar-calculator-map"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
@@ -92,6 +92,24 @@ def _dir_is_writable(dir_path: str) -> bool:
         return False
 
 
+def _updater_popen_kwargs(cwd: str) -> Dict[str, Any]:
+    env = os.environ.copy()
+    env.pop("_MEIPASS2", None)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return {
+        "cwd": cwd,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "creationflags": (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        ),
+        "close_fds": True,
+        "env": env,
+    }
+
+
 def _build_updater_batch_script(pid: int, staged_path: str, target_path: str) -> str:
     dst_dir = os.path.dirname(os.path.abspath(target_path))
     return (
@@ -103,22 +121,22 @@ def _build_updater_batch_script(pid: int, staged_path: str, target_path: str) ->
         f"set \"DST_DIR={dst_dir}\"\r\n"
         "set /a WAIT_N=0\r\n"
         ":wait_proc\r\n"
-        "tasklist /FI \"PID eq %PID%\" 2>nul | findstr /R /C:\"\\<%PID%\\>\" >nul\r\n"
-        "if %errorlevel%==0 (\r\n"
-        "  set /a WAIT_N+=1\r\n"
-        "  if %WAIT_N% GEQ 120 goto done_cleanup\r\n"
-        "  ping -n 2 127.0.0.1 >nul\r\n"
-        "  goto wait_proc\r\n"
-        ")\r\n"
+        "tasklist /FI \"PID eq %PID%\" /NH 2>nul | find \"%PID%\" >nul\r\n"
+        "if errorlevel 1 goto wait_done\r\n"
+        "set /a WAIT_N+=1\r\n"
+        "if %WAIT_N% GEQ 120 goto done_cleanup\r\n"
+        "ping -n 2 127.0.0.1 >nul\r\n"
+        "goto wait_proc\r\n"
+        ":wait_done\r\n"
         "set /a MOVE_N=0\r\n"
         ":try_move\r\n"
         "move /Y \"%SRC%\" \"%DST%\" >nul 2>&1\r\n"
-        "if exist \"%SRC%\" (\r\n"
-        "  set /a MOVE_N+=1\r\n"
-        "  if %MOVE_N% GEQ 40 goto done_cleanup\r\n"
-        "  ping -n 2 127.0.0.1 >nul\r\n"
-        "  goto try_move\r\n"
-        ")\r\n"
+        "if not exist \"%SRC%\" goto move_ok\r\n"
+        "set /a MOVE_N+=1\r\n"
+        "if %MOVE_N% GEQ 40 goto done_cleanup\r\n"
+        "ping -n 2 127.0.0.1 >nul\r\n"
+        "goto try_move\r\n"
+        ":move_ok\r\n"
         "set \"_MEIPASS2=\"\r\n"
         "set \"PYINSTALLER_RESET_ENVIRONMENT=1\"\r\n"
         "start \"\" /D \"%DST_DIR%\" \"%DST%\"\r\n"
@@ -132,6 +150,19 @@ def _cleanup_stale_update_files(base_dir: str) -> None:
         tmp = os.path.join(base_dir, "_err_update_new.tmp")
         if os.path.isfile(tmp):
             os.remove(tmp)
+    except Exception:
+        pass
+    try:
+        td = tempfile.gettempdir()
+        now = time.time()
+        for fn in os.listdir(td):
+            if fn.startswith("err_ar_updater_") and fn.endswith(".cmd"):
+                fp = os.path.join(td, fn)
+                try:
+                    if os.path.isfile(fp) and (now - os.path.getmtime(fp)) >= 60.0:
+                        os.remove(fp)
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -2409,28 +2440,27 @@ class CalculatorApi:
                 with open(bat_path, "w", encoding="utf-8", newline="") as bfh:
                     bfh.write(script_txt)
 
-                cflags = (
-                    getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-                    | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-                )
                 subprocess.Popen(
                     ["cmd.exe", "/C", bat_path],
-                    cwd=tempfile.gettempdir(),
-                    creationflags=cflags,
-                    close_fds=True,
+                    **_updater_popen_kwargs(tempfile.gettempdir()),
                 )
 
                 with self._update_lock:
                     self._update_state["pct"] = 100
                 self._push_update_status()
                 time.sleep(0.35)
+                threading.Timer(2.5, lambda: os._exit(0)).start()
                 self.cleanup()
                 if self._window:
+                    def _destroy_win():
+                        try:
+                            self._window.destroy()
+                        except Exception:
+                            pass
                     try:
-                        self._window.destroy()
+                        self._invoke_ui(_destroy_win)
                     except Exception:
-                        pass
+                        _destroy_win()
             except Exception as exc:
                 try:
                     if os.path.exists(staged_path):
@@ -2885,11 +2915,11 @@ def run_self_test(report_path: Optional[str]):
             assert abs(_ew_res.get("equipWeightMult", 1.0) - 1.15) < 1e-4, f"Expected 1.15 equipWeightMult, got {_ew_res}"
             qa_res = w.evaluate_js("window.__ERR_TEST.testQaAuditFixes()")
             assert qa_res and qa_res.get("ok"), f"QA audit fixes test failed: {qa_res}"
-            # Auto-updater pure logic + UI state verification (zero network calls)
-            assert _is_newer_version("2.1.5", "2.1.4") is True
-            assert _is_newer_version("v2.2.0", "2.1.4") is True
-            assert _is_newer_version("2.1.4", "2.1.4") is False
-            assert _is_newer_version("2.1.3", "2.1.4") is False
+            # Auto-updater pure logic + real end-to-end subprocess + UI state verification (zero network calls)
+            assert _is_newer_version("2.1.6", "2.1.5") is True
+            assert _is_newer_version("v2.2.0", "2.1.5") is True
+            assert _is_newer_version("2.1.5", "2.1.5") is False
+            assert _is_newer_version("2.1.4", "2.1.5") is False
             # Incremental map icon patcher helper verification
             _stale_icons = {"good_3142": "x"}
             _missing_stones = game_map_extractor.find_missing_good_icon_ids(_stale_icons, game_map_extractor.STONE_GOOD_ICONS)
@@ -2900,12 +2930,33 @@ def run_self_test(report_path: Optional[str]):
             assert _stale_icons.get("smithing_stone") == "d2008" and _stale_icons.get("somber_stone") == "d2018"
             _fake_sha = "a" * 64
             assert _parse_sha256sums(f"{_fake_sha}  ERR_AR_Calculator.exe\n", "ERR_AR_Calculator.exe") == _fake_sha
-            assert _is_trusted_github_url("https://github.com/oayd/err-ar-calculator-map/releases/download/v2.1.3/ERR_AR_Calculator.exe") is True
+            assert _is_trusted_github_url("https://github.com/oayd/err-ar-calculator-map/releases/download/v2.1.5/ERR_AR_Calculator.exe") is True
             assert _is_trusted_github_url("https://objects.githubusercontent.com/github-production-release-asset/123") is True
             assert _is_trusted_github_url("http://github.com/oayd/x.exe") is False
             assert _is_trusted_github_url("https://evil.example.com/x.exe") is False
             _bat = _build_updater_batch_script(4242, r"C:\App\_err_update_new.tmp", r"C:\App\ERR_AR_Calculator.exe")
-            assert "4242" in _bat and "move /Y" in _bat and "PYINSTALLER_RESET_ENVIRONMENT=1" in _bat
+            assert "4242" in _bat and "move /Y" in _bat and "PYINSTALLER_RESET_ENVIRONMENT=1" in _bat and "start \"\"" in _bat
+            with tempfile.TemporaryDirectory(prefix="err_upd_e2e_") as _utd:
+                _usrc = os.path.join(_utd, "_err_update_new.tmp")
+                _udst = os.path.join(_utd, "dummy_target.exe")
+                _ubat = os.path.join(_utd, "test_updater.cmd")
+                _usent = os.path.join(_utd, "relaunched.txt")
+                with open(_usrc, "wb") as _fh:
+                    _fh.write(b"NEW_VER_BYTES")
+                with open(_udst, "wb") as _fh:
+                    _fh.write(b"OLD_VER_BYTES")
+                _utxt = _build_updater_batch_script(999999, _usrc, _udst).replace(
+                    'start "" /D "%DST_DIR%" "%DST%"',
+                    f'echo RELAUNCHED > "{_usent}"',
+                )
+                with open(_ubat, "w", encoding="utf-8", newline="") as _fh:
+                    _fh.write(_utxt)
+                _up = subprocess.Popen(["cmd.exe", "/C", _ubat], **_updater_popen_kwargs(_utd))
+                _up.wait(timeout=10)
+                assert os.path.exists(_usent), "Updater subprocess did not reach relaunch step"
+                assert not os.path.exists(_usrc), "Updater subprocess did not move staged file"
+                with open(_udst, "rb") as _fh:
+                    assert _fh.read() == b"NEW_VER_BYTES", "Updater subprocess did not overwrite target"
             assert api.get_update_status().get("currentVersion") == APP_VERSION
             upd_res = w.evaluate_js("window.__ERR_TEST.testAppUpdaterUi()")
             assert upd_res and upd_res.get("ok"), f"App updater UI test failed: {upd_res}"
